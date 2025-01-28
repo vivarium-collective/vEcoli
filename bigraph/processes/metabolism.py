@@ -1096,17 +1096,53 @@ def test_metabolism_process():
     load_sim_data = LoadSimData(sim_data_path=SIM_DATA_PATH)
     metabolism_config = load_sim_data.get_metabolism_config()
 
+    # get the initial state
+    initial_state = load_sim_data.generate_initial_state()
+    initial_state['metabolism'] = {
+        "_type": "edge",
+        "inputs": {
+            "bulk": ["bulk"],
+            "bulk_total": ["bulk"],
+            "environment": ["environment"],
+            "boundary": ["boundary"],
+            "listeners": ["listeners"],
+        },
+        "outputs": {
+            "bulk": ["bulk"],
+            "environment": ["environment"],
+            "listeners": ["listeners"],
+        }
+    }
+
+    # TODO -- view state from metabolism process
+    schema = {
+        "metabolism": {
+            "_type": "edge",
+            "_inputs": {
+                # TODO -- get correct types. Get this from ports
+                "bulk": "any",
+                "bulk_total": "any",
+                "environment": "any",
+                "boundary": "any",
+                "listeners": "any",
+            },
+            "_outputs": {
+                "bulk": "any",
+                "environment": "any",
+                "listeners": "any",
+            }
+        }
+    }
+    state = core.view_edge(schema=schema,
+                           state=initial_state,
+                           edge_path=["metabolism"]
+                           )
+
     # make the metabolism process
     metabolism = Metabolism(config=metabolism_config, core=core)
 
-    # get the initial state
-    initial_state = load_sim_data.generate_initial_state()
-
-    # TODO -- project onto metabolism
-    state = core.project_edge()
-    interval = 1
-
     # run one update
+    interval = 1
     results = metabolism.update(state, interval)
     print(results)
 
