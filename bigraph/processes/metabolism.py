@@ -31,7 +31,7 @@ from reconstruction.ecoli.dataclasses.process.metabolism import REVERSE_TAG
 
 # from vivarium.core.process import Step
 from vivarium.library.units import units as vivunits
-from process_bigraph import Step
+from process_bigraph import Process, Step
 
 
 # Register default topology for this process, associating it with process name
@@ -64,7 +64,7 @@ GDCW_BASIS = units.mmol / units.g / units.h
 USE_KINETICS = True
 
 
-class Metabolism(Step):
+class Metabolism(Process):
     """Metabolism Process"""
 
     name = NAME
@@ -394,7 +394,8 @@ class Metabolism(Step):
             return True
         return False
 
-    def next_update(self, timestep, states):
+    def update(self, states, interval):
+
         # At t=0, convert all strings to indices
         if self.metabolite_idx is None:
             self.metabolite_idx = bulk_name_to_idx(
@@ -1091,9 +1092,23 @@ def test_metabolism_process():
 
     core = ProcessTypes()
 
+    # get the parameters
     load_sim_data = LoadSimData(sim_data_path=SIM_DATA_PATH)
     metabolism_config = load_sim_data.get_metabolism_config()
+
+    # make the metabolism process
     metabolism = Metabolism(config=metabolism_config, core=core)
+
+    # get the initial state
+    initial_state = load_sim_data.generate_initial_state()
+
+    # TODO -- project onto metabolism
+    state = core.project_edge()
+    interval = 1
+
+    # run one update
+    results = metabolism.update(state, interval)
+    print(results)
 
     breakpoint()
 
