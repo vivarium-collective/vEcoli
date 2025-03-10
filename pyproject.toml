@@ -54,6 +54,7 @@ dependencies = [
     "wheel",
     "stochastic-arrow",
     "autograd",
+    "process-bigraph>=0.0.27",
 ]
 
 [project.optional-dependencies]
