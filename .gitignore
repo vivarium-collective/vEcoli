@@ -13,6 +13,7 @@ out/
 /out
 .idea/
 *.iml
+venv
 
 # User files #
 ################

@@ -78,5 +78,6 @@ packages = [
     "reconstruction",
     "runscripts",
     "validation",
-    "wholecell"
+    "wholecell",
+    "data_model"
 ]
