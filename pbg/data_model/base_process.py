@@ -1,15 +1,24 @@
+import abc
+
 import process_bigraph as pbg
 
 from vivarium.core.process import Process as VivariumProcess
 from vivarium.core.types import State
 
 
-class BaseProcess(VivariumProcess, pbg.Process):
+CORE = pbg.ProcessTypes()
+
+
+class MetaABCAndType(abc.ABCMeta, type):
+    pass
+
+
+class BaseProcess(pbg.Process, VivariumProcess, metaclass=MetaABCAndType):
     config_schema = {}
 
-    def __init__(self, config=None, core=None):
-        super().__init__(parameters=config)
-        pbg.Process.__init__(self, config=config, core=core)
+    def __init__(self, config=None, core=CORE):
+        super().__init__(config=config, core=core)
+        VivariumProcess.__init__(self, parameters=config)
 
     # --- methods inherited from vivarium.core --- #
     def ports_schema(self):

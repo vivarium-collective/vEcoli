@@ -79,5 +79,5 @@ packages = [
     "runscripts",
     "validation",
     "wholecell",
-    "data_model"
+    "pbg"
 ]
