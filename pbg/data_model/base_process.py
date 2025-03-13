@@ -1,41 +1,48 @@
 import abc
 
-import process_bigraph as pbg
-
+from process_bigraph import ProcessTypes, Process as PbgProcess
 from vivarium.core.process import Process as VivariumProcess
-from vivarium.core.types import State
+
+from pbg.parse import get_port_mapping, get_config_schema
 
 
-CORE = pbg.ProcessTypes()
+CORE = ProcessTypes()
 
 
 class MetaABCAndType(abc.ABCMeta, type):
     pass
 
 
-class BaseProcess(pbg.Process, VivariumProcess, metaclass=MetaABCAndType):
-    config_schema = {}
+class BaseProcess(PbgProcess, VivariumProcess, metaclass=MetaABCAndType):
+    """This should replace all instances of inheritance from `vivarium.core.process.Process` as the new base class type."""
+    # config_schema = {}
+    # defaults = {}
+    # name = "base_process"
 
-    def __init__(self, config=None, core=CORE):
-        super().__init__(config=config, core=core)
-        VivariumProcess.__init__(self, parameters=config)
+    def __init__(self, parameters=None):
+        VivariumProcess.__init__(self, parameters=parameters)
+
+        self.config_schema = get_config_schema(self.parameters)
+        super().__init__(config=parameters, core=CORE)
 
     # --- methods inherited from vivarium.core --- #
     def ports_schema(self):
         return super().ports_schema()
 
-    def next_update(self, timestep, states: State):
+    def next_update(self, timestep, states):
         return super().next_update(timestep, states)
 
     # --- methods which extend pbg.Edge() --- #
     def inputs(self):
-        return super().inputs()
+        # TODO: currently only extends ports bidirectionally. Change this
+        return self._ports()
 
     def outputs(self):
-        return super().outputs()
-
-    def initial_state(self, config=None):
-        return super().initial_state(config)
+        return self._ports()
 
     def update(self, state, interval):
-        return super().update(state, interval)
+        return self.next_update(interval, state)
+
+    def _ports(self):
+        ports_schema = self.ports_schema()
+        return get_port_mapping(ports_schema)
