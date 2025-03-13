@@ -3,8 +3,7 @@ import abc
 from process_bigraph import ProcessTypes, Process as PbgProcess
 from vivarium.core.process import Process as VivariumProcess
 
-from pbg.parse import get_port_mapping, get_config_schema
-
+from pbg.translate import get_port_mapping, get_config_schema
 
 CORE = ProcessTypes()
 

@@ -1,23 +1,55 @@
-from types import FunctionType
-from typing import Any, Callable
-from dataclasses import dataclass, asdict
 import ast
 import inspect
+from typing import Callable, Any
+from types import ModuleType
 
 from vivarium.core.process import Process as VivariumProcess
 
 
-SCHEMA_MAPPER = {
-    "integer": int,
-    "float": float,
-    "string": str,
-    "boolean": bool,
-    "list": list,
-    "tuple": tuple,
-}
+class OutputDictAnalyzer(ast.NodeVisitor):
+    output_dict: dict
+
+    def __init__(self):
+        self.output_dict = {}
+
+    def visit_Return(self, node):
+        if isinstance(node.value, ast.Dict):
+            self.output_dict = self._extract_dict(node.value)
+        self.generic_visit(node)
+
+    def _extract_dict(self, node: ast.Dict):
+        output_dict = {}
+        for key, value in zip(node.keys, node.values):
+            if isinstance(key, ast.Constant):
+                dict_key = key.value
+            elif isinstance(key, ast.Str):
+                dict_key = key.s
+            else:
+                continue
+
+            dict_value = self._extract_value(value)
+            output_dict[dict_key] = dict_value
+
+        return output_dict
+
+    def _extract_value(self, node: ast.AST) -> Any:
+        if isinstance(node, ast.Constant):
+            return node.value
+        elif isinstance(node, ast.BinOp):
+            return "expression"
+        elif isinstance(node, ast.Call):
+            return "function_call"
+        elif isinstance(node, ast.Name):
+            return node.id
+        elif isinstance(node, ast.Dict):
+            return self._extract_dict(node)
+        return "unknown"
 
 
 class PortsSchemaAnalyzer(ast.NodeVisitor):
+    inputs: set
+    outputs: set
+
     def __init__(self):
         self.inputs = set()
         self.outputs = set()
@@ -39,15 +71,6 @@ class PortsSchemaAnalyzer(ast.NodeVisitor):
         self.generic_visit(node)
 
 
-@dataclass
-class Ports:
-    inputs: set
-    outputs: set
-
-    def serialize(self):
-        return asdict(self)
-
-
 def find_defaults(params: dict) -> dict:
     """Extract inner dict _default values from an arbitrarily-nested `params` input."""
     result = {}
@@ -62,72 +85,29 @@ def find_defaults(params: dict) -> dict:
     return result
 
 
-def translate_vivarium_types(defaults: dict) -> dict:
-    """Translate default values into corresponding bigraph-schema type declarations."""
-    result = {}
-    for key, value in defaults.items():
-        if isinstance(value, dict):
-            result[key] = translate_vivarium_types(value)
-        else:
-            result[key] = type(value).__name__
-
-    return result
-
-
-def get_port_mapping(ports_schema: dict[str, Any]):
-    """Translates vivarium.core.Process.defaults into bigraph-schema types to be consumed by pbg.Composite."""
-    defaults = find_defaults(ports_schema)
-    return translate_vivarium_types(defaults)
-
-
-def get_config_schema(defaults: dict[str, float | Any]):
-    """Translates vivarium.core.Process.defaults into bigraph-schema types to be consumed by pbg.Composite."""
-    config_schema = {}
-    for k, v in defaults.copy().items():
-        if not isinstance(v, dict):
-            _type = ""
-            for schema_type, python_type in SCHEMA_MAPPER.items():
-                if isinstance(v, python_type):
-                    _type = schema_type
-                else:
-                    _type = "any"
-
-            config_schema[k] = {
-                "_type": _type,  # TODO: provide a more specific lookup
-                "_default": v,
-            }
-        else:
-            config_schema[k] = get_config_schema(v)
-
-    return config_schema
-
-
-def extract_ports_from_update(func: Callable[[VivariumProcess, float, dict], dict]):
-    """
-    Parses a function and extracts:
-    - "inputs": variables that are being read
-    - "outputs": dictionary keys returned by the function
-    """
+def extract_output_dict(func: Callable[[VivariumProcess], dict]) -> dict:
+    """Extracts the dictionary returned by the function."""
     source = inspect.getsource(func)
     tree = ast.parse(source)
 
-    # inputs = set()
-    # outputs = set()
-
-    tree = ast.parse(source)
-    analyzer = PortsSchemaAnalyzer()
+    analyzer = OutputDictAnalyzer()
     analyzer.visit(tree)
 
-    return Ports(inputs=analyzer.inputs, outputs=analyzer.outputs)
+    return analyzer.output_dict
 
 
-def example_next_update(self, interval, states):
-    x = states['x']
-    return {
-        'y': x**x
-    }
+def get_process(
+        parent_package_name: str,
+        module_name: str,
+        process_class_name: str,
+        package_child_names: list[str] | None = None,
+) -> VivariumProcess:
+    import_statement: str = parent_package_name
+    if package_child_names:
+        for child_pkg in package_child_names:
+            import_statement += f".{child_pkg}"
+    import_statement += f".{module_name}"
 
-
-def test_extraction():
-    variables = extract_ports_from_update(example_next_update)
-    print(variables)
+    module: ModuleType = __import__(
+         import_statement, fromlist=[process_class_name])
+    return getattr(module, process_class_name)
