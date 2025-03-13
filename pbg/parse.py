@@ -1,47 +1,53 @@
 import ast
+import importlib
 import inspect
-from typing import Callable, Any
+import textwrap
+from typing import Callable, Any, LiteralString, Union, Optional, Type
 from types import ModuleType
 
 from vivarium.core.process import Process as VivariumProcess
 
 
 class OutputDictAnalyzer(ast.NodeVisitor):
-    output_dict: dict
+    """Parses an AST tree and extracts the return dictionary from a method."""
 
     def __init__(self):
         self.output_dict = {}
 
     def visit_Return(self, node):
+        """Capture the full dictionary from a return statement."""
         if isinstance(node.value, ast.Dict):
             self.output_dict = self._extract_dict(node.value)
         self.generic_visit(node)
 
     def _extract_dict(self, node: ast.Dict):
+        """Extract key-value pairs from an AST dictionary node."""
         output_dict = {}
         for key, value in zip(node.keys, node.values):
-            if isinstance(key, ast.Constant):
+            if isinstance(key, ast.Constant):  # Python 3.8+
                 dict_key = key.value
-            elif isinstance(key, ast.Str):
+            elif isinstance(key, ast.Str):  # Python 3.7 support
                 dict_key = key.s
             else:
-                continue
+                continue  # Skip non-constant keys
 
+            # Extract value type
             dict_value = self._extract_value(value)
             output_dict[dict_key] = dict_value
 
         return output_dict
 
     def _extract_value(self, node: ast.AST) -> Any:
-        if isinstance(node, ast.Constant):
+        """Extracts the value from AST nodes (e.g., literals, expressions)."""
+        if isinstance(node, ast.Constant):  # Handles direct literals
             return node.value
-        elif isinstance(node, ast.BinOp):
+        elif isinstance(node, ast.BinOp):  # Handles expressions like x**2
             return "expression"
-        elif isinstance(node, ast.Call):
+        elif isinstance(node, ast.Call):  # Handles function calls
             return "function_call"
-        elif isinstance(node, ast.Name):
+        elif isinstance(node, ast.Name):  # Handles variable names
             return node.id
-        elif isinstance(node, ast.Dict):
+        elif isinstance(node, ast.Dict):  # Handles nested dictionaries
             return self._extract_dict(node)
         return "unknown"
 
@@ -85,29 +91,40 @@ def find_defaults(params: dict) -> dict:
     return result
 
 
-def extract_output_dict(func: Callable[[VivariumProcess], dict]) -> dict:
-    """Extracts the dictionary returned by the function."""
-    source = inspect.getsource(func)
-    tree = ast.parse(source)
-
-    analyzer = OutputDictAnalyzer()
-    analyzer.visit(tree)
-
-    return analyzer.output_dict
-
-
 def get_process(
-        parent_package_name: str,
-        module_name: str,
         process_class_name: str,
-        package_child_names: list[str] | None = None,
+        import_path: str | None = None,
+        *path_components
 ) -> VivariumProcess:
-    import_statement: str = parent_package_name
-    if package_child_names:
-        for child_pkg in package_child_names:
-            import_statement += f".{child_pkg}"
-    import_statement += f".{module_name}"
+    if not import_path:
+        import_path = '.'.join(path_components)
 
-    module: ModuleType = __import__(
-         import_statement, fromlist=[process_class_name])
-    return getattr(module, process_class_name)
+    module: ModuleType = importlib.import_module(import_path)
+    return getattr(module, process_class_name)()
+
+
+def get_processes(package_path: str):
+    # finish this
+    module = importlib.import_module(package_path)
+    mod_attrs = dir(module)
+    processes = [
+        get_process(process_class_name=name, import_path=module.__name__)
+        for name in mod_attrs if name.startswith(name[0].upper())
+    ]
+
+
+def extract_ports_schema(
+        process_class_name: str,
+        import_path: str | None = None,
+        *path_components) -> dict:
+    """Extracts the dictionary returned by a class method without instantiating the class."""
+    process: VivariumProcess = get_process(process_class_name, import_path, *path_components)
+    return getattr(process.__init__(), 'ports_schema')()
+
+
+def test_extract_output_dict():
+    from ecoli.processes.antibiotics import death
+    name = 'DeathFreezeState'
+    path = death.__name__
+    output_ports = extract_ports_schema(name, path)
+    print(output_ports)

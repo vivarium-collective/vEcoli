@@ -7,7 +7,7 @@ import inspect
 from vivarium.core.process import Process as VivariumProcess
 
 from pbg.data_model.ports import ProcessBigraphPorts
-from pbg.parse import PortsSchemaAnalyzer, find_defaults, get_process, OutputDictAnalyzer, extract_output_dict
+from pbg.parse import PortsSchemaAnalyzer, find_defaults, get_process, OutputDictAnalyzer, extract_ports_schema
 
 SCHEMA_MAPPER = {
     "integer": int,
@@ -59,8 +59,12 @@ def get_config_schema(defaults: dict[str, float | Any]):
     return config_schema
 
 
-def extract_ports_schema_return(func: Callable[[VivariumProcess], dict]) -> dict:
-    return extract_output_dict(func)
+def extract_ports_schema_return(
+        process_class_name: str,
+        import_path: str | None = None,
+        *path_components
+) -> dict:
+    return extract_ports_schema(process_class_name=process_class_name, import_path=import_path, *path_components)
 
 
 def extract_ports_from_update(func: Callable[[VivariumProcess, float, dict], dict]) -> ProcessBigraphPorts:
@@ -87,20 +91,18 @@ def get_ports_schema_method(process: VivariumProcess):
     return getattr(process, "ports_schema").__func__
 
 
-def get_ports(
-        parent_package_name: str,
-        module_name: str,
+def get_port_schemas(
         process_class_name: str,
-        package_child_names: list[str] | None = None
-):
-    process: VivariumProcess = get_process(parent_package_name, module_name, process_class_name, package_child_names)
+        import_path: str | None = None,
+        *path_components
+) -> tuple[dict, dict]:
+    process: VivariumProcess = get_process(process_class_name, import_path, *path_components)
     updater: FunctionType = get_update_method(process)
     port_names: ProcessBigraphPorts = extract_ports_from_update(updater)
 
     inputs_schema, outputs_schema = {}, {}
 
-    ports_schema_method: FunctionType = get_ports_schema_method(process)
-    ports_schema: dict = extract_ports_schema_return(ports_schema_method)
+    ports_schema: dict = extract_ports_schema_return(process_class_name, import_path, *path_components)
     ports_mapping: dict = get_port_mapping(ports_schema)
 
     for name in port_names.inputs:
@@ -108,6 +110,8 @@ def get_ports(
 
     for name in port_names.outputs:
         outputs_schema[name] = ports_mapping[name]
+
+    return inputs_schema, outputs_schema
 
 
 def example_next_update(self, interval, states):
