@@ -1,14 +1,7 @@
-import textwrap
-from types import FunctionType
-from typing import Any, Callable
-from dataclasses import dataclass, asdict
-import ast
-import inspect
+from typing import Any
 
-from vivarium.core.process import Process as VivariumProcess
 
-from pbg.data_model.ports import ProcessBigraphPorts
-from pbg.parse import PortsSchemaAnalyzer, find_defaults, get_process
+from pbg.parse import find_defaults
 
 
 SCHEMA_MAPPER = {
@@ -21,13 +14,13 @@ SCHEMA_MAPPER = {
 }
 
 MAPPER = {
-    'int': 'integer',
-    'bool': 'boolean',
-    'list': 'list',
-    'tuple': 'tuple',
-    'float': 'float',
-    'any': 'any',
-    'ndarray': 'array',
+    "int": "integer",
+    "bool": "boolean",
+    "list": "list",
+    "tuple": "tuple",
+    "float": "float",
+    "any": "any",
+    "ndarray": "array",
 }
 
 
@@ -39,8 +32,8 @@ def translate_vivarium_types(defaults: dict) -> dict:
             result[key] = translate_vivarium_types(value)
         else:
             type_name = type(value).__name__
-            if type_name == 'NoneType':
-                type_name = 'any'
+            if type_name == "NoneType":
+                type_name = "any"
             result[key] = MAPPER[type_name]
 
     return result
@@ -72,4 +65,3 @@ def get_config_schema(defaults: dict[str, float | Any]):
             config_schema[k] = get_config_schema(v)
 
     return config_schema
-
