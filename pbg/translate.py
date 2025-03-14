@@ -20,6 +20,16 @@ SCHEMA_MAPPER = {
     "tuple": tuple,
 }
 
+MAPPER = {
+    'int': 'integer',
+    'bool': 'boolean',
+    'list': 'list',
+    'tuple': 'tuple',
+    'float': 'float',
+    'any': 'any',
+    'ndarray': 'array',
+}
+
 
 def translate_vivarium_types(defaults: dict) -> dict:
     """Translate default values into corresponding bigraph-schema type declarations."""
@@ -31,7 +41,7 @@ def translate_vivarium_types(defaults: dict) -> dict:
             type_name = type(value).__name__
             if type_name == 'NoneType':
                 type_name = 'any'
-            result[key] = type_name
+            result[key] = MAPPER[type_name]
 
     return result
 
