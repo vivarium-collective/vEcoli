@@ -1,80 +1,89 @@
 import ast
 import importlib
-import inspect
-import textwrap
-from typing import Callable, Any, LiteralString, Union, Optional, Type
 from types import ModuleType
 
+import pint
 from vivarium.core.process import Process as VivariumProcess
 
 
-class OutputDictAnalyzer(ast.NodeVisitor):
-    """Parses an AST tree and extracts the return dictionary from a method."""
-
-    def __init__(self):
-        self.output_dict = {}
-
-    def visit_Return(self, node):
-        """Capture the full dictionary from a return statement."""
-        if isinstance(node.value, ast.Dict):
-            self.output_dict = self._extract_dict(node.value)
-        self.generic_visit(node)
-
-    def _extract_dict(self, node: ast.Dict):
-        """Extract key-value pairs from an AST dictionary node."""
-        output_dict = {}
-        for key, value in zip(node.keys, node.values):
-            if isinstance(key, ast.Constant):  # Python 3.8+
-                dict_key = key.value
-            elif isinstance(key, ast.Str):  # Python 3.7 support
-                dict_key = key.s
-            else:
-                continue  # Skip non-constant keys
-
-            # Extract value type
-            dict_value = self._extract_value(value)
-            output_dict[dict_key] = dict_value
-
-        return output_dict
-
-    def _extract_value(self, node: ast.AST) -> Any:
-        """Extracts the value from AST nodes (e.g., literals, expressions)."""
-        if isinstance(node, ast.Constant):  # Handles direct literals
-            return node.value
-        elif isinstance(node, ast.BinOp):  # Handles expressions like x**2
-            return "expression"
-        elif isinstance(node, ast.Call):  # Handles function calls
-            return "function_call"
-        elif isinstance(node, ast.Name):  # Handles variable names
-            return node.id
-        elif isinstance(node, ast.Dict):  # Handles nested dictionaries
-            return self._extract_dict(node)
-        return "unknown"
-
-
 class PortsSchemaAnalyzer(ast.NodeVisitor):
-    inputs: set
-    outputs: set
-
     def __init__(self):
         self.inputs = set()
         self.outputs = set()
+        self.update_variable_names = set()
 
     def visit_Subscript(self, node):
-        if isinstance(node.value, ast.Name) and node.value.id == "states":
-            if isinstance(node.slice, ast.Constant):
-                self.inputs.add(node.slice.value)
-            elif isinstance(node.slice, ast.Str):
-                self.inputs.add(node.slice.s)
+        key_chain = self.get_full_key_chain(node)
+        if key_chain and key_chain.startswith("states"):
+            key_name = key_chain.replace("states.", "")
+            self.inputs.add(key_name)
+        self.generic_visit(node)
+
+    def visit_Assign(self, node):
+        """Capture assignments to the `update` dictionary, preserving hierarchy."""
+        for target in node.targets:
+            if isinstance(target, ast.Name) and target.id == "update":
+                self.update_variable_names.add(target.id)
+
+            elif isinstance(target, ast.Subscript):
+                if (
+                    isinstance(target.value, ast.Name)
+                    and target.value.id in self.update_variable_names
+                ):
+                    key_chain = self.get_full_key_chain(target)
+                    if key_chain:
+                        self.outputs.add(key_chain)
+
+                        if isinstance(node.value, ast.Dict):
+                            self.extract_dict_keys(node.value, parent_key=key_chain)
+
+        self.generic_visit(node)
+
+    def visit_Return(self, node):
+        """Ensure return statements containing dictionaries are analyzed."""
+        if isinstance(node.value, ast.Name) and node.value.id in self.update_variable_names:
+            self.outputs.update(self.update_variable_names)
+        elif isinstance(node.value, ast.Dict):
+            self.extract_dict_keys(node.value, parent_key="")
         self.generic_visit(node)
 
     def visit_Dict(self, node):
-        for key in node.keys:
-            if isinstance(key, ast.Constant):
-                self.outputs.add(key.value)
-            elif isinstance(key, ast.Str):
-                self.outputs.add(key.s)
-        self.generic_visit(node)
+        """Capture dictionary keys as outputs, including nested structures."""
+        self.extract_dict_keys(node, parent_key="")
+
+    def extract_dict_keys(self, node, parent_key=""):
+        """Recursively extract dictionary keys while preserving hierarchy."""
+        for key, value in zip(node.keys, node.values):
+            key_name = self.get_dict_key_name(key)
+            if not key_name:
+                continue  # Skip non-string keys
+
+            full_key = f"{parent_key}.{key_name}" if parent_key else key_name
+            self.outputs.add(full_key)
+
+            # Recursively process nested dictionaries
+            if isinstance(value, ast.Dict):
+                self.extract_dict_keys(value, parent_key=full_key)
+
+    def get_full_key_chain(self, node):
+        """Extracts full key path from nested dictionary accesses like states['x']['y']."""
+        keys = []
+        while isinstance(node, ast.Subscript):
+            key_name = self.get_dict_key_name(node.slice)
+            if key_name is not None:
+                keys.append(str(key_name))
+            node = node.value
+
+        if isinstance(node, ast.Name):
+            keys.append(node.id)
+
+        return ".".join(reversed(keys))
+
+    def get_dict_key_name(self, key):
+        """Extract dictionary key name, handling Python 3.14's `ast.Str` removal."""
+        if isinstance(key, ast.Constant):
+            return key.value
+        return None
 
 
 def find_defaults(params: dict) -> dict:
@@ -84,7 +93,10 @@ def find_defaults(params: dict) -> dict:
         if isinstance(value, dict):
             nested_result = find_defaults(value)
             if "_default" in value and not nested_result:
-                result[key] = value["_default"]
+                val = value["_default"]
+                if isinstance(val, pint.Quantity):
+                    val = val.to_tuple()[0]
+                result[key] = val
             elif nested_result:
                 result[key] = nested_result
 
@@ -111,20 +123,3 @@ def get_processes(package_path: str):
         get_process(process_class_name=name, import_path=module.__name__)
         for name in mod_attrs if name.startswith(name[0].upper())
     ]
-
-
-def extract_ports_schema(
-        process_class_name: str,
-        import_path: str | None = None,
-        *path_components) -> dict:
-    """Extracts the dictionary returned by a class method without instantiating the class."""
-    process: VivariumProcess = get_process(process_class_name, import_path, *path_components)
-    return getattr(process.__init__(), 'ports_schema')()
-
-
-def test_extract_output_dict():
-    from ecoli.processes.antibiotics import death
-    name = 'DeathFreezeState'
-    path = death.__name__
-    output_ports = extract_ports_schema(name, path)
-    print(output_ports)

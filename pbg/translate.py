@@ -1,3 +1,4 @@
+import textwrap
 from types import FunctionType
 from typing import Any, Callable
 from dataclasses import dataclass, asdict
@@ -7,7 +8,8 @@ import inspect
 from vivarium.core.process import Process as VivariumProcess
 
 from pbg.data_model.ports import ProcessBigraphPorts
-from pbg.parse import PortsSchemaAnalyzer, find_defaults, get_process, OutputDictAnalyzer, extract_ports_schema
+from pbg.parse import PortsSchemaAnalyzer, find_defaults, get_process
+
 
 SCHEMA_MAPPER = {
     "integer": int,
@@ -26,7 +28,10 @@ def translate_vivarium_types(defaults: dict) -> dict:
         if isinstance(value, dict):
             result[key] = translate_vivarium_types(value)
         else:
-            result[key] = type(value).__name__
+            type_name = type(value).__name__
+            if type_name == 'NoneType':
+                type_name = 'any'
+            result[key] = type_name
 
     return result
 
@@ -57,71 +62,4 @@ def get_config_schema(defaults: dict[str, float | Any]):
             config_schema[k] = get_config_schema(v)
 
     return config_schema
-
-
-def extract_ports_schema_return(
-        process_class_name: str,
-        import_path: str | None = None,
-        *path_components
-) -> dict:
-    return extract_ports_schema(process_class_name=process_class_name, import_path=import_path, *path_components)
-
-
-def extract_ports_from_update(func: Callable[[VivariumProcess, float, dict], dict]) -> ProcessBigraphPorts:
-    """
-    Parses a function and extracts:
-    - "inputs": variables that are being read
-    - "outputs": dictionary keys returned by the function
-    """
-    source = inspect.getsource(func)
-    tree = ast.parse(source)
-
-    tree = ast.parse(source)
-    analyzer = PortsSchemaAnalyzer()
-    analyzer.visit(tree)
-
-    return ProcessBigraphPorts(inputs=analyzer.inputs, outputs=analyzer.outputs)
-
-
-def get_update_method(process: VivariumProcess):
-    return getattr(process, "update").__func__
-
-
-def get_ports_schema_method(process: VivariumProcess):
-    return getattr(process, "ports_schema").__func__
-
-
-def get_port_schemas(
-        process_class_name: str,
-        import_path: str | None = None,
-        *path_components
-) -> tuple[dict, dict]:
-    process: VivariumProcess = get_process(process_class_name, import_path, *path_components)
-    updater: FunctionType = get_update_method(process)
-    port_names: ProcessBigraphPorts = extract_ports_from_update(updater)
-
-    inputs_schema, outputs_schema = {}, {}
-
-    ports_schema: dict = extract_ports_schema_return(process_class_name, import_path, *path_components)
-    ports_mapping: dict = get_port_mapping(ports_schema)
-
-    for name in port_names.inputs:
-        inputs_schema[name] = ports_mapping[name]
-
-    for name in port_names.outputs:
-        outputs_schema[name] = ports_mapping[name]
-
-    return inputs_schema, outputs_schema
-
-
-def example_next_update(self, interval, states):
-    x = states['x']
-    return {
-        'y': x**x
-    }
-
-
-def test_extraction():
-    variables = extract_ports_from_update(example_next_update)
-    print(variables)
 
