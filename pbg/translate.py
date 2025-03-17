@@ -1,5 +1,7 @@
 from typing import Any
 
+import numpy as np
+from pint import Quantity
 
 from pbg.parse import find_defaults
 
@@ -50,16 +52,24 @@ def get_config_schema(defaults: dict[str, float | Any]):
     config_schema = {}
     for k, v in defaults.copy().items():
         if not isinstance(v, dict):
+            # handle type
             _type = ""
             for schema_type, python_type in SCHEMA_MAPPER.items():
+                # TODO: perhaps use str(Quantity().u()) to define the type (ie, nanometer)
                 if isinstance(v, python_type):
                     _type = schema_type
                 else:
                     _type = "any"
 
+            # handle value
+            if isinstance(v, Quantity):
+                v = v.magnitude
+            elif isinstance(v, np.ndarray) or isinstance(v, np.float64):
+                v = v.tolist()
+
             config_schema[k] = {
                 "_type": _type,  # TODO: provide a more specific lookup
-                "_default": v,
+                "_default": v
             }
         else:
             config_schema[k] = get_config_schema(v)

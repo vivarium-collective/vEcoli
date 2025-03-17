@@ -14,15 +14,13 @@ class MetaABCAndType(abc.ABCMeta, type):
 
 class BaseProcess(PbgProcess, VivariumProcess, metaclass=MetaABCAndType):
     """This should replace all instances of inheritance from `vivarium.core.process.Process` as the new base class type."""
-    # config_schema = {}
-    # defaults = {}
-    # name = "base_process"
+    config_schema = {}
 
-    def __init__(self, parameters=None):
+    def __init__(self, parameters=None, core=None):
         VivariumProcess.__init__(self, parameters=parameters)
 
         self.config_schema = get_config_schema(self.parameters)
-        super().__init__(config=parameters, core=CORE)
+        super().__init__(config=parameters, core=core)
 
     # --- methods inherited from vivarium.core --- #
     def ports_schema(self):
@@ -40,7 +38,7 @@ class BaseProcess(PbgProcess, VivariumProcess, metaclass=MetaABCAndType):
         return self._ports()
 
     def update(self, state, interval):
-        return self.next_update(interval, state)
+        return self.next_update(timestep=interval, states=state)
 
     def _ports(self):
         ports_schema = self.ports_schema()
