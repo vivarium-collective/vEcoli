@@ -103,6 +103,20 @@ def find_defaults(params: dict) -> dict:
     return result
 
 
+def find_stores(params: dict) -> dict:
+    """Extract inner dict _default values from an arbitrarily-nested `params` input."""
+    result = {}
+    for key, value in params.items():
+        if isinstance(value, dict):
+            nested_result = find_stores(value)
+            if not nested_result:
+                result[key] = [key]
+            elif nested_result:
+                result[key] = nested_result
+
+    return result
+
+
 def get_process(
         process_class_name: str,
         import_path: str | None = None,

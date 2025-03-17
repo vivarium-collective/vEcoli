@@ -40,3 +40,7 @@ class BaseProcess(PbgProcess, VivariumProcess, metaclass=MetaABCAndType):
     def _ports(self):
         ports_schema = self.ports_schema()
         return get_port_mapping(ports_schema)
+
+    def get_stores(self):
+        state = self.initial_state()
+        return parse.find_stores(state)
