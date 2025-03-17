@@ -18,12 +18,15 @@ class ModuleTransformer(ast.NodeTransformer):
 
 class InheritanceTransformer(ModuleTransformer):
     """Transforms class inheritance from OldProcess to BaseProcess."""
+
     def visit_ClassDef(self, node):
         """Modify class inheritance from OldProcess -> BaseProcess"""
         for base in node.bases:
             if isinstance(base, ast.Name) and base.id == self.original_ancestor:
                 base.id = self.new_ancestor
-                print(f"Updated class '{node.name}' inheritance from OldProcess to BaseProcess")
+                print(
+                    f"Updated class '{node.name}' inheritance from OldProcess to BaseProcess"
+                )
         return node
 
 
@@ -43,11 +46,21 @@ class InitTransformer(ModuleTransformer):
             # Modify super().__init__ call to include 'core'
             for stmt in node.body:
                 if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
-                    if isinstance(stmt.value.func, ast.Attribute) and stmt.value.func.attr == "__init__":
+                    if (
+                        isinstance(stmt.value.func, ast.Attribute)
+                        and stmt.value.func.attr == "__init__"
+                    ):
                         # Check if 'core' is already passed
-                        if not any(isinstance(arg, ast.Name) and arg.id == self.new_param for arg in stmt.value.args):
-                            stmt.value.args.append(ast.Name(id=self.new_param, ctx=ast.Load()))  # Pass 'core' to super()
-                            print(f"Modified super().__init__ call to pass '{self.new_param}'.")
+                        if not any(
+                            isinstance(arg, ast.Name) and arg.id == self.new_param
+                            for arg in stmt.value.args
+                        ):
+                            stmt.value.args.append(
+                                ast.Name(id=self.new_param, ctx=ast.Load())
+                            )  # Pass 'core' to super()
+                            print(
+                                f"Modified super().__init__ call to pass '{self.new_param}'."
+                            )
 
         return node
 
@@ -60,7 +73,9 @@ class ImportTransformer(ModuleTransformer):
         self.import_found = False
 
     def visit_ImportFrom(self, node):
-        if node.module == "pbg.data_model.base_process" and self.new_ancestor in [n.name for n in node.names]:
+        if node.module == "pbg.data_model.base_process" and self.new_ancestor in [
+            n.name for n in node.names
+        ]:
             self.import_found = True
         return node
 
@@ -68,11 +83,16 @@ class ImportTransformer(ModuleTransformer):
         if not self.import_found:
             new_import = ast.ImportFrom(
                 module="pbg.data_model.base_process",
-                names=[ast.alias(name=self.new_ancestor, asname=None), ast.alias(name="CORE", asname=None)],
-                level=0
+                names=[
+                    ast.alias(name=self.new_ancestor, asname=None),
+                    ast.alias(name="CORE", asname=None),
+                ],
+                level=0,
             )
             tree.body.insert(0, new_import)
-            print("Added import: from pbg.data_model.base_process import BaseProcess, CORE")
+            print(
+                "Added import: from pbg.data_model.base_process import BaseProcess, CORE"
+            )
 
 
 def transform_python_file(input_file: Path, output_file: Path):
