@@ -1,10 +1,15 @@
 import subprocess
+import logging
 from warnings import warn
+
 
 import typer
 import ast
 import astor
 from pathlib import Path
+
+
+logger = logging.getLogger(__name__)
 
 
 app = typer.Typer()
@@ -24,7 +29,7 @@ class InheritanceTransformer(ModuleTransformer):
         for base in node.bases:
             if isinstance(base, ast.Name) and base.id == self.original_ancestor:
                 base.id = self.new_ancestor
-                print(
+                logger.info(
                     f"Updated class '{node.name}' inheritance from OldProcess to BaseProcess"
                 )
         return node
@@ -41,9 +46,8 @@ class InitTransformer(ModuleTransformer):
             if self.new_param not in param_names:
                 new_arg = ast.arg(arg=self.new_param, annotation=None)
                 node.args.args.append(new_arg)  # Add 'core' to the parameter list
-                print(f"Added '{self.new_param}' parameter to __init__ in class.")
+                logger.info(f"Added '{self.new_param}' parameter to __init__ in class.")
 
-            # Modify super().__init__ call to include 'core'
             for stmt in node.body:
                 if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
                     if (
@@ -58,7 +62,7 @@ class InitTransformer(ModuleTransformer):
                             stmt.value.args.append(
                                 ast.Name(id=self.new_param, ctx=ast.Load())
                             )  # Pass 'core' to super()
-                            print(
+                            logger.info(
                                 f"Modified super().__init__ call to pass '{self.new_param}'."
                             )
 
@@ -90,7 +94,7 @@ class ImportTransformer(ModuleTransformer):
                 level=0,
             )
             tree.body.insert(0, new_import)
-            print(
+            logger.info(
                 "Added import: from pbg.data_model.base_process import BaseProcess, CORE"
             )
 
@@ -121,7 +125,7 @@ def transform_python_file(input_file: Path, output_file: Path):
 
     try:
         subprocess.run(["black", output_file], check=True)
-        print(f"Formatted {output_file} using Black")
+        logger.info(f"Formatted {output_file} using Black")
     except subprocess.CalledProcessError:
         warn("Black formatting failed. File is still generated but not auto-formatted.")
 
