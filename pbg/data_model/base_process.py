@@ -3,6 +3,7 @@ import abc
 from process_bigraph import ProcessTypes, Process as PbgProcess
 from vivarium.core.process import Process as VivariumProcess
 
+from pbg import parse
 from pbg.translate import get_port_mapping, get_config_schema
 
 CORE = ProcessTypes()
@@ -22,13 +23,6 @@ class BaseProcess(PbgProcess, VivariumProcess, metaclass=MetaABCAndType):
         self.config_schema = get_config_schema(self.parameters)
         super().__init__(config=parameters, core=core)
 
-    # --- methods inherited from vivarium.core --- #
-    def ports_schema(self):
-        return super().ports_schema()
-
-    def next_update(self, timestep, states):
-        return super().next_update(timestep, states)
-
     # --- methods which extend pbg.Edge() --- #
     def inputs(self):
         # TODO: currently only extends ports bidirectionally. Change this
@@ -36,6 +30,9 @@ class BaseProcess(PbgProcess, VivariumProcess, metaclass=MetaABCAndType):
 
     def outputs(self):
         return self._ports()
+
+    def initial_state(self):
+        return parse.find_defaults(self.ports_schema())
 
     def update(self, state, interval):
         return self.next_update(timestep=interval, states=state)
