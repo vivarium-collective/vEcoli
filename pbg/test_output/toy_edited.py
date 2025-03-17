@@ -1,5 +1,4 @@
-from pbg.data_model.base_process import BaseProcess, CORE
-from vivarium.core.process import Process
+from pbg.data_model.base_process import BaseProcess
 
 
 class Add(BaseProcess):
