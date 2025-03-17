@@ -25,7 +25,6 @@ class InheritanceTransformer(ModuleTransformer):
     """Transforms class inheritance from OldProcess to BaseProcess."""
 
     def visit_ClassDef(self, node):
-        """Modify class inheritance from OldProcess -> BaseProcess"""
         for base in node.bases:
             if isinstance(base, ast.Name) and base.id == self.original_ancestor:
                 base.id = self.new_ancestor
@@ -39,9 +38,7 @@ class InitTransformer(ModuleTransformer):
     """Adds a new parameter to the constructor and modifies super().__init__ calls"""
 
     def visit_FunctionDef(self, node):
-        """Modify the __init__ method to add the 'core' parameter and pass it to super()"""
         if node.name == "__init__":
-            # Ensure 'core' parameter exists
             param_names = {arg.arg for arg in node.args.args}
             if self.new_param not in param_names:
                 new_arg = ast.arg(arg=self.new_param, annotation=None)
@@ -54,14 +51,13 @@ class InitTransformer(ModuleTransformer):
                         isinstance(stmt.value.func, ast.Attribute)
                         and stmt.value.func.attr == "__init__"
                     ):
-                        # Check if 'core' is already passed
                         if not any(
                             isinstance(arg, ast.Name) and arg.id == self.new_param
                             for arg in stmt.value.args
                         ):
                             stmt.value.args.append(
                                 ast.Name(id=self.new_param, ctx=ast.Load())
-                            )  # Pass 'core' to super()
+                            )
                             logger.info(
                                 f"Modified super().__init__ call to pass '{self.new_param}'."
                             )
@@ -99,7 +95,7 @@ class ImportTransformer(ModuleTransformer):
             )
 
 
-def transform_python_file(input_file: Path, output_file: Path):
+def transform_python_file(input_file: Path, output_file: Path) -> Path:
     """
     Transform an existing Vivarium1.0-style `Process` implementation into a `process-bigraph`-compliant format, saved to `output_file`.
 
@@ -125,7 +121,7 @@ def transform_python_file(input_file: Path, output_file: Path):
 
     try:
         subprocess.run(["black", output_file], check=True)
-        logger.info(f"Formatted {output_file} using Black")
+        typer.echo(f"Formatted {output_file} using Black")
     except subprocess.CalledProcessError:
         warn("Black formatting failed. File is still generated but not auto-formatted.")
 
@@ -138,7 +134,9 @@ def process(input_file: Path, output_file: Path):
         result = transform_python_file(input_file, output_file)
         typer.echo(result)
     except Exception as e:
-        typer.echo(f"Error: {e}", err=True)
+        msg = f"An error occurred: {e}"
+        typer.echo(msg, err=True)
+        logger.error(msg)
 
 
 @app.command()
