@@ -66,6 +66,9 @@ from ecoli.processes.shape import length_from_volume, surface_area_from_length
 from vivarium.core.process import Process
 from vivarium.library.units import units, remove_units
 
+from pbg.data_model.base_process import BaseProcess
+from pbg.translate import get_config_schema
+
 # Register default topology for this process, associating it with process name
 NAME = "ecoli-cell-wall"
 TOPOLOGY = {
@@ -82,7 +85,7 @@ def divide_lattice(lattice):
     return np.array_split(lattice, 2, axis=1)
 
 
-class CellWall(Process):
+class CellWall(BaseProcess):
     name = NAME
     topology = TOPOLOGY
     defaults = {
@@ -112,8 +115,8 @@ class CellWall(Process):
         "time_step": 10,
     }
 
-    def __init__(self, parameters=None):
-        super().__init__(parameters)
+    def __init__(self, parameters=None, core=None):
+        super().__init__(parameters, core)
 
         self.murein = self.parameters["murein"]
         self.pbp1a = self.parameters["PBP"]["PBP1A"]
