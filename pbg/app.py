@@ -1,4 +1,5 @@
 import subprocess
+from warnings import warn
 
 import typer
 import ast
@@ -82,34 +83,27 @@ def transform_python_file(input_file: Path, output_file: Path):
     :param output_file: Path to the output python file
     """
     source_code = input_file.read_text()
-
-    # Parse into AST
     tree = ast.parse(source_code)
 
-    # Modify class inheritance
     transformer = InheritanceTransformer()
     transformed_tree = transformer.visit(tree)
 
-    # Modify __init__ methods to add 'core' parameter
     init_transformer = InitTransformer()
     transformed_tree = init_transformer.visit(transformed_tree)
 
-    # Ensure the import exists
     import_checker = ImportTransformer()
     transformed_tree = import_checker.visit(transformed_tree)
     import_checker.add_import(transformed_tree)
 
-    # Convert AST back to Python code
     new_code = astor.to_source(transformed_tree)
 
-    # Write to output file
     output_file.write_text(new_code)
 
     try:
         subprocess.run(["black", output_file], check=True)
         print(f"Formatted {output_file} using Black")
     except subprocess.CalledProcessError:
-        print("Black formatting failed. File is still generated but not auto-formatted.")
+        warn("Black formatting failed. File is still generated but not auto-formatted.")
 
     return output_file
 
