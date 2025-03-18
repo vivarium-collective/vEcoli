@@ -60,7 +60,7 @@ dependencies = [
 ]
 
 [project.scripts]
-translate = "pbg.app:app"
+migrate = "pbg.app:cli"
 
 [project.optional-dependencies]
 dev = [

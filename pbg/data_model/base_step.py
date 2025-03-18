@@ -1,6 +1,6 @@
 import abc
 
-from process_bigraph import ProcessTypes, Process as PbgProcess
+from process_bigraph import ProcessTypes, Step as PbgStep
 from vivarium.core.process import Process as VivariumProcess
 
 from pbg import parse
@@ -8,9 +8,9 @@ from pbg.data_model.meta import MetaABCAndType
 from pbg.translate import get_port_mapping, get_config_schema
 
 
-class BaseProcess(PbgProcess, VivariumProcess, metaclass=MetaABCAndType):
+class BaseStep(PbgStep, VivariumProcess, metaclass=MetaABCAndType):
     """
-    This should replace all instances of inheritance from `vivarium.core.process.Process` as the new base class type.
+    This should replace all instances of inheritance from `vivarium.core.process.Step` as the new base class type.
     TODO: Ports are currently mapped 1:1 with same inputs and outputs. Change this! (somehow derive vivarium1.0 port directions)
     """
     config_schema = {}
@@ -33,9 +33,9 @@ class BaseProcess(PbgProcess, VivariumProcess, metaclass=MetaABCAndType):
     def initial_state(self):
         return parse.find_defaults(self.ports_schema())
 
-    def update(self, state, interval):
+    def update(self, state):
         update_data = state.copy()
-        next_update = self.next_update(timestep=interval, states=state)
+        next_update = self.next_update(states=state, timestep=1)
         update_data.update(next_update)
         return update_data
 

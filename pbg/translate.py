@@ -6,7 +6,7 @@ from pint import Quantity
 from pbg.parse import find_defaults
 
 
-SCHEMA_MAPPER = {
+CONFIG_SCHEMA_MAPPER = {
     "integer": int,
     "float": float,
     "string": str,
@@ -15,7 +15,7 @@ SCHEMA_MAPPER = {
     "tuple": tuple,
 }
 
-MAPPER = {
+PORTS_MAPPER = {
     "int": "integer",
     "bool": "boolean",
     "list": "list",
@@ -23,22 +23,23 @@ MAPPER = {
     "float": "float",
     "any": "any",
     "ndarray": "array",
+    "dict": "tree",
+    "NoneType": "any",
 }
 
 
 def translate_vivarium_types(defaults: dict) -> dict:
     """Translate default values into corresponding bigraph-schema type declarations."""
-    result = {}
+    ports = {}
     for key, value in defaults.items():
         if isinstance(value, dict):
-            result[key] = translate_vivarium_types(value)
+            ports[key] = translate_vivarium_types(value)
         else:
             type_name = type(value).__name__
-            if type_name == "NoneType":
-                type_name = "any"
-            result[key] = MAPPER[type_name]
+            # ports[key] = 'any'
+            ports[key] = PORTS_MAPPER[type_name]
 
-    return result
+    return ports
 
 
 def get_port_mapping(ports_schema: dict[str, Any]):
@@ -54,7 +55,7 @@ def get_config_schema(defaults: dict[str, float | Any]):
         if not isinstance(v, dict):
             # handle type
             _type = ""
-            for schema_type, python_type in SCHEMA_MAPPER.items():
+            for schema_type, python_type in CONFIG_SCHEMA_MAPPER.items():
                 # TODO: perhaps use str(Quantity().u()) to define the type (ie, nanometer)
                 if isinstance(v, python_type):
                     _type = schema_type

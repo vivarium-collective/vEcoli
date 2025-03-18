@@ -1,4 +1,4 @@
-from pbg.data_model.base_process import BaseProcess, CORE
+from pbg.data_model.base_process import BaseProcess
 from vivarium.core.process import Process
 
 

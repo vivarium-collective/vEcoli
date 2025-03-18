@@ -1,111 +1,32 @@
+import os
 import subprocess
 import logging
+from pathlib import Path
+from typing import Optional
 from warnings import warn
-
 
 import typer
 import ast
 import astor
-from pathlib import Path
+
+from pbg.transformers import ProcessTransformer, StepTransformer, InitTransformer, ImportTransformer
 
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
+
+cli: typer.Typer = typer.Typer()
 
 
-app = typer.Typer()
-
-
-class ModuleTransformer(ast.NodeTransformer):
-    original_ancestor = "Process"
-    new_ancestor = "BaseProcess"
-    new_param = "core"
-
-
-class InheritanceTransformer(ModuleTransformer):
-    """Transforms class inheritance from OldProcess to BaseProcess."""
-
-    def visit_ClassDef(self, node):
-        for base in node.bases:
-            if isinstance(base, ast.Name) and base.id == self.original_ancestor:
-                base.id = self.new_ancestor
-                logger.info(
-                    f"Updated class '{node.name}' inheritance from OldProcess to BaseProcess"
-                )
-        return node
-
-
-class InitTransformer(ModuleTransformer):
-    """Adds a new parameter to the constructor and modifies super().__init__ calls"""
-
-    def visit_FunctionDef(self, node):
-        if node.name == "__init__":
-            param_names = {arg.arg for arg in node.args.args}
-            if self.new_param not in param_names:
-                new_arg = ast.arg(arg=self.new_param, annotation=None)
-                node.args.args.append(new_arg)  # Add 'core' to the parameter list
-                logger.info(f"Added '{self.new_param}' parameter to __init__ in class.")
-
-            for stmt in node.body:
-                if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
-                    if (
-                        isinstance(stmt.value.func, ast.Attribute)
-                        and stmt.value.func.attr == "__init__"
-                    ):
-                        if not any(
-                            isinstance(arg, ast.Name) and arg.id == self.new_param
-                            for arg in stmt.value.args
-                        ):
-                            stmt.value.args.append(
-                                ast.Name(id=self.new_param, ctx=ast.Load())
-                            )
-                            logger.info(
-                                f"Modified super().__init__ call to pass '{self.new_param}'."
-                            )
-
-        return node
-
-
-class ImportTransformer(ModuleTransformer):
-    """Adds `from pbg.data_model.base_process import BaseProcess, CORE` to the top of the new module"""
-
-    def __init__(self):
-        super().__init__()
-        self.import_found = False
-
-    def visit_ImportFrom(self, node):
-        if node.module == "pbg.data_model.base_process" and self.new_ancestor in [
-            n.name for n in node.names
-        ]:
-            self.import_found = True
-        return node
-
-    def add_import(self, tree):
-        if not self.import_found:
-            new_import = ast.ImportFrom(
-                module="pbg.data_model.base_process",
-                names=[
-                    ast.alias(name=self.new_ancestor, asname=None),
-                    ast.alias(name="CORE", asname=None),
-                ],
-                level=0,
-            )
-            tree.body.insert(0, new_import)
-            logger.info(
-                "Added import: from pbg.data_model.base_process import BaseProcess, CORE"
-            )
-
-
-def transform_python_file(input_file: Path, output_file: Path) -> Path:
-    """
-    Transform an existing Vivarium1.0-style `Process` implementation into a `process-bigraph`-compliant format, saved to `output_file`.
+def transform_file(input_file: Path, output_file: Path, transformer: ProcessTransformer | StepTransformer) -> Path:
+    """Transforms an existing Vivarium1.0-style `Process` implementation into a `process-bigraph`-compliant format, saved to `output_file`.
 
     :param input_file: Path to the input python file
     :param output_file: Path to the output python file
+    :param transformer: Transformer to be applied
     """
     source_code = input_file.read_text()
     tree = ast.parse(source_code)
 
-    transformer = InheritanceTransformer()
     transformed_tree = transformer.visit(tree)
 
     init_transformer = InitTransformer()
@@ -128,10 +49,35 @@ def transform_python_file(input_file: Path, output_file: Path) -> Path:
     return output_file
 
 
-@app.command()
+@cli.command()
 def process(input_file: Path, output_file: Path):
     try:
-        result = transform_python_file(input_file, output_file)
+        transformer = ProcessTransformer()
+        result = transform_file(input_file, output_file, transformer)
+        typer.echo(f'Successfully migrated process to location: {output_file}')
+    except Exception as e:
+        msg = f"An error occurred: {e}"
+        typer.echo(msg, err=True)
+        logger.error(msg)
+
+
+@cli.command()
+def processes(input_dir: Path, output_dir: Path, suffix: str = "converted"):
+    for root, _, dir_files in os.walk(input_dir):
+        for dir_file in dir_files:
+            if not dir_file.startswith("__"):
+                fname = dir_file.split('.')[0] + f'_{suffix}.py'
+                input_fp = Path(os.path.join(root, dir_file))
+                output_fp = Path(os.path.join(output_dir, fname))
+                typer.echo(f"Processing {input_fp}...")
+                process(input_fp, output_fp)
+
+
+@cli.command()
+def step(input_file: Path, output_file: Path):
+    try:
+        transformer = StepTransformer()
+        result = transform_file(input_file, output_file, transformer)
         typer.echo(result)
     except Exception as e:
         msg = f"An error occurred: {e}"
@@ -139,11 +85,11 @@ def process(input_file: Path, output_file: Path):
         logger.error(msg)
 
 
-@app.command()
+@cli.command()
 def test(*args: Path):
     for arg in args:
         typer.echo(arg)
 
 
 if __name__ == "__main__":
-    app()
+    cli()
