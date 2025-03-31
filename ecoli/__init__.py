@@ -157,5 +157,10 @@ def register_types(core: ProcessTypes, types_dir: str) -> None:
 
 # project core singleton
 ecoli_core = ProcessTypes()
+
+# register types
 types_dir: str = os.path.join(os.path.dirname(__file__), "types")
 register_types(ecoli_core, types_dir)
+
+# register processes
+# TODO: register processes here (explicitly or implicitly via interface)
