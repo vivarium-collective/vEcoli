@@ -115,20 +115,25 @@ class TypeSchema:
 
     @property
     def required_keys(self) -> set:
-        return {'_default', '_apply', '_check', '_serialize', '_deserialize', '_fold'}
+        return {"_default", "_apply", "_check", "_serialize", "_deserialize", "_fold"}
 
     @property
     def optional_keys(self) -> set:
-        return {'_type', '_value', '_description', '_type_parameters', '_inherit', '_divide'}
+        return {
+            "_type",
+            "_value",
+            "_description",
+            "_type_parameters",
+            "_inherit",
+            "_divide",
+        }
 
 
 def get_type_filepaths(dirpath: str) -> set[str]:
     paths: set = set()
     for filename in os.listdir(dirpath):
         if filename.endswith(".json"):
-            paths.add(
-                os.path.join(dirpath, filename)
-            )
+            paths.add(os.path.join(dirpath, filename))
     return paths
 
 
@@ -136,10 +141,12 @@ def register_types(core: ProcessTypes, types_dir: str) -> None:
     types_to_register: set[str] = get_type_filepaths(types_dir)
     for spec_path in types_to_register:
         try:
-            with open(spec_path, 'r') as f:
+            with open(spec_path, "r") as f:
                 spec: dict = json.load(f)
-            
-            assert len(spec.keys()) == 1, f"You can only define one type per file.\nPlease check the following file: {spec_path}"
+
+            assert (
+                len(spec.keys()) == 1
+            ), f"You can only define one type per file.\nPlease check the following file: {spec_path}"
             type_id: str = list(spec.keys()).pop()
             core.register_types({type_id: spec[type_id]})
             logger.info(f"Type ID: {type_id} has been registered.\n")

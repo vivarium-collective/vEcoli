@@ -14,10 +14,7 @@ class BulkTimelineProcess(Process):
             "_type": "float",
             "_default": 1.0,
         },
-        "timeline": {
-            "_type": "tree",
-            "_default": {}
-        }
+        "timeline": {"_type": "tree", "_default": {}},
     }
 
     def __init__(self, config=None, core=None):
