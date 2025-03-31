@@ -1,10 +1,16 @@
 import os
+import sys
 
 # Improve performance and reproducibility
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 
+import json
+import logging
+from dataclasses import dataclass
+
+from process_bigraph import ProcessTypes
 from vivarium.core.registry import (
     divider_registry,
     emitter_registry,
@@ -37,11 +43,30 @@ from ecoli.library.updaters import (
     inverse_update_unique_numpy,
     inverse_updater_registry,
 )
-
-# Enable segmentation and other fault handling for tracebacks
 import faulthandler
 
 faulthandler.enable()
+
+
+def setup_logging(name: str) -> logging.Logger:
+    # Create a root logger
+    root_logger = logging.getLogger(name)
+    root_logger.setLevel(logging.INFO)
+
+    console_handler = logging.StreamHandler(stream=sys.stdout)
+    console_handler.setLevel(logging.INFO)
+    formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+
+    return root_logger
+
+
+logger: logging.Logger = setup_logging("ecoli.init")
+
 
 emitter_registry.register("parquet", ParquetEmitter)
 
@@ -75,3 +100,55 @@ for serializer_cls in (
 ):
     serializer = serializer_cls()
     serializer_registry.register(serializer.name, serializer)
+
+
+# required bgs keys: {'_default', '_apply', '_check', '_serialize', '_deserialize', '_fold'}
+# optional bgs keys: {'_type', '_value', '_description', '_type_parameters', '_inherit', '_divide'}
+@dataclass
+class TypeSchema:
+    type_id: str
+    protocol: str = "local"
+
+    @property
+    def attributes(self) -> set:
+        return self.required_keys.union(self.optional_keys)
+
+    @property
+    def required_keys(self) -> set:
+        return {'_default', '_apply', '_check', '_serialize', '_deserialize', '_fold'}
+
+    @property
+    def optional_keys(self) -> set:
+        return {'_type', '_value', '_description', '_type_parameters', '_inherit', '_divide'}
+
+
+def get_type_filepaths(dirpath: str) -> set[str]:
+    paths: set = set()
+    for filename in os.listdir(dirpath):
+        if filename.endswith(".json"):
+            paths.add(
+                os.path.join(dirpath, filename)
+            )
+    return paths
+
+
+def register_types(core: ProcessTypes, types_dir: str) -> None:
+    types_to_register: set[str] = get_type_filepaths(types_dir)
+    for spec_path in types_to_register:
+        try:
+            with open(spec_path, 'r') as f:
+                spec: dict = json.load(f)
+            
+            assert len(spec.keys()) == 1, f"You can only define one type per file.\nPlease check the following file: {spec_path}"
+            type_id: str = list(spec.keys()).pop()
+            core.register_types({type_id: spec[type_id]})
+            logger.info(f"Type ID: {type_id} has been registered.\n")
+        except AssertionError as e:
+            logger.error(str(e))
+            continue
+
+
+# project core singleton
+ecoli_core = ProcessTypes()
+types_dir: str = os.path.join(os.path.dirname(__file__), "types")
+register_types(ecoli_core, types_dir)

@@ -244,7 +244,10 @@ def numpy_schema(name: str, emit: bool = True) -> Dict[str, Any]:
     Returns:
         Fully configured ports schema for molecules of type `name`
     """
-    schema = {"_default": [], "_emit": emit}
+    schema = {
+        "_default": [],
+        "_emit": emit
+    }
     if name == "bulk":
         schema["_updater"] = bulk_numpy_updater
         # Only pull out counts to be serialized (save space and time)

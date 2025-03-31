@@ -1,13 +1,15 @@
 {
-  "id": "string",
-  "count": "float",
-  "rRNA_submass": "float",
-  "tRNA_submass": "float",
-  "mRNA_submass": "float",
-  "miscRNA_submass": "float",
-  "nonspecific_RNA_submass": "float",
-  "protein_submass": "float",
-  "metabolite_submass": "float",
-  "water_submass": "float",
-  "DNA_submass":  "float"
+  "bulk_type": {
+    "id": "string",
+    "count": "float",
+    "rRNA_submass": "float",
+    "tRNA_submass": "float",
+    "mRNA_submass": "float",
+    "miscRNA_submass": "float",
+    "nonspecific_RNA_submass": "float",
+    "protein_submass": "float",
+    "metabolite_submass": "float",
+    "water_submass": "float",
+    "DNA_submass":  "float"
+  }
 }

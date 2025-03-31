@@ -1,4 +1,4 @@
-from vivarium import process_registry
+from vivarium.core.registry import process_registry
 from ecoli.processes.antibiotics.lysis_initiation import LysisInitiation
 
 from ecoli.processes.tf_unbinding import TfUnbinding
