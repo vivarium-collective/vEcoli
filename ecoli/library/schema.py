@@ -225,7 +225,8 @@ def counts(states: np.ndarray, idx: int | np.ndarray) -> np.ndarray:
         return states["count"][idx]
     # evolve_state reads from ('allocate', process_name, 'bulk')
     # which is a simple Numpy array (not structured)
-    return states[idx].copy()
+    # return states[idx].copy()
+    return np.ascontiguousarray(states[idx].copy())
 
 
 class get_bulk_counts(Serializer):
