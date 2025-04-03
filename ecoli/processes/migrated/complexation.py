@@ -21,28 +21,12 @@ import numpy as np
 from stochastic_arrow import StochasticSystem
 from process_bigraph import Process, ProcessTypes
 
-# from vivarium.core.composition import simulate_process
-
 from ecoli.library.schema import numpy_schema, bulk_name_to_idx, counts, listener_schema
-# from ecoli.processes.registries import topology_registry
-# from ecoli.processes.partition import PartitionedProcess
-
-# Register default topology for this process, associating it with process name
-# NAME = "ecoli-complexation"
-# TOPOLOGY = {"bulk": ("bulk",), "listeners": ("listeners",), "timestep": ("timestep",)}
-# topology_registry.register(NAME, TOPOLOGY)
 
 
 class Complexation(Process):
-    """
-    Complexation Process
+    """Complexation Process"""
 
-    config_schema:
-    :stoichiometry: a stoichiometric coefficient matrix of shape (n_reactions, n_species) ie:
-        species A B C D E
-        A + B -> C  [[-1, -1, 1, 0, 0],
-        C -> D + E   [0, 0, -1, 1, 1]]
-    """
     config_schema = {
         "rates": "list[float]",
         "stoichiometry": "list",
@@ -190,6 +174,3 @@ def test_complexation():
     # assert isinstance(complexation_events[1], list), "This is not a list."  # <-- TODO: does this need to be a list with the new structure?
     print(f"Data:\n{data}")
 
-
-# if __name__ == "__main__":
-#     test_complexation()
