@@ -1,6 +1,6 @@
 """
 =============
-Cell Division
+MIGRATED: Cell Division
 =============
 """
 from types import FunctionType
@@ -45,12 +45,14 @@ class MarkDPeriod(Step):
     
     def outputs(self): 
         return {
-            "full_chromosome": {
-                "set": {
-                    "has_triggered_division": "boolean"
-                }
-            },
+            "full_chromosome": "tree",
             "divide": "boolean"
+        }
+
+    def initial_state(self):
+        return {
+            "full_chromosome": {},
+            "divide": False
         }
 
     def update(self, state):
@@ -58,6 +60,8 @@ class MarkDPeriod(Step):
             states=state["full_chromosome"],
             attributes=["division_time", "has_triggered_division"]
         )
+
+        # TODO: what to do here?
         if len(division_time) < 2:
             return {}
         # Set division time to be the minimum division time for a chromosome
@@ -93,10 +97,7 @@ class Division(Step):
     config_schema = {
         "agent_id": "string",
         "seed": "integer",
-        "division_threshold": {
-            "_type": "string",
-            "_default": "massDistribution",
-        },
+        "division_threshold": "maybe[string]",  # <-- Union[str, None] = None by default
         "dry_mass_inc_dict": "tree"
     }
 
@@ -105,16 +106,17 @@ class Division(Step):
 
         self.daughter_ids_function: Callable[[str], list[str]] = daughter_phylogeny_id
 
+        self.seed = self.config.get("seed", 0)
         # must provide a composer to generate new daughters
         self.agent_id = self.config["agent_id"]
         # self.composer = self.parameters["composer"]
         # self.composer_config = self.parameters["composer_config"]
-        self.random_state = np.random.RandomState(seed=self.config["seed"])
+        self.random_state = np.random.RandomState(seed=self.seed)
 
         self.division_mass_multiplier = 1
         if self.config["division_threshold"] == "massDistribution":
             division_random_seed = (
-                binascii.crc32(b"CellDivision", self.config["seed"]) & 0xFFFFFFFF
+                binascii.crc32(b"CellDivision", self.seed) & 0xFFFFFFFF
             )
             division_random_state = np.random.RandomState(seed=division_random_seed)
             self.division_mass_multiplier = division_random_state.normal(
@@ -131,7 +133,7 @@ class Division(Step):
         return {
             "division_variable": {},
             "full_chromosome": {},
-            # "agents": {"*": {}},
+            "agents": {"*": {}},  # TODO: what to do here?
             "media_id": {},
             "division_threshold": {
                 "_default": self.config["division_threshold"],

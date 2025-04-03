@@ -111,7 +111,30 @@ in the ``divider_registry`` in ``ecoli/__init__.py``
 
 class MetadataArray(np.ndarray):
     """Subclass of Numpy array that allows for metadata to be stored with the array.
-    Currently used to store next unique molecule index for unique molecule arrays."""
+    Currently used to store next unique molecule index for unique molecule arrays.
+
+    Instantiating this class involves 3 steps:
+
+    1. define the dtype as a list[tuple[str, type]], where each item specifies the data name and python type:
+
+        dtype = [
+            ("unique_index", int),
+            ("_entryState", bool),
+            ("value", float),
+        ]
+
+    2. create the base array as an array of tuples[unique_index, _entryState, value], specifying the dtype:
+
+        data = np.array([
+            (1, True, 3.14),
+            (2, False, 2.71),
+            (3, True, 1.61),
+        ], dtype=dtype)
+
+    3. wrap this array in this class with optional metadata[dict]:
+
+        arr = MetadataArray(data, metadata={"description": "Molecule tracking array"})
+    """
 
     def __new__(cls, input_array, metadata=None):
         # Input array should be an array instance

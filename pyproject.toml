@@ -54,9 +54,10 @@ dependencies = [
     "wheel",
     "stochastic-arrow",
     "autograd",
-    "process-bigraph>=0.0.27",
     "typer>=0.15.2",
     "astor>=0.8.1",
+    "cryptography>=44.0.2",
+    "process-bigraph>=0.0.28",
 ]
 
 [project.scripts]
