@@ -63,3 +63,5 @@ trace-*
 #######################
 .venv/
 
+encryption.py
+.NOTES
