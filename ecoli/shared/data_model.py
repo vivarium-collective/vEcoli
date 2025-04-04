@@ -4,7 +4,7 @@ import pickle
 
 
 @dataclass
-class Base:
+class BaseModel:
     @classmethod
     def hydrate(cls, p: bytes) -> dict:
         return pickle.loads(p)
@@ -27,13 +27,13 @@ class Base:
 
 
 @dataclass
-class VivariumDocument(Base):
+class VivariumDocument(BaseModel):
     state: dict[str, Any]
     composition: str
 
 
 @dataclass
-class IntervalResult(Base):
+class IntervalResult(BaseModel):
     def __init__(self, **port_data):
         for port_name, port_value in port_data.items():
             setattr(self, port_name, port_value)
@@ -46,3 +46,9 @@ class IntervalResult(Base):
     def ports(self):
         return self.get_attrs()
 
+
+@dataclass
+class SimulationResult(BaseModel):
+    simulation_id: str
+    timestamp: str
+    data: list[IntervalResult]

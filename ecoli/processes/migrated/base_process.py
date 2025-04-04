@@ -19,12 +19,12 @@ simulation.
 
 import numpy as np
 from stochastic_arrow import StochasticSystem
+from process_bigraph import Process, ProcessTypes
 
-from ecoli.library.schema import bulk_name_to_idx, counts  # these are now registered types -> listener_schema, numpy_schema
-from ecoli.processes.migrated.partition import LinkedProcess
+from ecoli.library.schema import numpy_schema, bulk_name_to_idx, counts, listener_schema
 
 
-class Complexation(LinkedProcess):
+class Complexation(Process):
     """Complexation Process"""
 
     config_schema = {
@@ -51,7 +51,7 @@ class Complexation(LinkedProcess):
         self.complex_ids = self.config["complex_ids"]
 
         self.randomState = np.random.RandomState(seed=self.config["seed"])
-        self.seed = self.randomState.randint(2**31)
+        self.seed = self.randomState.randint(2 ** 31)
         self.system = StochasticSystem(self.stoichiometry, random_seed=self.seed)
 
         # TODO: create a base class that has this and inherit it for this class
