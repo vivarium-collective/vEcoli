@@ -76,7 +76,7 @@ class Complexation(Process):
         #     ],
         #     dtype=[("id", "U40"), ("count", int)],
 
-        ...so a list[{id: , count: }]
+        ...so a list[tuple[id(str), count(int)]]
         """
         return {
             "bulk": "list[bulk_type]",
@@ -86,19 +86,24 @@ class Complexation(Process):
     def outputs(self):
         return {
             "bulk": "list[bulk_type]",
-            "listeners": "tree[complexation_listener_type]"  # {"complexation_listener": "complexation_listener_type",}
+            "listeners": "tree[complexation_listener_type]"
         }
 
     def requester_inputs(self):
+        """Input port schemas needing to be available to the Requester."""
         return self.inputs()
 
     def requester_outputs(self):
-        # TODO: these need to match that returned by calculate_request, right?
+        """Output port schemas needing to be available to the Requester."""
+        # these need to match that returned by calculate_request, right?
         return {
             "bulk": "list[bulk_type]"
         }
 
     def calculate_request(self, state):
+        """This is just like self.update, but formatted for a Step, as this is the method
+        called by the Requester.
+        """
         timestep = state["timestep"]
         bulk_state: np.ndarray[tuple] = np.array(state["bulk"], dtype=self.bulk_dtype)
 
