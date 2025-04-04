@@ -56,7 +56,6 @@ dependencies = [
     "autograd",
     "typer>=0.15.2",
     "astor>=0.8.1",
-    "cryptography>=44.0.2",
     "process-bigraph>=0.0.28",
 ]
 
@@ -75,6 +74,9 @@ docs = [
     "Sphinx",
     "sphinx-rtd-theme",
     "nbsphinx"
+]
+shared = [
+    "cryptography>=44.0.2",
 ]
 
 [tool.setuptools]
