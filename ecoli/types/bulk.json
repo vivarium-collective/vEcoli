@@ -3,5 +3,8 @@
     "_inherit": "tuple",
     "_type": "bulk_type",
     "_divide": "bulk_binomial"
+  },
+  "bulk": {
+    "_type": "list[bulk_type]"
   }
 }

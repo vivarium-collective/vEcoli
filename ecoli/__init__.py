@@ -138,21 +138,19 @@ def get_type_filepaths(dirpath: str) -> set[str]:
     return paths
 
 
-def register_types(core: ProcessTypes, types_dir: str) -> None:
+def register_types(core: ProcessTypes, types_dir: str, verbose: bool = True) -> None:
     types_to_register: set[str] = get_type_filepaths(types_dir)
     for spec_path in types_to_register:
         try:
             with open(spec_path, "r") as f:
                 spec: dict = json.load(f)
-
-            assert (
-                len(spec.keys()) == 1
-            ), f"You can only define one type per file.\nPlease check the following file: {spec_path}"
-            type_id: str = list(spec.keys()).pop()
-            core.register_types({type_id: spec[type_id]})
-            logger.info(f"Type ID: {type_id} has been registered.\n")
+            for type_id, type_spec in spec.items():
+                core.register_types({type_id: type_spec})
+                if verbose:
+                    logger.info(f"Type ID: {type_id} has been registered.\n")
         except AssertionError as e:
-            logger.error(str(e))
+            if verbose:
+                logger.error(str(e))
             continue
 
 
