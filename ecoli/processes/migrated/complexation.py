@@ -22,6 +22,7 @@ from stochastic_arrow import StochasticSystem
 
 from ecoli.library.schema import bulk_name_to_idx, counts  # these are now registered types -> listener_schema, numpy_schema
 from ecoli.processes.migrated.partition import LinkedProcess
+from ecoli.shared.dtypes import BULK_DTYPE, format_bulk_state
 
 
 class Complexation(LinkedProcess):
@@ -54,12 +55,6 @@ class Complexation(LinkedProcess):
         self.seed = self.randomState.randint(2**31)
         self.system = StochasticSystem(self.stoichiometry, random_seed=self.seed)
 
-        # TODO: create a base class that has this and inherit it for this class
-        self.bulk_dtype = np.dtype([
-            ("id", "<U100"),
-            ("count", "<f8")
-        ])
-
     def initial_state(self):
         return {
             "bulk": [()],
@@ -79,7 +74,7 @@ class Complexation(LinkedProcess):
         ...so a list[tuple[id(str), count(int)]]
         """
         return {
-            "bulk": "list[bulk_type]",
+            "bulk": "list[bulk_type]",  # <-- NOTE: this is to replace instances of numpy_schema...can also be declared as "bulk"
             "timestep": "float",
         }
 
@@ -105,7 +100,7 @@ class Complexation(LinkedProcess):
         called by the Requester.
         """
         timestep = state["timestep"]
-        bulk_state: np.ndarray[tuple] = np.array(state["bulk"], dtype=self.bulk_dtype)
+        bulk_state = format_bulk_state(state)
 
         if self.molecule_idx is None:
             self.molecule_idx = bulk_name_to_idx(  # TODO: can we make this non-brittle?
@@ -126,7 +121,7 @@ class Complexation(LinkedProcess):
 
     def update(self, state, interval):
         timestep = state["timestep"]
-        bulk_state = np.array(state["bulk"], dtype=self.bulk_dtype)
+        bulk_state = format_bulk_state(state)
         substrate = counts(bulk_state, self.molecule_idx).flatten().astype(np.int64)
 
         result = self.system.evolve(timestep, substrate, self.rates)

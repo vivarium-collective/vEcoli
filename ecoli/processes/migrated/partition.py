@@ -18,6 +18,8 @@ import abc
 import numpy as np
 from process_bigraph import Process, Step
 
+from ecoli.shared.dtypes import BULK_DTYPE
+
 
 class Requester(Step):
     config_schema = {}
@@ -55,11 +57,7 @@ class LinkedProcess(Process):
 
     def __init__(self, config=None, core=None):
         super().__init__(config, core)
-
-        self.bulk_dtype = np.dtype([
-            ("id", "<U100"),
-            ("count", "<f8")
-        ])
+        self.bulk_dtype = BULK_DTYPE
 
     def initial_state(self):
         return {
