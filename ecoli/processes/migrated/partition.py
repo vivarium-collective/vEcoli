@@ -18,7 +18,7 @@ import abc
 import numpy as np
 from process_bigraph import Process, Step
 
-from ecoli.shared.dtypes import BULK_DTYPE
+from ecoli.shared.dtypes import bulk_dtype
 
 
 class Requester(Step):
@@ -57,7 +57,7 @@ class PartitionedProcess(Process):
 
     def __init__(self, config=None, core=None):
         super().__init__(config, core)
-        self.bulk_dtype = BULK_DTYPE
+        self.bulk_dtype = bulk_dtype
 
     def initial_state(self):
         return {
