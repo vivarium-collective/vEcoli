@@ -1,5 +1,5 @@
 TODO:
- - [] Use breakpoints to decipher bulk type schema
+ - [x] Use breakpoints to decipher bulk type schema
  - [x] Create MetadataArray type and register (replace in any uses)
  - [] Create new repo/org
  - [] Reference dividers for types in ecoli.library.schema
