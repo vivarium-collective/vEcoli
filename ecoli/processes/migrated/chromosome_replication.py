@@ -15,6 +15,8 @@ replication forks terminate once they reach the end of their template strand
 and the chromosome immediately decatenates forming two separate chromosome
 molecules.
 """
+from types import FunctionType
+from typing import Any
 
 import numpy as np
 
@@ -25,6 +27,7 @@ from ecoli.library.schema import (
     bulk_name_to_idx,
     listener_schema,
 )
+from ecoli.shared.dtypes import format_active_replisomes_state
 
 from wholecell.utils import units
 from vivarium.library.units import Quantity
@@ -59,24 +62,27 @@ class ChromosomeReplication(PartitionedProcess):
             "_default": "float"
         },
         "criticalInitiationMass": {
-            "_type": 975 * units.fg,
-            "_default": "float"
+            "_type": "float",
+            "_default": 975
         },
         "nutrientToDoublingTime": "tree",
         "replichore_lengths": "list",
         "sequences": "list",
-        "polymerized_dntp_weights": [],
+        "polymerized_dntp_weights": "list",
         "replication_coordinate": "list",
         "D_period": "list",
         "replisome_protein_mass": {
             "_type": "float",
             "_default": 0.0
         },
-        "no_child_place_holder": -1,
-        "basal_elongation_rate": 967,
-        "make_elongation_rates": (
-
-        ),
+        "no_child_place_holder": {
+            "_type": "integer",
+            "_default": -1
+        },
+        "basal_elongation_rate": {
+            "_type": "float",
+            "_default": 967.0,
+        },
         "mechanistic_replisome": {
             "_type": "boolean",
             "_default": True
@@ -151,52 +157,26 @@ class ChromosomeReplication(PartitionedProcess):
         return {
             # bulk molecules
             "bulk": "bulk",
-            "listeners": {
-                "mass": listener_schema({"cell_mass": 0.0}),
-                "replication_data": listener_schema(
-                    {"critical_initiation_mass": 0.0, "critical_mass_per_oriC": 0.0}
-                ),
-            },
-            "environment": {
-                "media_id": {"_default": "", "_updater": "set"},
-            },
-            "active_replisomes": numpy_schema(
-                "active_replisomes", emit=self.parameters["emit_unique"]
-            ),
-            "oriCs": numpy_schema("oriCs", emit=self.parameters["emit_unique"]),
-            "chromosome_domains": numpy_schema(
-                "chromosome_domains", emit=self.parameters["emit_unique"]
-            ),
-            "full_chromosomes": numpy_schema(
-                "full_chromosomes", emit=self.parameters["emit_unique"]
-            ),
-            "timestep": {"_default": self.parameters["time_step"]},
+            "listeners": "tree",
+            "environment": "tree",
+            "active_replisomes": "active_replisomes",
+            "oriCs": "oriCs",
+            "chromosome_domains": "chromosome_domains",
+            "full_chromosomes": "full_chromosomes",
+            "timestep": "float",
         }
 
     def outputs(self):
         return {
             # bulk molecules
-            "bulk": numpy_schema("bulk"),
-            "listeners": {
-                "mass": listener_schema({"cell_mass": 0.0}),
-                "replication_data": listener_schema(
-                    {"critical_initiation_mass": 0.0, "critical_mass_per_oriC": 0.0}
-                ),
-            },
-            "environment": {
-                "media_id": {"_default": "", "_updater": "set"},
-            },
-            "active_replisomes": numpy_schema(
-                "active_replisomes", emit=self.parameters["emit_unique"]
-            ),
-            "oriCs": numpy_schema("oriCs", emit=self.parameters["emit_unique"]),
-            "chromosome_domains": numpy_schema(
-                "chromosome_domains", emit=self.parameters["emit_unique"]
-            ),
-            "full_chromosomes": numpy_schema(
-                "full_chromosomes", emit=self.parameters["emit_unique"]
-            ),
-            "timestep": {"_default": self.parameters["time_step"]},
+            "bulk": "bulk",
+            "listeners": "tree",
+            "environment": "tree",
+            "active_replisomes": "active_replisomes",
+            "oriCs": "oriCs",
+            "chromosome_domains": "chromosome_domains",
+            "full_chromosomes": "full_chromosomes",
+            "timestep": "float",
         }
 
     def calculate_request(self, state):
@@ -240,20 +220,22 @@ class ChromosomeReplication(PartitionedProcess):
             requests["bulk"].append((self.replisome_trimers_idx, 6 * n_oriC))
             requests["bulk"].append((self.replisome_monomers_idx, 2 * n_oriC))
 
+        active_replisomes_state = format_active_replisomes_state(state)
+
         # If there are no active forks return
-        n_active_replisomes = state["active_replisomes"]["_entryState"].sum()
+        n_active_replisomes = active_replisomes_state["_entryState"].sum()
         if n_active_replisomes == 0:
             return requests
 
         # Get current locations of all replication forks
-        (fork_coordinates,) = attrs(state["active_replisomes"], ["coordinates"])
+        (fork_coordinates,) = attrs(active_replisomes_state, ["coordinates"])
         sequence_length = np.abs(np.repeat(fork_coordinates, 2))
 
         self.elongation_rates = self.make_elongation_rates(
             self.random_state,
             len(self.sequences),
             self.basal_elongation_rate,
-            state["timestep"],
+            state["timestep"]
         )
 
         sequences = buildSequences(
@@ -296,9 +278,11 @@ class ChromosomeReplication(PartitionedProcess):
             "listeners": {"replication_data": {}},
         }
 
+        active_replisomes_state = format_active_replisomes_state(state)
+
         # Module 1: Replication initiation
         # Get number of existing replisomes and oriCs
-        n_active_replisomes = state["active_replisomes"]["_entryState"].sum()
+        n_active_replisomes = active_replisomes_state["_entryState"].sum()
         n_oriC = state["oriCs"]["_entryState"].sum()
 
         # If there are no origins, return immediately
@@ -421,7 +405,7 @@ class ChromosomeReplication(PartitionedProcess):
             right_replichore,
             coordinates_replisome,
         ) = attrs(
-            state["active_replisomes"],
+            active_replisomes_state,
             ["domain_index", "right_replichore", "coordinates"],
         )
 
@@ -468,7 +452,7 @@ class ChromosomeReplication(PartitionedProcess):
         updated_coordinates[~right_replichore] = -updated_coordinates[~right_replichore]
 
         # Update attributes and submasses of replisomes
-        (current_dna_mass,) = attrs(state["active_replisomes"], ["massDiff_DNA"])
+        (current_dna_mass,) = attrs(active_replisomes_state, ["massDiff_DNA"])
         update["active_replisomes"].update(
             {
                 "set": {
@@ -559,7 +543,7 @@ class ChromosomeReplication(PartitionedProcess):
                 chromosome_add_update = {
                     "add": {
                         "domain_index": domain_index_new_full_chroms,
-                        "division_time": states["global_time"] + self.D_period,
+                        "division_time": state["global_time"] + self.D_period,
                         "has_triggered_division": False,
                     }
                 }
