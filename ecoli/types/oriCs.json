@@ -1,0 +1,9 @@
+{
+  "oriCs_type": {
+    "_inherit": "tuple",
+    "_type": "oriCs_type"
+  },
+  "oriCs": {
+    "_type": "list[oriCs_type]"
+  }
+}

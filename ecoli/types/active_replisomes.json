@@ -1,0 +1,10 @@
+{
+  "active_replisomes_type": {
+    "_inherit": "tuple",
+    "_type": "active_replisomes_type",
+    "_divide": "by_domain"
+  },
+  "active_replisomes": {
+    "_type": "list[active_replisomes_type]"
+  }
+}
