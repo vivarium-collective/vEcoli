@@ -128,9 +128,9 @@ class ChromosomeStructure(Step):
         },
         "emit_unique": {
             "_type": "boolean",
-            "_default": False
+            "_default": True
         },
-        "rna_ids": [],
+        "rna_ids": "list",
         "n_mature_rnas": {
             "_type": "integer",
             "_default": 0
@@ -146,53 +146,120 @@ class ChromosomeStructure(Step):
     }
 
     # Constructor
-    def __init__(self, parameters=None):
-        super().__init__(parameters)
-        self.rna_sequences = self.parameters["rna_sequences"]
-        self.protein_sequences = self.parameters["protein_sequences"]
-        self.n_TUs = self.parameters["n_TUs"]
-        self.n_TFs = self.parameters["n_TFs"]
-        self.rna_ids = self.parameters["rna_ids"]
-        self.n_amino_acids = self.parameters["n_amino_acids"]
-        self.n_fragment_bases = self.parameters["n_fragment_bases"]
-        replichore_lengths = self.parameters["replichore_lengths"]
+    def __init__(self, config=None, core=None):
+        super().__init__(config, core)
+
+        self.ppi_idx = None
+        self.water_idx = None
+        self.amino_acids_idx = None
+        self.ribosome_50S_subunit_idx = None
+        self.ribosome_30S_subunit_idx = None
+        self.active_tfs_idx = None
+        self.fragmentBasesIdx = None
+        self.mature_rna_idx = None
+        self.rna_sequences = self.config["rna_sequences"]
+        self.protein_sequences = self.config["protein_sequences"]
+        self.n_TUs = self.config["n_TUs"]
+        self.n_TFs = self.config["n_TFs"]
+        self.rna_ids = self.config["rna_ids"]
+        self.n_amino_acids = self.config["n_amino_acids"]
+        self.n_fragment_bases = self.config["n_fragment_bases"]
+        replichore_lengths = self.config["replichore_lengths"]
         self.min_coordinates = -replichore_lengths[1]
         self.max_coordinates = replichore_lengths[0]
-        self.relaxed_DNA_base_pairs_per_turn = self.parameters[
+        self.relaxed_DNA_base_pairs_per_turn = self.config[
             "relaxed_DNA_base_pairs_per_turn"
         ]
-        self.terC_index = self.parameters["terC_index"]
+        self.terC_index = self.config["terC_index"]
 
-        self.n_mature_rnas = self.parameters["n_mature_rnas"]
-        self.mature_rna_ids = self.parameters["mature_rna_ids"]
-        self.mature_rna_end_positions = self.parameters["mature_rna_end_positions"]
-        self.mature_rna_nt_counts = self.parameters["mature_rna_nt_counts"]
-        self.unprocessed_rna_index_mapping = self.parameters[
+        self.n_mature_rnas = self.config["n_mature_rnas"]
+        self.mature_rna_ids = self.config["mature_rna_ids"]
+        self.mature_rna_end_positions = self.config["mature_rna_end_positions"]
+        self.mature_rna_nt_counts = self.config["mature_rna_nt_counts"]
+        self.unprocessed_rna_index_mapping = self.config[
             "unprocessed_rna_index_mapping"
         ]
 
         # Load sim options
-        self.calculate_superhelical_densities = self.parameters[
+        self.calculate_superhelical_densities = self.config[
             "calculate_superhelical_densities"
         ]
 
         # Get placeholder value for chromosome domains without children
-        self.no_child_place_holder = self.parameters["no_child_place_holder"]
+        self.no_child_place_holder = self.config["no_child_place_holder"]
 
-        self.inactive_RNAPs = self.parameters["inactive_RNAPs"]
-        self.fragmentBases = self.parameters["fragmentBases"]
-        self.ppi = self.parameters["ppi"]
-        self.active_tfs = self.parameters["active_tfs"]
-        self.ribosome_30S_subunit = self.parameters["ribosome_30S_subunit"]
-        self.ribosome_50S_subunit = self.parameters["ribosome_50S_subunit"]
-        self.amino_acids = self.parameters["amino_acids"]
-        self.water = self.parameters["water"]
+        self.inactive_RNAPs = self.config["inactive_RNAPs"]
+        self.fragmentBases = self.config["fragmentBases"]
+        self.ppi = self.config["ppi"]
+        self.active_tfs = self.config["active_tfs"]
+        self.ribosome_30S_subunit = self.config["ribosome_30S_subunit"]
+        self.ribosome_50S_subunit = self.config["ribosome_50S_subunit"]
+        self.amino_acids = self.config["amino_acids"]
+        self.water = self.config["water"]
 
         self.inactive_RNAPs_idx = None
 
-        self.emit_unique = self.parameters.get("emit_unique", True)
+        self.emit_unique = self.config.get("emit_unique", True)
 
-    def ports_schema(self):
+    def inputs(self):
+        ports = {
+            "listeners": {
+                "rnap_data": listener_schema(
+                    {
+                        "n_total_collisions": 0,
+                        "n_headon_collisions": 0,
+                        "n_codirectional_collisions": 0,
+                        "headon_collision_coordinates": [],
+                        "codirectional_collision_coordinates": [],
+                        "n_removed_ribosomes": 0,
+                        "incomplete_transcription_events": (
+                            np.zeros(self.n_TUs, np.int64),
+                            self.rna_ids,
+                        ),
+                        "n_empty_fork_collisions": 0,
+                        "empty_fork_collision_coordinates": [],
+                    }
+                )
+            },
+            "bulk": numpy_schema("bulk"),
+            # Unique molecules
+            "active_replisomes": numpy_schema(
+                "active_replisomes", emit=self.parameters["emit_unique"]
+            ),
+            "oriCs": numpy_schema("oriCs", emit=self.parameters["emit_unique"]),
+            "chromosome_domains": numpy_schema(
+                "chromosome_domains", emit=self.parameters["emit_unique"]
+            ),
+            "active_RNAPs": numpy_schema(
+                "active_RNAPs", emit=self.parameters["emit_unique"]
+            ),
+            "RNAs": numpy_schema("RNAs", emit=self.parameters["emit_unique"]),
+            "active_ribosome": numpy_schema(
+                "active_ribosome", emit=self.parameters["emit_unique"]
+            ),
+            "full_chromosomes": numpy_schema(
+                "full_chromosomes", emit=self.parameters["emit_unique"]
+            ),
+            "promoters": numpy_schema("promoters", emit=self.parameters["emit_unique"]),
+            "DnaA_boxes": numpy_schema(
+                "DnaA_boxes", emit=self.parameters["emit_unique"]
+            ),
+            "chromosomal_segments": numpy_schema(
+                "chromosomal_segments", emit=self.parameters["emit_unique"]
+            ),
+            "genes": numpy_schema("genes", emit=self.parameters["emit_unique"]),
+            "global_time": {"_default": 0.0},
+            "timestep": {"_default": self.parameters["time_step"]},
+            "next_update_time": {
+                "_default": self.parameters["time_step"],
+                "_updater": "set",
+                "_divider": "set",
+            },
+        }
+
+        return ports
+
+    def outputs(self):
         ports = {
             "listeners": {
                 "rnap_data": listener_schema(
@@ -266,7 +333,7 @@ class ChromosomeStructure(Step):
             return True
         return False
 
-    def next_update(self, timestep, states):
+    def update(self, state):
         # At t=0, convert all strings to indices
         if self.inactive_RNAPs_idx is None:
             self.fragmentBasesIdx = bulk_name_to_idx(
