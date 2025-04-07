@@ -57,6 +57,7 @@ dependencies = [
     "typer>=0.15.2",
     "astor>=0.8.1",
     "process-bigraph>=0.0.28",
+    "bigraph-schema>=0.0.53",
 ]
 
 [project.scripts]

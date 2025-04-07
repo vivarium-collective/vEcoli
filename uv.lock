@@ -258,7 +258,7 @@ wheels = [
 
 [[package]]
 name = "bigraph-schema"
-version = "0.0.51"
+version = "0.0.53"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "fire" },
@@ -267,7 +267,7 @@ dependencies = [
     { name = "pint" },
     { name = "pytest" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9e/15/78bb7ea7f268baeabb292d3d94b22243b68d557f502eb74f210452da9a8c/bigraph-schema-0.0.51.tar.gz", hash = "sha256:98267abfda26a036abfcc0c94fc41dfc13f9a66ba3f45cc12af2637511c58acc", size = 47891 }
+sdist = { url = "https://files.pythonhosted.org/packages/7c/f8/b8641cf09d6d597c2870616ac70b84b99b040b4f46e98bfa0218bc400f24/bigraph-schema-0.0.53.tar.gz", hash = "sha256:f775b17a09f965ce15efc8dc86e6346be2eebb6b9b4e79885efcb2918f6a5eca", size = 281236 }
 
 [[package]]
 name = "biopython"
@@ -3669,6 +3669,7 @@ dependencies = [
     { name = "altair" },
     { name = "astor" },
     { name = "autograd" },
+    { name = "bigraph-schema" },
     { name = "biopython" },
     { name = "cvxpy" },
     { name = "cython" },
@@ -3733,6 +3734,7 @@ requires-dist = [
     { name = "altair" },
     { name = "astor", specifier = ">=0.8.1" },
     { name = "autograd" },
+    { name = "bigraph-schema", specifier = ">=0.0.53" },
     { name = "biopython" },
     { name = "cryptography", marker = "extra == 'shared'", specifier = ">=44.0.2" },
     { name = "cvxpy" },
