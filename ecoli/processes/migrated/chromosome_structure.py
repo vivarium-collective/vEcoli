@@ -1,6 +1,7 @@
 """
+TODO: Finish the migration process here!
 ====================
-Chromosome Structure
+MIGRATED: Chromosome Structure
 ====================
 
 - Resolve collisions between molecules and replication forks on the chromosome.
