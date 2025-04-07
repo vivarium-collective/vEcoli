@@ -1,0 +1,9 @@
+{
+  "promoters_type": {
+    "_inherit": "tuple",
+    "_type": "promoters_type",
+  },
+  "promoters": {
+    "_type": "list[promoters_type]"
+  }
+}
