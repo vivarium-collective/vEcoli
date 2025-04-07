@@ -42,8 +42,8 @@ class Requester(Step):
 # - handle protein complex dissociation
 
 
-class LinkedProcess(Process):
-    """Linked Process which acts as a base type which should be inherited by any process that needs to
+class PartitionedProcess(Process):
+    """Partitioned Process which acts as a base type which should be inherited by any process that needs to
     be linked with a Requester. This replaces the previous PartitionedProcess. These processes are
     distinctly marked by their interaction/dependence on the "bulk" type.
     """
@@ -70,25 +70,26 @@ class LinkedProcess(Process):
 
     @abc.abstractmethod
     def outputs(self):
-        return {
-            "bulk": "list[bulk_type]",
-        }
-
-    @abc.abstractmethod
-    def requester_inputs(self):
-        """Input port schemas needing to be available to the Requester."""
         pass
 
-    @abc.abstractmethod
+    def requester_inputs(self):
+        """Input port schemas needing to be available to the Requester."""
+        return self.inputs()
+
     def requester_outputs(self):
         """Output port schemas needing to be available to the Requester."""
         # these need to match that returned by calculate_request, right?
-        pass
+        return {
+            "bulk": "list[bulk_type]"
+        }
 
     @abc.abstractmethod
     def calculate_request(self, state):
         """This is just like self.update, but formatted for a Step, as this is the method
         called by the Requester.
+
+        :param state: The schema of this state should match `self.requester_inputs()`.
+        :returns: `dict` whose schema should match `self.requester_outputs()`.
         """
         pass
 
