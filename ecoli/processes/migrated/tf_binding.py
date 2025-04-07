@@ -178,7 +178,7 @@ class TfBinding(Step):
             "timestep": "float",
         }
 
-    def calculate_request(self, state):
+    def update_condition(self, state):
         if state["next_update_time"] <= state["global_time"]:
             if state["next_update_time"] < state["global_time"]:
                 warnings.warn(
