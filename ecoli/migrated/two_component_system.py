@@ -11,12 +11,11 @@ and back in response to counts of ligand stimulants.
 
 import numpy as np
 
-from ecoli.library.schema import numpy_schema, bulk_name_to_idx, counts
-from ecoli.shared.dtypes import format_bulk_state, format_state
+from ecoli.library.schema import bulk_name_to_idx, counts
+from ecoli.shared.dtypes import format_bulk_state
 
 from wholecell.utils import units
-from ecoli.processes.registries import topology_registry
-from ecoli.processes.migrated.partition import PartitionedProcess
+from ecoli.migrated.partition import PartitionedProcess
 
 
 # Register default topology for this process, associating it with process name

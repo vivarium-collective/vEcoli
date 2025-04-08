@@ -15,17 +15,13 @@ replication forks terminate once they reach the end of their template strand
 and the chromosome immediately decatenates forming two separate chromosome
 molecules.
 """
-from types import FunctionType
-from typing import Any
 
 import numpy as np
 
 from ecoli.library.schema import (
-    numpy_schema,
     counts,
     attrs,
     bulk_name_to_idx,
-    listener_schema,
 )
 from ecoli.shared.dtypes import format_active_replisomes_state
 
@@ -33,8 +29,7 @@ from wholecell.utils import units
 from vivarium.library.units import Quantity
 from wholecell.utils.polymerize import buildSequences, polymerize, computeMassIncrease
 
-from ecoli.processes.registries import topology_registry
-from ecoli.processes.migrated.partition import PartitionedProcess
+from ecoli.migrated.partition import PartitionedProcess
 
 
 # TODO: do we need to keep these topology and name definitions? (they exist in every module)

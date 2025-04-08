@@ -21,7 +21,7 @@ import numpy as np
 from stochastic_arrow import StochasticSystem
 
 from ecoli.library.schema import bulk_name_to_idx, counts  # these are now registered types -> listener_schema, numpy_schema
-from ecoli.processes.migrated.partition import PartitionedProcess
+from ecoli.migrated.partition import PartitionedProcess
 from ecoli.shared.dtypes import format_bulk_state
 
 
