@@ -12,6 +12,7 @@ and back in response to counts of ligand stimulants.
 import numpy as np
 
 from ecoli.library.schema import numpy_schema, bulk_name_to_idx, counts
+from ecoli.shared.dtypes import format_bulk_state, format_state
 
 from wholecell.utils import units
 from ecoli.processes.registries import topology_registry
@@ -116,8 +117,9 @@ class TwoComponentSystem(PartitionedProcess):
         requests = {"bulk": [(self.molecule_idx, self.molecules_required.astype(int))]}
         return requests
 
-    def update(self, timestep, states):
-        moleculeCounts = counts(states["bulk"], self.molecule_idx)
+    def update(self, state, interval):
+        bulk_state = format_bulk_state(state)
+        moleculeCounts = counts(bulk_state, self.molecule_idx)
         # Check if any molecules were allocated fewer counts than requested
         if (self.molecules_required > moleculeCounts).any():
             _, self.all_molecule_changes = self.moleculesToNextTimeStep(
