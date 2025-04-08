@@ -23,7 +23,7 @@
 - [] rna_degradation.py
 - [X] rna_interference.py
 - [X] rna_maturation.py
-- [] shape.py
+- [X] shape.py
 - [X] tf_binding.py
 - [X] tf_unbinding.py
 - [] transcript_elongation.py
