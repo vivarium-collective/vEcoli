@@ -1,9 +1,9 @@
 """
 ================
-RNA Interference
+MIGRATED: RNA Interference
 ================
 Treats sRNA-mRNA binding as complexation events that create duplexes and free
-bound ribosomes. Decreases ompF translation during micF overexpression.
+bound ribosomes. Decreases ompF translation during micF over-expression.
 """
 
 import numpy as np
@@ -67,13 +67,18 @@ class RnaInterference(Process):
 
         self.srna_idx = None
 
-    def ports_schema(self):
+    def inputs(self):
         return {
-            "bulk": numpy_schema("bulk"),
-            "active_ribosome": numpy_schema(
-                "active_ribosome", emit=self.parameters["emit_unique"]
-            ),
-            "RNAs": numpy_schema("RNAs", emit=self.parameters["emit_unique"]),
+            "bulk": "bulk",  # numpy_schema("bulk"),
+            "active_ribosome": "list[tuple]",  # numpy_schema("active_ribosome", emit=self.parameters["emit_unique"]),
+            "RNAs": "list[tuple]"  # numpy_schema("RNAs", emit=self.parameters["emit_unique"]),
+        }
+
+    def outputs(self):
+        return {
+            "bulk": "bulk",  # numpy_schema("bulk"),
+            "active_ribosome": "list[tuple]",  # numpy_schema("active_ribosome", emit=self.parameters["emit_unique"]),
+            "RNAs": "list[tuple]"  # numpy_schema("RNAs", emit=self.parameters["emit_unique"]),
         }
 
     def update(self, state, interval):
@@ -93,19 +98,19 @@ class RnaInterference(Process):
         }
 
         TU_index, can_translate, is_full_transcript, rna_indexes = attrs(
-            states["RNAs"],
+            state["RNAs"],
             ["TU_index", "can_translate", "is_full_transcript", "unique_index"],
         )
 
         mRNA_index, ribosome_indexes = attrs(
-            states["active_ribosome"], ["mRNA_index", "unique_index"]
+            state["active_ribosome"], ["mRNA_index", "unique_index"]
         )
 
         for srna_idx, mrna_index, binding_prob, duplex_idx in zip(
             self.srna_idx, self.target_tu_ids, self.binding_probs, self.duplex_idx
         ):
             # Get count of complete sRNAs
-            srna_count = counts(states["bulk"], srna_idx)
+            srna_count = counts(bulk_state, srna_idx)
             if srna_count == 0:
                 continue
 
@@ -117,13 +122,16 @@ class RnaInterference(Process):
                 continue
 
             # Each sRNA has probability binding_prob of binding a target mRNA
-            n_duplexed = np.min(
-                [self.random_state.binomial(srna_count, binding_prob), mrna_mask.sum()]
-            )
+            n_duplexed = np.min([
+                self.random_state.binomial(srna_count, binding_prob),
+                mrna_mask.sum()
+            ]).tolist()
 
             # Choose n_duplexed mRNAs and sRNAs randomly to delete
             mrna_to_delete = self.random_state.choice(
-                size=n_duplexed, a=np.nonzero(mrna_mask)[0], replace=False
+                size=n_duplexed,
+                a=np.nonzero(mrna_mask)[0],
+                replace=False
             ).tolist()
             update["RNAs"]["delete"] += list(mrna_to_delete)
             update["bulk"].append((srna_idx, -n_duplexed))
@@ -260,6 +268,3 @@ def main():
     data, config = test_rna_interference(return_data=True)
     print(data)
 
-
-if __name__ == "__main__":
-    main()
