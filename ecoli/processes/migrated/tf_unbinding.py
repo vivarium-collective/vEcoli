@@ -1,5 +1,5 @@
 """
-TfUnbinding
+MIGRATED: TfUnbinding
 Unbind transcription factors from DNA to allow signaling processes before
 binding back to DNA.
 """
@@ -9,7 +9,7 @@ import warnings
 
 from process_bigraph import Step
 
-from ecoli.processes.registries import topology_registry
+# from ecoli.processes.registries import topology_registry
 from ecoli.library.schema import bulk_name_to_idx, attrs, numpy_schema
 from ecoli.shared.dtypes import format_bulk_state
 
@@ -59,7 +59,7 @@ class TfUnbinding(Step):
         return {
             "bulk": "bulk",
             "promoters": "tree",
-            "global_time": "global_time",
+            "global_time": "float",
             "timestep": "float",
             "next_update_time": "float"
         }
@@ -68,7 +68,7 @@ class TfUnbinding(Step):
         return {
             "bulk": "bulk",
             "promoters": "tree",
-            "global_time": "global_time",
+            "global_time": "float",
             "timestep": "float",
             "next_update_time": "float"
         }
@@ -89,7 +89,7 @@ class TfUnbinding(Step):
             return True
         return False
 
-    def next_update(self, state, interval):
+    def update(self, state):
         bulk_state = format_bulk_state(state)
         # At t=0, convert all strings to indices
         if self.active_tf_idx is None:
