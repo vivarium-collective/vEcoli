@@ -32,14 +32,8 @@ class Equilibrium(PartitionedProcess):
             "_type": "boolean",
             "_default": False
         },
-        "n_avogadro": {
-            "_type": "float",
-            "_default": 0.0
-        },
-        "cell_density": {
-            "_type": "float",
-            "_default": 0.0
-        },
+        "n_avogadro": "float",
+        "cell_density": "float",
         "stoichMatrix": "list",
         "moleculeNames": "list",
         "seed": "integer",

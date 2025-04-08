@@ -29,7 +29,7 @@ class MarkDPeriod(Step):
     def ports_schema(self):
         return {
             "full_chromosome": {},
-            "global_time": {"_default": 0.0},
+            "global_time": "float",
             "divide": {
                 "_default": False,
                 "_updater": "set",

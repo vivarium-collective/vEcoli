@@ -59,10 +59,7 @@ class TfBinding(Step):
         "active_to_bound": "tree",
         "active_to_inactive_tf": "tree",
         "bulk_molecule_ids": "list",
-        "seed": {
-            "_default": 0,
-            "_type": "integer"
-        },
+        "seed": "integer",
         "submass_to_idx": {
             "_type": "map[integer]",
             "_default": {

@@ -2,38 +2,39 @@ from process_bigraph import Process
 
 
 class Chemostat(Process):
-    defaults = {
+    config_schema = {
         # Map from variable names to the values (must support
         # subtraction) those variables should be held at.
-        "targets": {},
-        "delay": 0,
+        "targets": "tree",
+        "delay": "integer",
     }
-    name = "chemostat"
 
-    def __init__(self, parameters=None):
-        super().__init__(parameters)
-        self.seconds_to_wait = self.parameters["delay"]
+    def __init__(self, config=None, core=None):
+        super().__init__(config, core)
+        self.seconds_to_wait = self.config["delay"]
 
-    def ports_schema(self):
+    def inputs(self):
         schema = {
-            variable: {
-                "_default": target * 0,
-            }
-            for variable, target in self.parameters["targets"].items()
+            variable: "float"
+            for variable, target in self.config["targets"].items()
         }
         return schema
 
-    def next_update(self, timestep, state):
+    def outputs(self):
+        schema = {
+            variable: "float"
+            for variable, target in self.config["targets"].items()
+        }
+        return schema
+
+    def update(self, state, interval):
         if self.seconds_to_wait > 0:
-            self.seconds_to_wait -= timestep
+            self.seconds_to_wait -= interval
             return {}
 
-        targets = self.parameters["targets"]
+        targets = self.config["targets"]
         update = {
-            variable: {
-                "_value": targets[variable] - current,
-                "_updater": "accumulate",
-            }
+            variable: targets[variable] - current
             for variable, current in state.items()
         }
         return update

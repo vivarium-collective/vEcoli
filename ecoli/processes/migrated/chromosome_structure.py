@@ -123,19 +123,13 @@ class ChromosomeStructure(Step):
         },
         "amino_acids": "list",
         "water": "water",
-        "seed": {
-            "_type": "float",
-            "_default": 0
-        },
+        "seed": "integer",
         "emit_unique": {
             "_type": "boolean",
             "_default": True
         },
         "rna_ids": "list",
-        "n_mature_rnas": {
-            "_type": "integer",
-            "_default": 0
-        },
+        "n_mature_rnas": "integer",
         "mature_rna_ids": "list",
         "mature_rna_end_positions": "list",
         "mature_rna_nt_counts": "list",

@@ -71,10 +71,7 @@ class ChromosomeReplication(PartitionedProcess):
         "polymerized_dntp_weights": "list",
         "replication_coordinate": "list",
         "D_period": "list",
-        "replisome_protein_mass": {
-            "_type": "float",
-            "_default": 0.0
-        },
+        "replisome_protein_mass": "float",
         "no_child_place_holder": {
             "_type": "integer",
             "_default": -1
@@ -93,10 +90,7 @@ class ChromosomeReplication(PartitionedProcess):
         "dntps": "list",
         "ppi": "list",
         # random seed
-        "seed": {
-            "_type": "float",
-            "_default": 0.0
-        },
+        "seed": "integer",
         "emit_unique": {
             "_type": "boolean",
             "_default": False
