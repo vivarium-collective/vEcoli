@@ -54,10 +54,12 @@ dependencies = [
     "wheel",
     "stochastic-arrow",
     "autograd",
-    "typer>=0.15.2",
-    "astor>=0.8.1",
-    "process-bigraph>=0.0.28",
-    "bigraph-schema>=0.0.53",
+    # "typer>=0.15.2",
+    # "astor>=0.8.1",
+    "typer",
+    "astor",
+    "process-bigraph",
+    "vivarium-interface>=0.0.3",
 ]
 
 [project.scripts]
@@ -77,7 +79,7 @@ docs = [
     "nbsphinx"
 ]
 shared = [
-    "cryptography>=44.0.2",
+    "cryptography",
 ]
 
 [tool.setuptools]
