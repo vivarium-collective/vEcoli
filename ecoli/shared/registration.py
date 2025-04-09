@@ -32,7 +32,7 @@ class Schema:
 @dataclasses.dataclass
 class Type:
     id: str
-    schema: dict
+    schema: Schema
 
 
 @dataclasses.dataclass
