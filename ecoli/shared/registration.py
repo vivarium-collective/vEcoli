@@ -15,6 +15,27 @@ class Implementation:
 
 
 @dataclasses.dataclass
+class Schema:
+    _type: str
+    _default: Any
+    _apply: Optional[str] = None
+    _serialize: Optional[str] = None
+    _divide: Optional[str] = None
+    params: Optional[Dict[str, Any]] = None
+
+    def __post_init__(self):
+        if self.params is not None:
+            for k, v in self.params.items():
+                setattr(self, k, v)
+
+
+@dataclasses.dataclass
+class Type:
+    id: str
+    schema: dict
+
+
+@dataclasses.dataclass
 class ImplementationRegistry:
     id: str
     implementation: ProcessTypes
