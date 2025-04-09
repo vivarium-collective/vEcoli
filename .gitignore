@@ -66,3 +66,4 @@ trace-*
 encryption.py
 NOTES
 example.ipynb
+*.todo

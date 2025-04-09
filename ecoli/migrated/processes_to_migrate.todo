@@ -30,3 +30,8 @@
 - [] transcript_initiation.py
 - [X] two_component_system.py
 - [X] unique_update.py
+
+TODO:
+    - [] Add formalized registration at module init of processes
+    - [] Add formalized registration at module init of types
+    - [] Clean up registration module
