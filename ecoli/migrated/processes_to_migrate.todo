@@ -9,7 +9,7 @@
 - [X] concentrations_deriver.py
 - [] division_detector.py
 - [] engine_process.py
-- [] enzyme_kinetics.py
+- [X] enzyme_kinetics.py
 - [X] equilibrium.py
 - [X] global_clock.py
 - [] metabolism.py
