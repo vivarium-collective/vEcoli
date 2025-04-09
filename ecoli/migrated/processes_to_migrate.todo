@@ -11,7 +11,7 @@
 - [] engine_process.py
 - [] enzyme_kinetics.py
 - [X] equilibrium.py
-- [] global_clock.py
+- [X] global_clock.py
 - [] metabolism.py
 - [] metabolism_redux.py
 - [] metabolism_redux_classic.py
