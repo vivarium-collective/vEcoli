@@ -88,9 +88,9 @@ def numpy_schema(name: str) -> Dict[str, Any]:
             for unique molecules
 
     Returns:
-        Fully configured ports schema for molecules of type `name`
+        Fully configured and bigraph-schema-compliant ports schema for molecules of type `name`
     """
-    schema = {"_default": [], "_type": "bulk"}
+    schema = {"_default": [], "_type": "list[tuple]"}  # TODO: should this be "bulk" or "oriCs", etc instead (use registered type)?
     if name == "bulk":
         schema["_apply"] = bulk_numpy_updater
         # Only pull out counts to be serialized (save space and time)
