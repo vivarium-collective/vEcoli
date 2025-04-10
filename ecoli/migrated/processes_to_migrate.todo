@@ -35,3 +35,4 @@ TODO:
     - [] Add formalized registration at module init of processes
     - [] Add formalized registration at module init of types
     - [] Clean up registration module
+    - [] Review partitioned process vs. process/step implementations

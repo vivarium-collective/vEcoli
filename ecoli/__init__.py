@@ -148,9 +148,9 @@ def register_types(core: ProcessTypes, types_dir: str, verbose: bool = True) -> 
                 core.register_types({type_id: type_spec})
                 if verbose:
                     logger.info(f"Type ID: {type_id} has been registered.\n")
-        except AssertionError as e:
+        except:
             if verbose:
-                logger.error(str(e))
+                logger.error(f"{spec_path} cannot be registered.\n")
             continue
 
 
@@ -166,12 +166,14 @@ def deserialize_bytes(schema, encoded, core=None):
     return pickle.loads(encoded)
 
 
+VERBOSE_REGISTER = True
+
 # project core singleton
 ecoli_core = ProcessTypes()
 
 # register types
 types_dir: str = os.path.join(os.path.dirname(__file__), "types")
-register_types(ecoli_core, types_dir)
+register_types(ecoli_core, types_dir, VERBOSE_REGISTER)
 
 # register processes
 # TODO: register processes here (explicitly or implicitly via interface)
