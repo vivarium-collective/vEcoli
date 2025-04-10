@@ -126,10 +126,10 @@ def get_schema_type(value: Any) -> SchemaType:
     type_name = type(value).__name__
     if isinstance(value, np.ndarray):
         shape = str(value.shape)
-        _type = PORTS_MAPPER[str(value.dtype)]
+        _type = PORTS_MAPPER.get(str(value.dtype), 'any')
         return SchemaType(f"array[{_type}|{shape}]")
     else:
-        return SchemaType(PORTS_MAPPER[type_name])
+        return SchemaType(PORTS_MAPPER.get(type_name, 'any'))
 
 
 def translate_vivarium_types(defaults: dict) -> dict:

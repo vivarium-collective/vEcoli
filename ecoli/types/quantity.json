@@ -1,0 +1,9 @@
+{
+  "quantity": {
+    "_type": "quantity",
+    "_serialize": "serialize_quantity",
+    "_deserialize": "deserialize_quantity",
+    "_inherit": "float",
+    "_apply": "apply_quantity"
+  }
+}
