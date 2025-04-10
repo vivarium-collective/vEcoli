@@ -4,7 +4,7 @@ TODO: processes:
     - [X] bulk_timeline.py
     - [X] cell_division.py
     - [X] chemostat.py
-    - [] chromosome_replication.py
+    - [X] chromosome_replication.py
     - [X] chromosome_structure.py
     - [X] complexation.py
     - [X] concentrations_deriver.py

@@ -1,6 +1,12 @@
 import os
 import pickle
 import sys
+import warnings
+
+import unum
+
+# suppress \s errors TODO: fix this in offending modules
+warnings.filterwarnings("ignore", category=SyntaxWarning)
 
 # Improve performance and reproducibility
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -17,6 +23,8 @@ from vivarium.core.registry import (
     emitter_registry,
     serializer_registry,
 )
+from wholecell.utils import units
+from ecoli.library.units import Quantity
 
 from ecoli.library.parquet_emitter import ParquetEmitter
 from ecoli.library.schema import (
@@ -138,13 +146,18 @@ def get_type_filepaths(dirpath: str) -> set[str]:
     return paths
 
 
-def register_types(core: ProcessTypes, types_dir: str, verbose: bool = True) -> None:
+def register_types(core: ProcessTypes, types_dir: str, verbose: bool) -> None:
+    function_keys = ["_serialize", "_deserialize", "_fold", "_check", "_apply"]
     types_to_register: set[str] = get_type_filepaths(types_dir)
     for spec_path in types_to_register:
         try:
             with open(spec_path, "r") as f:
                 spec: dict = json.load(f)
             for type_id, type_spec in spec.items():
+                if isinstance(type_spec, dict):
+                    for key, spec_definition in type_spec.items():
+                        if key in function_keys:
+                            spec[type_id][key] = eval(spec_definition)
                 core.register_types({type_id: type_spec})
                 if verbose:
                     logger.info(f"Type ID: {type_id} has been registered.\n")
@@ -153,6 +166,8 @@ def register_types(core: ProcessTypes, types_dir: str, verbose: bool = True) -> 
                 logger.error(f"{spec_path} cannot be registered.\n")
             continue
 
+
+# -- bytes -- #
 
 def check_bytes(schema, state, core=None):
     return isinstance(state, bytes)
@@ -166,14 +181,42 @@ def deserialize_bytes(schema, encoded, core=None):
     return pickle.loads(encoded)
 
 
-VERBOSE_REGISTER = True
+# -- quantity -- #
+
+def deserialize_quantity(value, core=None):
+    return str(Quantity(value))
+
+
+def serialize_quantity(value, core=None):
+    return pickle.dumps(value.m)
+
+
+def apply_quantity(schema, current: Quantity, update: Quantity, core=None):
+    return current + update
+
+
+# -- unum -- #
+
+def check_unum(schema, state, core=None):
+    return isinstance(state, unum.Unum)
+
+
+def serialize_unum(schema, value: unum.Unum, core=None):
+    return str(value)
+
+
+def deserialize_unum(schema, state, core=None):
+    return unum.Unum(state)
+
+
+VERBOSE_REGISTER = os.getenv("VERBOSE_REGISTER", False)
 
 # project core singleton
 ecoli_core = ProcessTypes()
 
 # register types
 types_dir: str = os.path.join(os.path.dirname(__file__), "types")
-register_types(ecoli_core, types_dir, VERBOSE_REGISTER)
+register_types(ecoli_core, types_dir, bool(VERBOSE_REGISTER))
 
 # register processes
 # TODO: register processes here (explicitly or implicitly via interface)
