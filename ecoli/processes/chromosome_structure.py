@@ -11,14 +11,16 @@ Chromosome Structure
 import numpy as np
 import numpy.typing as npt
 import warnings
+from vivarium.core.process import Step
+from vivarium.core.composer import Composer
+from vivarium.core.engine import Engine
 
-from process_bigraph import Step
-
-from ecoli.migrated.global_clock import GlobalClock
-from ecoli.migrated.unique_update import UniqueUpdate
-from ecoli.shared.schemas import listener_schema, numpy_schema
+from ecoli.processes.global_clock import GlobalClock
+from ecoli.processes.unique_update import UniqueUpdate
 from ecoli.processes.registries import topology_registry
 from ecoli.library.schema import (
+    listener_schema,
+    numpy_schema,
     attrs,
     bulk_name_to_idx,
     get_free_indices,
@@ -26,202 +28,128 @@ from ecoli.library.schema import (
 from ecoli.library.json_state import get_state_from_file
 from wholecell.utils.polymerize import buildSequences
 
-
-# MIGRATION: we should save this as it will inform the inputs and outputs definitions within the composite document
-# TOPOLOGY = {
-#     "bulk": ("bulk",),
-#     "listeners": ("listeners",),
-#     "active_replisomes": (
-#         "unique",
-#         "active_replisome",
-#     ),
-#     "oriCs": (
-#         "unique",
-#         "oriC",
-#     ),
-#     "chromosome_domains": (
-#         "unique",
-#         "chromosome_domain",
-#     ),
-#     "active_RNAPs": ("unique", "active_RNAP"),
-#     "RNAs": ("unique", "RNA"),
-#     "active_ribosome": ("unique", "active_ribosome"),
-#     "full_chromosomes": (
-#         "unique",
-#         "full_chromosome",
-#     ),
-#     "promoters": ("unique", "promoter"),
-#     "DnaA_boxes": ("unique", "DnaA_box"),
-#     "genes": ("unique", "gene"),
-#     "chromosomal_segments": ("unique", "chromosomal_segment"),
-#     "global_time": ("global_time",),
-#     "timestep": ("timestep",),
-#     "next_update_time": ("next_update_time", "chromosome_structure"),
-# }
-# topology_registry.register(NAME, TOPOLOGY)
+# Register default topology for this process, associating it with process name
+NAME = "ecoli-chromosome-structure"
+TOPOLOGY = {
+    "bulk": ("bulk",),
+    "listeners": ("listeners",),
+    "active_replisomes": (
+        "unique",
+        "active_replisome",
+    ),
+    "oriCs": (
+        "unique",
+        "oriC",
+    ),
+    "chromosome_domains": (
+        "unique",
+        "chromosome_domain",
+    ),
+    "active_RNAPs": ("unique", "active_RNAP"),
+    "RNAs": ("unique", "RNA"),
+    "active_ribosome": ("unique", "active_ribosome"),
+    "full_chromosomes": (
+        "unique",
+        "full_chromosome",
+    ),
+    "promoters": ("unique", "promoter"),
+    "DnaA_boxes": ("unique", "DnaA_box"),
+    "genes": ("unique", "gene"),
+    "chromosomal_segments": ("unique", "chromosomal_segment"),
+    "global_time": ("global_time",),
+    "timestep": ("timestep",),
+    "next_update_time": ("next_update_time", "chromosome_structure"),
+}
+topology_registry.register(NAME, TOPOLOGY)
 
 
 class ChromosomeStructure(Step):
     """Chromosome Structure Process"""
-    config_schema = {
+
+    name = NAME
+    topology = TOPOLOGY
+    defaults = {
         # Load parameters
-        "rna_sequences": "list",
-        "protein_sequences": "list",
-        "n_TUs": {
-            "_default": 1,
-            "_type": "integer"
-        },
-        "n_TFs": {
-            "_default": 1,
-            "_type": "integer"
-        },
-        "n_amino_acids": {
-            "_default": 1,
-            "_type": "integer"
-        },
-        "n_fragment_bases": {
-            "_default": 1,
-            "_type": "integer"
-        },
-        "replichore_lengths": {
-            "_default": [0, 0],
-            "_type": "list[integer]"
-        },
-        "relaxed_DNA_base_pairs_per_turn": {
-            "_default": 1,
-            "_type": "integer"
-        },
-        "terC_index": {
-            "_type": "integer",
-            "_default": -1
-        },
-        "calculate_superhelical_densities": {"_default": False, "_type": "boolean"},
+        "rna_sequences": [],
+        "protein_sequences": [],
+        "n_TUs": 1,
+        "n_TFs": 1,
+        "n_amino_acids": 1,
+        "n_fragment_bases": 1,
+        "replichore_lengths": [0, 0],
+        "relaxed_DNA_base_pairs_per_turn": 1,
+        "terC_index": -1,
+        "calculate_superhelical_densities": False,
         # Get placeholder value for chromosome domains without children
-        "no_child_place_holder": {
-            "_type": "integer",
-            "_default": -1
-        },
+        "no_child_place_holder": -1,
         # Load bulk molecule views
-        "inactive_RNAPs": "list",
-        "fragmentBases": "list",
-        "ppi": {
-            "_type": "string",
-            "_default": "ppi"
-        },
-        "active_tfs": "list",
-        "ribosome_30S_subunit": {
-            "_type": "string",
-            "_default": "30S"
-        },
-        "ribosome_50S_subunit": {
-            "_type": "string",
-            "_default": "50S"
-        },
-        "amino_acids": "list",
-        "water": {
-            "_type": "string",
-            "_default": "water"
-        },
-        "seed": "integer",
-        "emit_unique": {"_type": "boolean", "_default": False},
-        "rna_ids": "list",
-        "n_mature_rnas": "integer",
-        "mature_rna_ids": "list",
-        "mature_rna_end_positions": "list",
-        "mature_rna_nt_counts": "list",
-        "unprocessed_rna_index_mapping": "map",
-        "time_step": {"_type": "float", "_default": 1.0},
+        "inactive_RNAPs": [],
+        "fragmentBases": [],
+        "ppi": "ppi",
+        "active_tfs": [],
+        "ribosome_30S_subunit": "30S",
+        "ribosome_50S_subunit": "50S",
+        "amino_acids": [],
+        "water": "water",
+        "seed": 0,
+        "emit_unique": False,
+        "rna_ids": [],
+        "n_mature_rnas": 0,
+        "mature_rna_ids": [],
+        "mature_rna_end_positions": [],
+        "mature_rna_nt_counts": [],
+        "unprocessed_rna_index_mapping": {},
+        "time_step": 1.0,
     }
 
     # Constructor
-    def __init__(self, config=None, core=None):
-        super().__init__(config, core)
-        self.rna_sequences = self.config["rna_sequences"]
-        self.protein_sequences = self.config["protein_sequences"]
-        self.n_TUs = self.config["n_TUs"]
-        self.n_TFs = self.config["n_TFs"]
-        self.rna_ids = self.config["rna_ids"]
-        self.n_amino_acids = self.config["n_amino_acids"]
-        self.n_fragment_bases = self.config["n_fragment_bases"]
-        replichore_lengths = self.config["replichore_lengths"]
+    def __init__(self, parameters=None):
+        super().__init__(parameters)
+        self.rna_sequences = self.parameters["rna_sequences"]
+        self.protein_sequences = self.parameters["protein_sequences"]
+        self.n_TUs = self.parameters["n_TUs"]
+        self.n_TFs = self.parameters["n_TFs"]
+        self.rna_ids = self.parameters["rna_ids"]
+        self.n_amino_acids = self.parameters["n_amino_acids"]
+        self.n_fragment_bases = self.parameters["n_fragment_bases"]
+        replichore_lengths = self.parameters["replichore_lengths"]
         self.min_coordinates = -replichore_lengths[1]
         self.max_coordinates = replichore_lengths[0]
-        self.relaxed_DNA_base_pairs_per_turn = self.config[
+        self.relaxed_DNA_base_pairs_per_turn = self.parameters[
             "relaxed_DNA_base_pairs_per_turn"
         ]
-        self.terC_index = self.config["terC_index"]
+        self.terC_index = self.parameters["terC_index"]
 
-        self.n_mature_rnas = self.config["n_mature_rnas"]
-        self.mature_rna_ids = self.config["mature_rna_ids"]
-        self.mature_rna_end_positions = self.config["mature_rna_end_positions"]
-        self.mature_rna_nt_counts = self.config["mature_rna_nt_counts"]
-        self.unprocessed_rna_index_mapping = self.config[
+        self.n_mature_rnas = self.parameters["n_mature_rnas"]
+        self.mature_rna_ids = self.parameters["mature_rna_ids"]
+        self.mature_rna_end_positions = self.parameters["mature_rna_end_positions"]
+        self.mature_rna_nt_counts = self.parameters["mature_rna_nt_counts"]
+        self.unprocessed_rna_index_mapping = self.parameters[
             "unprocessed_rna_index_mapping"
         ]
 
         # Load sim options
-        self.calculate_superhelical_densities = self.config[
+        self.calculate_superhelical_densities = self.parameters[
             "calculate_superhelical_densities"
         ]
 
         # Get placeholder value for chromosome domains without children
-        self.no_child_place_holder = self.config["no_child_place_holder"]
+        self.no_child_place_holder = self.parameters["no_child_place_holder"]
 
-        self.inactive_RNAPs = self.config["inactive_RNAPs"]
-        self.fragmentBases = self.config["fragmentBases"]
-        self.ppi = self.config["ppi"]
-        self.active_tfs = self.config["active_tfs"]
-        self.ribosome_30S_subunit = self.config["ribosome_30S_subunit"]
-        self.ribosome_50S_subunit = self.config["ribosome_50S_subunit"]
-        self.amino_acids = self.config["amino_acids"]
-        self.water = self.config["water"]
+        self.inactive_RNAPs = self.parameters["inactive_RNAPs"]
+        self.fragmentBases = self.parameters["fragmentBases"]
+        self.ppi = self.parameters["ppi"]
+        self.active_tfs = self.parameters["active_tfs"]
+        self.ribosome_30S_subunit = self.parameters["ribosome_30S_subunit"]
+        self.ribosome_50S_subunit = self.parameters["ribosome_50S_subunit"]
+        self.amino_acids = self.parameters["amino_acids"]
+        self.water = self.parameters["water"]
 
         self.inactive_RNAPs_idx = None
 
-        self.emit_unique = self.config.get("emit_unique", True)
+        self.emit_unique = self.parameters.get("emit_unique", True)
 
-    def inputs(self):
-        # TODO: I've defined these as closely to the original definitions as possible, with schema funcs customized for process bigraph
-        ports = {
-            "listeners": {
-                "rnap_data": listener_schema(
-                    {
-                        "n_total_collisions": 0,
-                        "n_headon_collisions": 0,
-                        "n_codirectional_collisions": 0,
-                        "headon_collision_coordinates": [],
-                        "codirectional_collision_coordinates": [],
-                        "n_removed_ribosomes": 0,
-                        "incomplete_transcription_events": (
-                            np.zeros(self.n_TUs, np.int64),
-                            self.rna_ids,
-                        ),
-                        "n_empty_fork_collisions": 0,
-                        "empty_fork_collision_coordinates": [],
-                    }
-                )
-            },
-            "bulk": numpy_schema("bulk"),
-            # Unique molecules
-            "active_replisomes": numpy_schema("active_replisomes"),
-            "oriCs": numpy_schema("oriCs"),
-            "chromosome_domains": numpy_schema("chromosome_domains"),
-            "active_RNAPs": numpy_schema("active_RNAPs"),
-            "RNAs": numpy_schema("RNAs"),
-            "active_ribosome": numpy_schema("active_ribosome"),
-            "full_chromosomes": numpy_schema("full_chromosomes"),
-            "promoters": numpy_schema("promoters"),
-            "DnaA_boxes": numpy_schema("DnaA_boxes"),
-            "chromosomal_segments": numpy_schema("chromosomal_segments"),
-            "genes": numpy_schema("genes"),
-            "global_time": "float",
-            "timestep": "float",
-            "next_update_time": "float"
-        }
-
-        return ports
-
-    def outputs(self):
+    def ports_schema(self):
         ports = {
             "listeners": {
                 "rnap_data": listener_schema(
