@@ -17,19 +17,19 @@ molecules.
 """
 
 import numpy as np
+from vivarium.library.units import Quantity
 
+from wholecell.utils import units
+from wholecell.utils.polymerize import buildSequences, polymerize, computeMassIncrease
 from ecoli.library.schema import (
     counts,
     attrs,
     bulk_name_to_idx,
 )
-from ecoli.shared.dtypes import format_active_replisomes_state
-
-from wholecell.utils import units
-from vivarium.library.units import Quantity
-from wholecell.utils.polymerize import buildSequences, polymerize, computeMassIncrease
 
 from ecoli.migrated.partition import PartitionedProcess
+from ecoli.shared.dtypes import format_active_replisomes_state
+from ecoli.shared.schemas import listener_schema, numpy_schema
 
 
 # TODO: do we need to keep these topology and name definitions? (they exist in every module)
@@ -145,27 +145,43 @@ class ChromosomeReplication(PartitionedProcess):
     def inputs(self):
         return {
             # bulk molecules
-            "bulk": "bulk",
-            "listeners": "tree",
-            "environment": "tree",
+            "bulk": numpy_schema("bulk"),
+            "listeners": {
+                "mass": listener_schema({"cell_mass": 0.0}),
+                "replication_data": listener_schema({
+                    "critical_initiation_mass": 0.0,
+                    "critical_mass_per_oriC": 0.0
+                }),
+            },
+            "environment": {
+                "media_id": "string"
+            },
             "active_replisomes": "active_replisomes",
-            "oriCs": "oriCs",
-            "chromosome_domains": "chromosome_domains",
-            "full_chromosomes": "full_chromosomes",
-            "timestep": "float",
+            "oriCs": numpy_schema("oriCs"),
+            "chromosome_domains": numpy_schema("chromosome_domains"),
+            "full_chromosomes": numpy_schema("full_chromosomes"),
+            "timestep": {"_default": self.config["time_step"]},
         }
 
     def outputs(self):
         return {
             # bulk molecules
-            "bulk": "bulk",
-            "listeners": "tree",
-            "environment": "tree",
+            "bulk": numpy_schema("bulk"),
+            "listeners": {
+                "mass": listener_schema({"cell_mass": 0.0}),
+                "replication_data": listener_schema({
+                    "critical_initiation_mass": 0.0,
+                    "critical_mass_per_oriC": 0.0
+                }),
+            },
+            "environment": {
+                "media_id": "string"
+            },
             "active_replisomes": "active_replisomes",
-            "oriCs": "oriCs",
-            "chromosome_domains": "chromosome_domains",
-            "full_chromosomes": "full_chromosomes",
-            "timestep": "float",
+            "oriCs": numpy_schema("oriCs"),
+            "chromosome_domains": numpy_schema("chromosome_domains"),
+            "full_chromosomes": numpy_schema("full_chromosomes"),
+            "timestep": {"_default": self.config["time_step"]},
         }
 
     def calculate_request(self, state):
