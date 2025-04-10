@@ -2,6 +2,7 @@ import dataclasses
 from typing import Dict, Any
 
 import numpy as np
+import unum
 from pint import Quantity
 
 from ecoli.library.schema import UniqueNumpyUpdater, get_bulk_counts, bulk_numpy_updater, get_unique_fields, UNIQUE_DIVIDERS, divide_bulk
@@ -31,6 +32,9 @@ PORTS_MAPPER = {
     "int32": "integer",
     "int16": "integer",
     "uint16": "integer",
+    "Unum": "unum",
+    "str": "string"
+
 }
 
 
@@ -152,33 +156,39 @@ def get_port_mapping(ports_schema: dict[str, Any]):
     return translate_vivarium_types(defaults)
 
 
-def get_config_schema(defaults: dict[str, float | Any]):
+def get_config_schema(defaults: dict[str, Any]):
     """Translates vivarium.core.Process.defaults into bigraph-schema types to be consumed by pbg.Composite."""
     config_schema = {}
     for k, v in defaults.copy().items():
         if not isinstance(v, dict):
-            # handle type
-            _type = ""
-            for schema_type, python_type in CONFIG_SCHEMA_MAPPER.items():
-                # TODO: perhaps use str(Quantity().u()) to define the type (ie, nanometer)
-                if isinstance(v, python_type):
-                    _type = schema_type
-                else:
-                    _type = "any"
+            type_name = type(v).__name__
+            if type_name in PORTS_MAPPER.keys():
+                # handle type
+                _type = PORTS_MAPPER[type_name]
+                
+                # handle default
+                if isinstance(v, Quantity):
+                    v = v.magnitude
+                elif isinstance(v, np.ndarray):
+                    v = v.tolist()
+                elif isinstance(v, unum.Unum):
+                    v = v.asNumber()
 
-            # handle value
-            if isinstance(v, Quantity):
-                v = v.magnitude
-            elif isinstance(v, np.ndarray) or isinstance(v, np.float64):
-                v = v.tolist()
-
-            config_schema[k] = {
-                "_type": _type,  # TODO: provide a more specific lookup
+                config_schema[k] = {
+                    "_type": _type,  # TODO: provide a more specific lookup
+                    "_default": v
+                }
+        else:
+            config_schema[k] = "tree" if not len(v.keys()) else {
+                "_type": "tree",
                 "_default": v
             }
-        else:
-            config_schema[k] = get_config_schema(v)
 
     return config_schema
 
+
+def test_get_config_schema():
+    from ecoli.migrated.transcript_elongation import TranscriptElongation
+    defaults = TranscriptElongation.defaults
+    config_schema = get_config_schema(defaults)
 

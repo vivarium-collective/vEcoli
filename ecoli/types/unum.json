@@ -3,6 +3,7 @@
     "_type": "unum",
     "_deserialize": "deserialize_unum",
     "_serialize": "serialize_unum",
-    "_check": "check_unum"
+    "_check": "check_unum",
+    "_inherit": "float"
   }
 }
