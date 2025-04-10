@@ -64,6 +64,6 @@ trace-*
 .venv/
 
 encryption.py
-notes.todo
 example.ipynb
 *.todo
+notes.md

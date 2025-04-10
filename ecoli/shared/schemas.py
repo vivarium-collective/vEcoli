@@ -7,14 +7,6 @@ from pint import Quantity
 
 from ecoli.library.schema import UniqueNumpyUpdater, get_bulk_counts, bulk_numpy_updater, get_unique_fields, UNIQUE_DIVIDERS, divide_bulk
 
-CONFIG_SCHEMA_MAPPER = {
-    "integer": int,
-    "float": float,
-    "string": str,
-    "boolean": bool,
-    "list": list,
-    "tuple": tuple,
-}
 
 PORTS_MAPPER = {
     "int": "integer",
@@ -23,7 +15,7 @@ PORTS_MAPPER = {
     "tuple": "tuple",
     "float": "float",
     "any": "any",
-    "ndarray": "array",
+    "ndarray": "list",  # TODO: eventually formalize this to "array",
     "dict": "tree",
     "NoneType": "any",
     "int64": "integer",
@@ -85,7 +77,8 @@ def listener_schema(elements: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
 
 
 def numpy_schema(name: str) -> Dict[str, Any]:
-    """Helper function used in ports schemas for bulk and unique molecules
+    """TODO: parse schema function keys more carefully.
+    Helper function used in ports schemas for bulk and unique molecules
 
     Args:
         name: `bulk` for bulk molecules or one of the keys in :py:data:`UNIQUE_DIVIDERS`
