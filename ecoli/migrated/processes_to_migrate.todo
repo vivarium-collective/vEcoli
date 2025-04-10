@@ -28,11 +28,12 @@ TODO: processes:
     - [X] tf_binding.py
     - [X] tf_unbinding.py
     - [] transcript_elongation.py
-    - [] transcript_initiation.py
+    - [X] transcript_initiation.py
     - [X] two_component_system.py
     - [X] unique_update.py
 
 TODO: misc:
+    - [] review numpy_schema and ensure the migrated version works
     - [] Add formalized registration at module init of processes
     - [] Add formalized registration at module init of types
     - [] Clean up registration module
