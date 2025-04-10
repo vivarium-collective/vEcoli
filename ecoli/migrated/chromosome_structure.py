@@ -1,4 +1,5 @@
 """
+# TODO: handle listener and numpy schema types as needed (when they come up), otherwise try test
 ====================
 MIGRATED: Chromosome Structure
 ====================

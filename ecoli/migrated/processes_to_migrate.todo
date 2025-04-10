@@ -5,7 +5,7 @@ TODO: processes:
     - [X] cell_division.py
     - [X] chemostat.py
     - [] chromosome_replication.py
-    - [] chromosome_structure.py
+    - [X] chromosome_structure.py
     - [X] complexation.py
     - [X] concentrations_deriver.py
     - [X] division_detector.py
