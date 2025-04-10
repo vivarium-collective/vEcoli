@@ -4,6 +4,7 @@ from typing import Dict, Any
 import numpy as np
 from pint import Quantity
 
+from ecoli.library.schema import UniqueNumpyUpdater, get_bulk_counts, bulk_numpy_updater, get_unique_fields, UNIQUE_DIVIDERS, divide_bulk
 
 CONFIG_SCHEMA_MAPPER = {
     "integer": int,
@@ -76,6 +77,31 @@ def listener_schema(elements: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
             }
         else:
             schema[element] = {"_default": default, "_type": str(get_schema_type(default))}  # **basic_schema, }
+    return schema
+
+
+def numpy_schema(name: str) -> Dict[str, Any]:
+    """Helper function used in ports schemas for bulk and unique molecules
+
+    Args:
+        name: `bulk` for bulk molecules or one of the keys in :py:data:`UNIQUE_DIVIDERS`
+            for unique molecules
+
+    Returns:
+        Fully configured ports schema for molecules of type `name`
+    """
+    schema = {"_default": [], "_type": "bulk"}
+    if name == "bulk":
+        schema["_apply"] = bulk_numpy_updater
+        # Only pull out counts to be serialized (save space and time)
+        schema["_serialize"] = get_bulk_counts
+        schema["_divide"] = divide_bulk
+    else:
+        # schema["_updater"] = UniqueNumpyUpdater().updater
+        # Convert to list of contiguous Numpy arrays for faster and more
+        # efficient serialization (still do not recommend emitting unique)
+        schema["_serialize"] = get_unique_fields
+        schema["_divide"] = UNIQUE_DIVIDERS[name]
     return schema
 
 

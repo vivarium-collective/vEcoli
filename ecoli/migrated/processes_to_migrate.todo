@@ -1,37 +1,38 @@
-- [] __init__.py
-- [X] allocator.py
-- [X] bulk_timeline.py
-- [X] cell_division.py
-- [X] chemostat.py
-- [] chromosome_replication.py
-- [] chromosome_structure.py
-- [X] complexation.py
-- [X] concentrations_deriver.py
-- [X] division_detector.py
-- [] engine_process.py
-- [X] enzyme_kinetics.py
-- [X] equilibrium.py
-- [X] global_clock.py
-- [] metabolism.py
-- [] metabolism_redux.py
-- [] metabolism_redux_classic.py
-- [X] partition.py
-- [] polypeptide_elongation.py
-- [] polypeptide_initiation.py
-- [X] protein_degradation.py
-- [X] registries.py
-- [] rna_degradation.py
-- [X] rna_interference.py
-- [X] rna_maturation.py
-- [X] shape.py
-- [X] tf_binding.py
-- [X] tf_unbinding.py
-- [] transcript_elongation.py
-- [] transcript_initiation.py
-- [X] two_component_system.py
-- [X] unique_update.py
+TODO: processes:
+    - [] __init__.py
+    - [X] allocator.py
+    - [X] bulk_timeline.py
+    - [X] cell_division.py
+    - [X] chemostat.py
+    - [] chromosome_replication.py
+    - [] chromosome_structure.py
+    - [X] complexation.py
+    - [X] concentrations_deriver.py
+    - [X] division_detector.py
+    - [] engine_process.py
+    - [X] enzyme_kinetics.py
+    - [X] equilibrium.py
+    - [X] global_clock.py
+    - [] metabolism.py
+    - [] metabolism_redux.py
+    - [] metabolism_redux_classic.py
+    - [X] partition.py
+    - [] polypeptide_elongation.py
+    - [] polypeptide_initiation.py
+    - [X] protein_degradation.py
+    - [X] registries.py
+    - [] rna_degradation.py
+    - [X] rna_interference.py
+    - [X] rna_maturation.py
+    - [X] shape.py
+    - [X] tf_binding.py
+    - [X] tf_unbinding.py
+    - [] transcript_elongation.py
+    - [] transcript_initiation.py
+    - [X] two_component_system.py
+    - [X] unique_update.py
 
-TODO:
+TODO: misc:
     - [] Add formalized registration at module init of processes
     - [] Add formalized registration at module init of types
     - [] Clean up registration module
