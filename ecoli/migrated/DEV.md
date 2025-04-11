@@ -1,4 +1,4 @@
-## _*Processes*_:
+## _*Core processes to Migrate*_:
 - [] __init__.py
 - [X] allocator.py
 - [X] bulk_timeline.py
@@ -33,6 +33,22 @@
 - [X] unique_update.py
 
 ----------------------------------------------------------------------
+
+## _*Auxiliary processes to Migrate:*_
+### _`ecoli.processes.antibiotics`_:
+
+### _`ecoli.processes.chemotaxis`_:
+
+### _`ecoli.processes.environment`_:
+
+### _`ecoli.processes.listeners`_:
+
+### _`ecoli.processes.membrane`_:
+
+### _`ecoli.processes.spatiality`_:
+
+### _`ecoli.processes.stubs`_:
+
 
 ## _*Misc*_:
 - [] for partitioned processes, parse exactly which inputs and which outputs should be defined, rather than bidirectional
