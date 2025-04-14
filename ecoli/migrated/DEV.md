@@ -1,5 +1,5 @@
 ## _*Core processes to Migrate*_:
-- [] __init__.py
+- [X] __init__.py
 - [X] allocator.py
 - [X] bulk_timeline.py
 - [X] cell_division.py
@@ -13,8 +13,8 @@
 - [X] enzyme_kinetics.py
 - [X] equilibrium.py
 - [X] global_clock.py
-- [] metabolism.py
-- [] metabolism_redux.py
+- [] metabolism.py  TODO: do we need this and the redux classic?
+- [X] metabolism_redux.py
 - [] metabolism_redux_classic.py
 - [X] partition.py
 - [X] polypeptide_elongation.py
