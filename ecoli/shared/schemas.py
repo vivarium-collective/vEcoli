@@ -14,10 +14,9 @@ PORTS_MAPPER = {
     "list": "list",
     "tuple": "tuple",
     "float": "float",
-    "any": "any",
     "ndarray": "list",  # TODO: eventually formalize this to "array",
     "dict": "tree",
-    "NoneType": "any",
+    "NoneType": "any",  # TODO: be less general here (attempt further parsing if need be)
     "int64": "integer",
     "float32": "float",
     "float64": "float",
@@ -25,7 +24,7 @@ PORTS_MAPPER = {
     "int16": "integer",
     "uint16": "integer",
     "Unum": "unum",
-    "str": "string"
+    "str": "string",
 
 }
 
@@ -172,10 +171,13 @@ def get_config_schema(defaults: dict[str, Any]):
                     "_default": v
                 }
         else:
-            config_schema[k] = "tree" if not len(v.keys()) else {
-                "_type": "tree",
-                "_default": v
-            }
+            if "_default" in v.keys():
+                config_schema[k] = v
+            else:
+                config_schema[k] = "tree" if not len(v.keys()) else {
+                    "_type": "tree",
+                    "_default": v
+                }
 
     return config_schema
 
