@@ -21,7 +21,7 @@
 - [] polypeptide_initiation.py
 - [X] protein_degradation.py
 - [X] registries.py
-- [] rna_degradation.py
+- [X] rna_degradation.py
 - [X] rna_interference.py
 - [X] rna_maturation.py
 - [X] shape.py

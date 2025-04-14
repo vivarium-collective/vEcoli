@@ -3797,7 +3797,7 @@ requires-dist = [
     { name = "typer" },
     { name = "unum" },
     { name = "vivarium-core" },
-    { name = "vivarium-interface", specifier = ">=0.0.3" },
+    { name = "vivarium-interface", git = "https://github.com/vivarium-collective/vivarium-interface.git?rev=main" },
     { name = "wheel" },
 ]
 provides-extras = ["dev", "docs", "shared"]
@@ -3835,8 +3835,8 @@ sdist = { url = "https://files.pythonhosted.org/packages/3e/87/794e0b4c5dccbca30
 
 [[package]]
 name = "vivarium-interface"
-version = "0.0.3"
-source = { registry = "https://pypi.org/simple" }
+version = "0.0.4"
+source = { git = "https://github.com/vivarium-collective/vivarium-interface.git?rev=main#707412a77ecd47da3939bc4c5759b3ecac6e52b6" }
 dependencies = [
     { name = "bigraph-viz" },
     { name = "graphviz" },
@@ -3845,7 +3845,6 @@ dependencies = [
     { name = "pandas" },
     { name = "process-bigraph" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b4/b8/81ee23d11531b5962deb49f8734d035ab655ee4c03cf67bf702c82c3411c/vivarium-interface-0.0.3.tar.gz", hash = "sha256:c4840248ec24252c3c31d792e927a033bf6e5ee9439ac5bc387814d9e01d3357", size = 13407 }
 
 [[package]]
 name = "wcwidth"

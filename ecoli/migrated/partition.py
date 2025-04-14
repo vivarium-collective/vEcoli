@@ -57,6 +57,8 @@ class PartitionedProcess(Process):
 
     def __init__(self, config=None, core=None):
         super().__init__(config, core)
+        self.timestep: float = self.config.get("time_step", 1.0)
+        self.timestep_schema = {"_default": self.timestep, "_type": "float"}
 
     def initial_state(self):
         return {
