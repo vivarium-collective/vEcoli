@@ -14,3 +14,7 @@ commit:
 push:
 	@git push
 
+.PHONY: add
+add:
+	@[ -n "$(files)" ] && git add "$(files)" || git add --all
+

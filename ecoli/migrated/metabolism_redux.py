@@ -13,9 +13,9 @@ from unum import Unum
 
 from scipy.sparse import csr_matrix
 import cvxpy as cp
-from process_bigraph import Step
 from vivarium.library.units import units as vivunits
 
+from ecoli.shared.base import StepBase
 from ecoli.shared.schemas import get_config_schema, numpy_schema, listener_schema
 from wholecell.utils import units
 from reconstruction.ecoli.dataclasses.process.metabolism import REVERSE_TAG
@@ -50,7 +50,8 @@ BAD_RXNS = [
 ]
 
 
-class MetabolismRedux(Step):
+# TODO: possibly use StepBase here and all others!
+class MetabolismRedux(StepBase):
     defaults = {
         "stoich_dict": {},
         "reaction_catalysts": {},
@@ -490,10 +491,10 @@ class MetabolismRedux(Step):
             return True
         return False
 
-    def update(self, state, interval):
+    def update(self, state):
         # Initialize indices
         if self.homeostatic_metabolite_idx is None:
-            bulk_ids = states["bulk"]["id"]
+            bulk_ids = state["bulk"]["id"]
             self.homeostatic_metabolite_idx = bulk_name_to_idx(
                 self.homeostatic_metabolites, bulk_ids
             )
@@ -506,8 +507,8 @@ class MetabolismRedux(Step):
             )
             self.aa_idx = bulk_name_to_idx(self.aa_names, bulk_ids)
 
-        unconstrained = states["environment"]["exchange_data"]["unconstrained"]
-        constrained = states["environment"]["exchange_data"]["constrained"]
+        unconstrained = state["environment"]["exchange_data"]["unconstrained"]
+        constrained = state["environment"]["exchange_data"]["constrained"]
         new_allowed_exchange_uptake = set(unconstrained).union(constrained.keys())
         new_exchange_molecules = set(self.exchange_molecules).union(
             set(new_allowed_exchange_uptake)
@@ -525,25 +526,25 @@ class MetabolismRedux(Step):
 
         # extract the states from the ports
         homeostatic_metabolite_counts = counts(
-            states["bulk"], self.homeostatic_metabolite_idx
+            state["bulk"], self.homeostatic_metabolite_idx
         )
-        self.timestep = states["timestep"]
+        self.timestep = state["timestep"]
 
         # TODO (Cyrus) - Implement kinetic model
         # kinetic_flux_targets = states['kinetic_flux_targets']
         # needed for kinetics
-        current_catalyst_counts = counts(states["bulk"], self.catalyst_idx)
-        translation_gtp = states["polypeptide_elongation"]["gtp_to_hydrolyze"]
+        current_catalyst_counts = counts(state["bulk"], self.catalyst_idx)
+        translation_gtp = state["polypeptide_elongation"]["gtp_to_hydrolyze"]
         kinetic_enzyme_counts = counts(
-            states["bulk"], self.kinetics_enzymes_idx
+            state["bulk"], self.kinetics_enzymes_idx
         )  # kinetics related
-        kinetic_substrate_counts = counts(states["bulk"], self.kinetics_substrates_idx)
+        kinetic_substrate_counts = counts(state["bulk"], self.kinetics_substrates_idx)
 
         # cell mass difference for calculating GAM
         if self.cell_mass is not None:
             self.previous_mass = self.cell_mass
-        self.cell_mass = states["listeners"]["mass"]["cell_mass"] * units.fg
-        dry_mass = states["listeners"]["mass"]["dry_mass"] * units.fg
+        self.cell_mass = state["listeners"]["mass"]["cell_mass"] * units.fg
+        dry_mass = state["listeners"]["mass"]["dry_mass"] * units.fg
 
         cell_volume = self.cell_mass / self.cell_density
         # Coefficient to convert between flux (mol/g DCW/hr) basis
@@ -570,7 +571,7 @@ class MetabolismRedux(Step):
 
         ## Determine updates to concentrations depending on the current state
         doubling_time = self.nutrient_to_doubling_time.get(
-            states["environment"]["media_id"], self.nutrient_to_doubling_time["minimal"]
+            state["environment"]["media_id"], self.nutrient_to_doubling_time["minimal"]
         )
         if self.include_ppgpp:
             # Sim does not include ppGpp regulation so do not update biomass
@@ -585,8 +586,8 @@ class MetabolismRedux(Step):
             # RNA/protein ratio which is controlled by ppGpp and other growth
             # regulation
             rp_ratio = (
-                states["listeners"]["mass"]["rna_mass"]
-                / states["listeners"]["mass"]["protein_mass"]
+                state["listeners"]["mass"]["rna_mass"]
+                / state["listeners"]["mass"]["protein_mass"]
             )
             conc_updates = self.getBiomassAsConcentrations(
                 doubling_time, rp_ratio=rp_ratio
@@ -596,8 +597,8 @@ class MetabolismRedux(Step):
             conc_updates.update(
                 self.update_amino_acid_targets(
                     self.counts_to_molar,
-                    states["polypeptide_elongation"]["aa_count_diff"],
-                    dict(zip(self.aa_names, counts(states["bulk_total"], self.aa_idx))),
+                    state["polypeptide_elongation"]["aa_count_diff"],
+                    dict(zip(self.aa_names, counts(state["bulk_total"], self.aa_idx))),
                 )
             )
 
@@ -624,14 +625,14 @@ class MetabolismRedux(Step):
         if self.mechanistic_aa_transport:
             aa_in_media = np.array(
                 [
-                    states["boundary"]["external"][aa_name].to("mM").magnitude
+                    state["boundary"]["external"][aa_name].to("mM").magnitude
                     > self.import_constraint_threshold
                     for aa_name in self.aa_environment_names
                 ]
             )
             aa_in_media[self.removed_aa_uptake] = False
             exchange_rates = (
-                states["polypeptide_elongation"]["aa_exchange_rates"] * timestep
+                state["polypeptide_elongation"]["aa_exchange_rates"] * self.timestep
             ).asNumber(CONC_UNITS / TIME_UNITS)
             aa_uptake_package = (
                 exchange_rates[aa_in_media],
@@ -713,7 +714,7 @@ class MetabolismRedux(Step):
             },
             "listeners": {
                 "fba_results": {
-                    "media_id": states["environment"]["media_id"],
+                    "media_id": state["environment"]["media_id"],
                     "conc_updates": [
                         conc_updates.get(m, 0) for m in self.conc_update_molecules
                     ],
@@ -734,7 +735,7 @@ class MetabolismRedux(Step):
                     ),
                 }
             },
-            "next_update_time": states["global_time"] + states["timestep"],
+            "next_update_time": state["global_time"] + state["timestep"],
         }
 
     def concentrationToCounts(self, concs):
@@ -1078,5 +1079,3 @@ def test_network_flow_model():
 
 # TODO (Cyrus) Add test for entire process
 
-if __name__ == "__main__":
-    test_network_flow_model()
