@@ -27,6 +27,7 @@ PORTS_MAPPER = {
     "str": "string",
 
 }
+DEFAULT_DICT_TYPE = "tree"
 
 
 @dataclasses.dataclass
@@ -171,13 +172,12 @@ def get_config_schema(defaults: dict[str, Any]):
                     "_default": v
                 }
         else:
-            if "_default" in v.keys():
+            if "_type" in v.keys():
+                # case: already has a bgs-compliant type def
                 config_schema[k] = v
             else:
-                config_schema[k] = "tree" if not len(v.keys()) else {
-                    "_type": "tree",
-                    "_default": v
-                }
+                # case: use type with default if default value assigned
+                config_schema[k] = DEFAULT_DICT_TYPE if not len(v.keys()) else {"_type": DEFAULT_DICT_TYPE, "_default": v}
 
     return config_schema
 
