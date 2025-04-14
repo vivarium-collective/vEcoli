@@ -18,3 +18,6 @@ push:
 add:
 	@[ -n "$(files)" ] && git add "$(files)" || git add --all
 
+.PHONY: test
+test:
+	@[ -n "$(dest)" ] && pytest -s "$(dest)" || pytest -s
