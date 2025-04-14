@@ -19,6 +19,7 @@ import numpy as np
 from process_bigraph import Process, Step
 
 from ecoli.library.schema import numpy_schema
+from ecoli.shared.schemas import get_config_schema
 
 
 class Requester(Step):
@@ -47,18 +48,18 @@ class PartitionedProcess(Process):
     be linked with a Requester. This replaces the previous PartitionedProcess. These processes are
     distinctly marked by their interaction/dependence on the "bulk" type.
     """
-
-    config_schema = {
-        "time_step": {
-            "_type": "float",
-            "_default": 1.0,
-        }
-    }
+    defaults = {}
+    config_schema = {}
 
     def __init__(self, config=None, core=None):
+        # parsing the defaults and setting the config schema as an instance attribute
+        self.timestep_schema = {"_default": 1.0, "_type": "float"}
+        self.config_schema = get_config_schema(self.defaults)
+        self.config_schema['time_step'] = self.timestep_schema
+
         super().__init__(config, core)
-        self.timestep: float = self.config.get("time_step", 1.0)
-        self.timestep_schema = {"_default": self.timestep, "_type": "float"}
+
+        self.timestep = self.config["time_step"]
 
     def initial_state(self):
         return {

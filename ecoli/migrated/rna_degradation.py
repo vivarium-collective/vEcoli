@@ -99,8 +99,6 @@ class RnaDegradation(PartitionedProcess):
         "emit_unique": False,
     }
 
-    config_schema = get_config_schema(defaults)
-
     def __init__(self, config=None):
         super().__init__(config)
         self.rna_ids = self.config["rna_ids"]

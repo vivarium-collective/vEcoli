@@ -18,7 +18,7 @@
 - [] metabolism_redux_classic.py
 - [X] partition.py
 - [] polypeptide_elongation.py
-- [] polypeptide_initiation.py
+- [X] polypeptide_initiation.py
 - [X] protein_degradation.py
 - [X] registries.py
 - [X] rna_degradation.py
