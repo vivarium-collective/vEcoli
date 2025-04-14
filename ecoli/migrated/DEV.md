@@ -51,6 +51,7 @@
 
 
 ## _*Misc*_:
+- [] Look into defining biology-specific module constraints as JSON and parsing rather than explicitly defining them
 - [] For auto-parsed config schemas, ensure that lambda funcs are moved to directly being declared in constructor vs in config schema
 - [] for partitioned processes, parse exactly which inputs and which outputs should be defined, rather than bidirectional
 - [] refactor bulk_state declarations to be numpy_schema("bulk")
