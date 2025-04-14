@@ -48,7 +48,6 @@ class PolypeptideInitiation(PartitionedProcess):
         "active_ribosome_fraction": {},
         "elongation_rates": {},
         "variable_elongation": False,
-        "make_elongation_rates": lambda x: [],
         "rna_id_to_cistron_indexes": {},
         "cistron_start_end_pos_in_tu": {},
         "tu_ids": [],
@@ -74,7 +73,7 @@ class PolypeptideInitiation(PartitionedProcess):
         self.active_ribosome_fraction = self.config["active_ribosome_fraction"]
         self.ribosome_elongation_rates_dict = self.config["elongation_rates"]
         self.variable_elongation = self.config["variable_elongation"]
-        self.make_elongation_rates = self.config["make_elongation_rates"]
+        self.make_elongation_rates = lambda x: []
 
         self.rna_id_to_cistron_indexes = self.config["rna_id_to_cistron_indexes"]
         self.cistron_start_end_pos_in_tu = self.config[

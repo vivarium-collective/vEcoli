@@ -17,7 +17,7 @@
 - [] metabolism_redux.py
 - [] metabolism_redux_classic.py
 - [X] partition.py
-- [] polypeptide_elongation.py
+- [X] polypeptide_elongation.py
 - [X] polypeptide_initiation.py
 - [X] protein_degradation.py
 - [X] registries.py
@@ -51,6 +51,7 @@
 
 
 ## _*Misc*_:
+- [] For auto-parsed config schemas, ensure that lambda funcs are moved to directly being declared in constructor vs in config schema
 - [] for partitioned processes, parse exactly which inputs and which outputs should be defined, rather than bidirectional
 - [] refactor bulk_state declarations to be numpy_schema("bulk")
 - [] review numpy_schema and ensure the migrated version works
