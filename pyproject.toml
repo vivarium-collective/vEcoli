@@ -59,7 +59,7 @@ dependencies = [
     "typer",
     "astor",
     "process-bigraph",
-    "vivarium-interface",
+    "vivarium-interface>=0.0.4",
 ]
 
 [project.scripts]
@@ -92,6 +92,3 @@ packages = [
     "wholecell",
     "pbg"
 ]
-
-[tool.uv.sources]
-vivarium-interface = { git = "https://github.com/vivarium-collective/vivarium-interface.git", rev = "main" }
