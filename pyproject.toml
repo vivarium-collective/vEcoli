@@ -54,16 +54,15 @@ dependencies = [
     "wheel",
     "stochastic-arrow",
     "autograd",
-    # "typer>=0.15.2",
-    # "astor>=0.8.1",
     "typer",
     "astor",
-    "process-bigraph",
+    "process-bigraph>=0.0.30",
     "vivarium-interface>=0.0.4",
 ]
 
 [project.scripts]
-migrate = "pbg.app:cli"
+gateway = "api.gateway.main:cli"
+crosspiler = "pbg.app:cli"
 
 [project.optional-dependencies]
 dev = [
@@ -81,14 +80,30 @@ docs = [
 shared = [
     "cryptography",
 ]
+api = [
+    "broadcaster>=0.3.1",
+    "cryptography>=44.0.2",
+    "fastapi>=0.115.12",
+    "grpcio>=1.71.0",
+    "grpcio-tools>=1.71.0",
+    "pydantic>=2.11.3",
+    "python-dotenv>=1.1.0",
+    "python-multipart>=0.0.20",
+    "typer>=0.15.2",
+    "uvicorn>=0.34.1",
+    "websockets>=15.0.1",
+]
 
 [tool.setuptools]
 packages = [
+    # original packages
     "ecoli",
-    "migration", 
     "reconstruction",
     "runscripts",
     "validation",
     "wholecell",
-    "pbg"
+    # packages added by Alex
+    "pbg",  # TODO: eventually extract needed from this and remove
+    "api",
+    "migration"
 ]

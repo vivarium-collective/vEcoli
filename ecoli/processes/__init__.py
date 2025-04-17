@@ -1,5 +1,6 @@
 from vivarium.core.registry import process_registry
 from ecoli.processes.antibiotics.lysis_initiation import LysisInitiation
+from ecoli.processes.death_threshold import DeathThreshold
 
 from ecoli.processes.tf_unbinding import TfUnbinding
 from ecoli.processes.tf_binding import TfBinding
@@ -124,4 +125,8 @@ process_registry.register(GlobalClock.name, GlobalClock)
 process_registry.register(MureinDivision.name, MureinDivision)
 process_registry.register(BulkTimelineProcess.name, BulkTimelineProcess)
 
-__all__ = ["processes"]
+# tutorial process
+process_registry.register(DeathThreshold.name, DeathThreshold)
+
+
+# __all__ = ["processes"]

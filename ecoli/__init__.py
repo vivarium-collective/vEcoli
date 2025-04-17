@@ -1,8 +1,10 @@
 import os
 import pickle
 import sys
+from typing import Any
 import warnings
 
+import process_bigraph
 import unum
 
 # suppress \s errors TODO: fix this in offending modules
@@ -23,6 +25,7 @@ from vivarium.core.registry import (
     emitter_registry,
     serializer_registry,
 )
+
 from wholecell.utils import units
 from ecoli.library.units import Quantity
 
@@ -211,8 +214,31 @@ def deserialize_unum(schema, state, core=None):
 
 VERBOSE_REGISTER = os.getenv("VERBOSE_REGISTER", False)
 
+
+@dataclass.dataclass
+class Get:
+    core: process_bigraph.ProcessTypes | Any
+
+    @property
+    def processes(self):
+        return list(self.core.process_registry.registry.keys())
+    
+    @property
+    def types(self):
+        return(self.core.process_registry.registry.keys())
+    
+
+class Core(process_bigraph.ProcessTypes):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+    
+    @property
+    def get(self):
+        return Get(core=self)
+    
+
 # project core singleton
-ecoli_core = ProcessTypes()
+ecoli_core = Core()
 
 # register types
 types_dir: str = os.path.join(os.path.dirname(__file__), "types")

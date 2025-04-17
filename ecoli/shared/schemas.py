@@ -87,18 +87,19 @@ def numpy_schema(name: str) -> Dict[str, Any]:
     Returns:
         Fully configured and bigraph-schema-compliant ports schema for molecules of type `name`
     """
-    schema = {"_default": [], "_type": "list[tuple]"}  # TODO: should this be "bulk" or "oriCs", etc instead (use registered type)?
-    if name == "bulk":
-        schema["_apply"] = bulk_numpy_updater
-        # Only pull out counts to be serialized (save space and time)
-        schema["_serialize"] = get_bulk_counts
-        schema["_divide"] = divide_bulk
-    else:
-        # schema["_updater"] = UniqueNumpyUpdater().updater
-        # Convert to list of contiguous Numpy arrays for faster and more
-        # efficient serialization (still do not recommend emitting unique)
-        schema["_serialize"] = get_unique_fields
-        schema["_divide"] = UNIQUE_DIVIDERS[name]
+    schema = {"_default": [()], "_type": "list[tuple]"}  # TODO: should this be "bulk" or "oriCs", etc instead (use registered type)?
+    # TODO: fix below.
+    # if name == "bulk":
+    #     schema["_apply"] = bulk_numpy_updater
+    #     # Only pull out counts to be serialized (save space and time)
+    #     schema["_serialize"] = get_bulk_counts
+    #     schema["_divide"] = divide_bulk
+    # else:
+    #     # schema["_updater"] = UniqueNumpyUpdater().updater
+    #     # Convert to list of contiguous Numpy arrays for faster and more
+    #     # efficient serialization (still do not recommend emitting unique)
+    #     schema["_serialize"] = get_unique_fields
+    #     schema["_divide"] = UNIQUE_DIVIDERS[name]
     return schema
 
 

@@ -1,10 +1,10 @@
 .PHONY: clean
 clean:
-	@uv cache clean
+	@uv cache clean && rm uv.lock && uv lock
 
 .PHONY: sync
 sync:
-	@[ -n "$(f)" ] && uv sync --frozen || uv sync
+	@[ -n "$(e)" ] && uv sync --frozen --all-extras || uv sync --frozen
 
 .PHONY: commit
 commit:
@@ -21,3 +21,7 @@ add:
 .PHONY: test
 test:
 	@[ -n "$(dest)" ] && pytest -s "$(dest)" || pytest -s
+
+.PHONY: api
+api:
+	@uv run uvicorn api.gateway.app:app --reload --host 0.0.0.0 --port 8080
