@@ -17,3 +17,10 @@ class RouterConfig(BaseClass):
         if len(self.prefix) > 1:
             return self.prefix.split('/')[-1]
         
+    def include(self, app: fastapi.FastAPI) -> None:
+        return app.include_router(
+            self.router, 
+            prefix=self.prefix, 
+            dependencies=self.dependencies  # type: ignore
+        )
+        

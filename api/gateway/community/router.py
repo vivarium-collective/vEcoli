@@ -6,35 +6,45 @@ import datetime
 from typing import Any 
 
 from fastapi import APIRouter, Depends, UploadFile, File, Body, Query
+import fastapi
 import process_bigraph
 from vivarium import Vivarium
 
+from api.data_model.gateway import RouterConfig
+from api.gateway.community import auth
+from api.gateway.handlers.app_config import root_prefix
+from api.gateway.handlers.multi import launch_scan
+from api.gateway.handlers.vivarium import VivariumFactory, new_id
 from ecoli import ecoli_core
 
 from api.data_model.base import BaseClass
 from api.data_model.simulation import SimulationRun
 from api.data_model.vivarium import VivariumDocument
-from api.gateway.auth import get_user
-from api.handlers.encryption.db import write
-from api.handlers.multi import launch_scan
-from api.handlers.vivarium import VivariumFactory, new_id
+from api.gateway.community.auth import get_user
+
 
 
 LOCAL_URL = "http://localhost:8080"
 PROD_URL = ""  # TODO: define this
-    
+MAJOR_VERSION = 1
 
-router = APIRouter()
+
+config = RouterConfig(
+    router=APIRouter(), 
+    prefix=root_prefix(MAJOR_VERSION) + "/community",
+    dependencies=[fastapi.Depends(auth.get_user)]
+)
+
 viv_factory = VivariumFactory()
 
 # e54d4431-5dab-474e-b71a-0db1fcb9e659
 
-@router.get("/test-authentication", operation_id="test-authentication", tags=["CommunityAPI"])
+@config.router.get("/test-authentication", operation_id="test-authentication", tags=["CommunityAPI"])
 async def test_authentication(user: dict = Depends(get_user)):
     return user
 
 
-@router.post("/run", tags=["CommunityAPI"])
+@config.router.post("/run", tags=["CommunityAPI"])
 async def run_simulation(
     document: VivariumDocument,
     duration: float = Query(default=11.0),
@@ -54,7 +64,7 @@ async def run_simulation(
     )
 
 
-@router.post(
+@config.router.post(
     "/scan", 
     tags=["CommunityAPI"], 
     description="Launch n of the same/similar simulations in parallel async"
@@ -71,7 +81,7 @@ async def run_scan(
 
 # TODO: have the ecoli interval results call encryption.db.write for each interval
 # TODO: have this method call encryption.db.read for interval data
-@router.get(
+@config.router.get(
     '/get/results', 
     operation_id='get-results', 
     tags=["CommunityAPI"]
@@ -88,14 +98,14 @@ async def get_results(key: str, simulation_id: str):
 
 # -- static data -- #
 
-@router.get('/get/processes', tags=["CommunityAPI"])
+@config.router.get('/get/processes', tags=["CommunityAPI"])
 def get_registered_processes() -> list[str]:
     # TODO: implement this for ecoli_core
     from ecoli import ecoli_core
     return list(ecoli_core.process_registry.registry.keys())
 
 
-@router.get('/get/types', tags=["CommunityAPI"])
+@config.router.get('/get/types', tags=["CommunityAPI"])
 def get_registered_types() -> list[str]:
     # TODO: implement this for ecoli_core
     from ecoli import ecoli_core

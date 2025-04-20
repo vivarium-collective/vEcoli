@@ -10,9 +10,8 @@ from fastapi.openapi.utils import get_openapi
 from starlette.middleware.cors import CORSMiddleware
 
 from api.data_model.gateway import RouterConfig
-from api.handlers import app_config as config 
-from api.gateway import auth 
-from api.gateway.routers import community, evolve
+from api.gateway.handlers import app_config
+from api.gateway.community.router import config
 
 
 logger: log.Logger = log.getLogger(__name__)
@@ -20,7 +19,7 @@ logger: log.Logger = log.getLogger(__name__)
 dot.load_dotenv()
 
 # config spec and env vars
-APP_CONFIG = config.get_config(
+APP_CONFIG = app_config.get_config(
     os.path.join(
         os.path.dirname(
             os.path.dirname(__file__)
@@ -34,19 +33,6 @@ APP_VERSION = APP_CONFIG['version']
 GATEWAY_PORT = os.getenv("GATEWAY_PORT", "8080")
 
 # endpoint routers
-ROOT_PREFIX = f"/api/{APP_VERSION}"
-ROUTER_CONFIGS = [
-    RouterConfig(
-        router=community.router, 
-        prefix=ROOT_PREFIX + "/community",
-        dependencies=[fastapi.Depends(auth.get_user)]
-    ),
-    RouterConfig(
-        router=evolve.router, 
-        prefix=ROOT_PREFIX + "/evolve",
-        dependencies=[fastapi.Depends(auth.get_user)]
-    ),
-]
 
 # url roots
 LOCAL_URL = "http://localhost:8080"
@@ -64,12 +50,7 @@ app.add_middleware(
 )
 
 # add routers: TODO: specify this to be served instead by the reverse-proxy
-for router in ROUTER_CONFIGS:
-    app.include_router(
-        router.router, 
-        prefix=router.prefix, 
-        dependencies=router.dependencies  # type: ignore
-    )  
+config.include(app)
 
 
 @app.get("/", tags=["Root"])
