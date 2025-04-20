@@ -55,6 +55,7 @@ from ecoli.library.updaters import (
     inverse_update_unique_numpy,
     inverse_updater_registry,
 )
+from ecoli.migrated.registries import ecoli_core
 import faulthandler
 
 faulthandler.enable()
@@ -215,34 +216,9 @@ def deserialize_unum(schema, state, core=None):
 VERBOSE_REGISTER = os.getenv("VERBOSE_REGISTER", False)
 
 
-@dataclass.dataclass
-class Get:
-    core: process_bigraph.ProcessTypes | Any
-
-    @property
-    def processes(self):
-        return list(self.core.process_registry.registry.keys())
-    
-    @property
-    def types(self):
-        return(self.core.process_registry.registry.keys())
-    
-
-class Core(process_bigraph.ProcessTypes):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-    
-    @property
-    def get(self):
-        return Get(core=self)
-    
-
-# project core singleton
-ecoli_core = Core()
-
 # register types
 types_dir: str = os.path.join(os.path.dirname(__file__), "types")
-register_types(ecoli_core, types_dir, bool(VERBOSE_REGISTER))
+# register_types(ecoli_core, types_dir, bool(VERBOSE_REGISTER))
 
 # register processes
 # TODO: register processes here (explicitly or implicitly via interface)

@@ -39,7 +39,7 @@
 # from ecoli.migrated.listeners.unique_molecule_counts import UniqueMoleculeCounts
 # from ecoli.migrated.listeners.ribosome_data import RibosomeData
 # from ecoli.migrated.metabolism import Metabolism  # <--TODO: do we need this?
-from ecoli.migrated.tf_unbinding import TfUnbinding
+"""from ecoli.migrated.tf_unbinding import TfUnbinding
 from ecoli.migrated.tf_binding import TfBinding
 from ecoli.migrated.transcript_initiation import TranscriptInitiation
 from ecoli.migrated.transcript_elongation import TranscriptElongation
@@ -85,3 +85,4 @@ __all__ = [
     "GlobalClock",
     "BulkTimelineProcess"
 ]
+"""

@@ -22,7 +22,6 @@ from stochastic_arrow import StochasticSystem
 
 from ecoli.library.schema import bulk_name_to_idx, counts  # these are now registered types -> listener_schema, numpy_schema
 from ecoli.migrated.partition import PartitionedProcess
-from ecoli.shared.dtypes import format_bulk_state
 
 
 class Complexation(PartitionedProcess):
@@ -100,7 +99,7 @@ class Complexation(PartitionedProcess):
         called by the Requester.
         """
         timestep = state["timestep"]
-        bulk_state = format_bulk_state(state)
+        bulk_state = state["bulk"]
 
         if self.molecule_idx is None:
             self.molecule_idx = bulk_name_to_idx(  # TODO: can we make this non-brittle?

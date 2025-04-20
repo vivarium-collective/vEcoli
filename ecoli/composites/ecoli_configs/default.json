@@ -73,6 +73,7 @@
     "swap_processes" : {},
     "profile": false,
     "processes": [
+        "death_threshold",
         "post-division-mass-listener",
 
         "bulk-timeline",
