@@ -5,7 +5,7 @@
     "description" : "",
     "progress_bar" : true,
     "sim_data_path": "reconstruction/sim_data/kb/simData.cPickle",
-    "emitter" : "timeseries",
+    "composite_path": "",
     "emitter_arg": {},
     "emit_topology" : false,
     "emit_processes" : false,
