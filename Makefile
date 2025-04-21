@@ -4,7 +4,7 @@ clean:
 
 .PHONY: sync
 sync:
-	@[ -n "$(e)" ] && uv sync --frozen --all-extras || uv sync --frozen
+	@make clean && uv sync --frozen --all-extras
 
 .PHONY: commit
 commit:
@@ -13,10 +13,6 @@ commit:
 .PHONY: push
 push:
 	@git push
-
-.PHONY: add
-add:
-	@[ -n "$(files)" ] && git add "$(files)" || git add --all
 
 .PHONY: test
 test:

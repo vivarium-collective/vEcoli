@@ -62,7 +62,9 @@ dependencies = [
 
 [project.scripts]
 gateway = "api.gateway.main:cli"
-crosspiler = "pbg.app:cli"
+crosspile = "pbg.app:cli"
+flow = "runscripts.flow:cli"
+
 
 [project.optional-dependencies]
 dev = [
