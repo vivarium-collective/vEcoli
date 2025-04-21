@@ -93,16 +93,16 @@ class DeathThreshold(PartitionedProcess):
             "timestep": self.timestep_schema,
         }
 
-    def calculate_request(self, timestep, states):
+    def calculate_request(self, state):
         # Since this is a PartitionedProcess, it will be turned into two Steps:
         # a Requester and an Evolver. The Requester Step will call calculate_request.
 
         # Cache molecule index so that Requester and Evolver can use it
         if self.mol_idx is None:
-            self.mol_idx = bulk_name_to_idx(self.molecule_id, states["bulk"]["id"])
+            self.mol_idx = bulk_name_to_idx(self.molecule_id, state["bulk"]["id"])
         # Request all counts of given bulk molecule. Updates to bulk store are
         # lists of 2-element tuples ``(index, count)``
-        return {"bulk": [(self.mol_idx, counts(states["bulk"], self.mol_idx))]}
+        return {"bulk": [(self.mol_idx, counts(state["bulk"], self.mol_idx))]}
 
     def update(self, state, interval):
         # The Evolver Step will call evolve_state after the Requesters in the execution

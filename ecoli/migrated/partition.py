@@ -19,10 +19,11 @@ import numpy as np
 from process_bigraph import Process, Step
 
 from ecoli.library.schema import numpy_schema
+from ecoli.shared.base import ProcessBase, StepBase
 from ecoli.shared.schemas import get_config_schema
 
 
-class Requester(Step):
+class Requester(StepBase):
     config_schema = {}
 
     def initialize(self, config):
@@ -43,13 +44,14 @@ class Requester(Step):
 # - handle protein complex dissociation
 
 
-class PartitionedProcess(Process):
+class PartitionedProcess(ProcessBase):
     """Partitioned Process which acts as a base type which should be inherited by any process that needs to
     be linked with a Requester. This replaces the previous PartitionedProcess. These processes are
     distinctly marked by their interaction/dependence on the "bulk" type.
     """
     defaults = {}
     config_schema = {}
+    _molecule_idx: int | np.ndarray = np.array([])
 
     def __init__(self, config=None, core=None):
         # parsing the defaults and setting the config schema as an instance attribute
@@ -60,7 +62,17 @@ class PartitionedProcess(Process):
         super().__init__(config, core)
 
         self.timestep = self.config["time_step"]
+    
+    @property
+    def molecule_idx(self):
+        return self._molecule_idx
 
+    @molecule_idx.setter
+    def molecule_idx(self, val: np.ndarray | int):
+        """Sanity check on mol index"""
+        assert isinstance(val, np.ndarray) or isinstance(val, int), f"Mol index type is incorrect. Got: {type(val)} Expected: np.ndarray or int"
+        self._molecule_idx = val
+    
     def initial_state(self):
         return {
             "bulk": [()],

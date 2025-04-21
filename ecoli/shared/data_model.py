@@ -1,22 +1,27 @@
 from dataclasses import dataclass, asdict, field, astuple
+import json
 from typing import Any
 import pickle
 
 
 @dataclass
-class BaseModel:
+class BaseClass:
+    def serialize(self) -> str:
+        d = self.as_dict()
+        return json.dumps(d)
+
+    def as_bytes(self):
+        return pickle.dumps(self.as_dict())
+
+    def as_dict(self):
+        return asdict(self)
+
+    def as_tuple(self):
+        return astuple(self)
+    
     @classmethod
     def hydrate(cls, p: bytes) -> dict:
         return pickle.loads(p)
-
-    def bytes(self):
-        return pickle.dumps(self.dict())
-
-    def dict(self):
-        return asdict(self)
-
-    def tuple(self):
-        return astuple(self)
 
     @property
     def _builtins(self):
@@ -27,13 +32,13 @@ class BaseModel:
 
 
 @dataclass
-class VivariumDocument(BaseModel):
+class VivariumDocument(BaseClass):
     state: dict[str, Any]
     composition: str
 
 
 @dataclass
-class IntervalResult(BaseModel):
+class IntervalResult(BaseClass):
     def __init__(self, **port_data):
         for port_name, port_value in port_data.items():
             setattr(self, port_name, port_value)
@@ -48,7 +53,7 @@ class IntervalResult(BaseModel):
 
 
 @dataclass
-class SimulationResult(BaseModel):
+class SimulationResult(BaseClass):
     simulation_id: str
     timestamp: str
     data: list[IntervalResult]
