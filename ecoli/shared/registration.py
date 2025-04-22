@@ -6,12 +6,15 @@ import datetime
 import json
 import logging
 import os
+from importlib import import_module
 from types import ModuleType
 from typing import Any, Dict, List, Optional
 
 from process_bigraph import ProcessTypes, Process
 from vivarium.core.registry import Registry as VivRegistry
 from bigraph_schema import Registry as BgsRegistry
+
+from ecoli.shared.types.register import register_type
 
 
 class TopologyRegistry(VivRegistry):
@@ -89,6 +92,22 @@ class Core(ProcessTypes):
     @view.setter
     def view(self, v):
         raise AssertionError("You cannot set the view.")
+    
+    def register_type(self, module_name: str):
+        return register_type(module_name, core=self)
+    
+    def register_process_package(self, package_name: str, verbose=False):
+        """Assumes there to be an __all__ definition in the referenced package"""
+        package = import_module(f"ecoli.{package_name}")
+        for process in package.__all__:
+            try:
+                proc = getattr(package, process)
+                process_id = proc.__module__.split('.')[-1]
+                self.add.process(process_id, proc)
+                if verbose:
+                    print(f'{process_id} registered to processes')
+            except Exception as e:
+                print(e) if verbose else None
 
 
 # ------------------- # 
@@ -307,6 +326,16 @@ def register_types(core: ProcessTypes, types_dir: str, verbose: bool, logger: lo
             if verbose:
                 logger.error(f"{spec_path} cannot be registered.\n")
             continue
+
+
+def get_process_module_names(subpackage: str = "migrated") -> list[str]:
+    mod_names = []
+    pkg = import_module(f"ecoli.{subpackage}")
+    for item in pkg.__all__:
+        proc = getattr(pkg, item)
+        proc_module = proc.__module__
+        mod_names.append(proc_module)
+    return mod_names
 
 
 # ------- main ---------- # 

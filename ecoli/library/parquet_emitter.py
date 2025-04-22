@@ -658,6 +658,7 @@ def flatten_dict(d: dict):
 
 
 class ParquetEmitter(Emitter):
+    # TODO: migrate this
     """
     Emit data to a Parquet dataset.
     """

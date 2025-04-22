@@ -54,7 +54,7 @@ from ecoli.migrated.equilibrium import Equilibrium
 from ecoli.migrated.protein_degradation import ProteinDegradation
 
 from ecoli.migrated.metabolism_redux import MetabolismRedux
-from ecoli.migrated.chromosome_replication import ChromosomeReplication
+# from ecoli.migrated.chromosome_replication import ChromosomeReplication
 from ecoli.migrated.chromosome_structure import ChromosomeStructure
 from ecoli.migrated.allocator import Allocator
 from ecoli.migrated.chemostat import Chemostat
@@ -78,7 +78,7 @@ __all__ = [
     "Equilibrium",
     "ProteinDegradation",
     "MetabolismRedux",
-    "ChromosomeReplication",
+    # "ChromosomeReplication",
     "ChromosomeStructure",
     "Allocator",
     "Chemostat",

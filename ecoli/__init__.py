@@ -33,11 +33,6 @@ from dataclasses import dataclass
 
 from process_bigraph import ProcessTypes
 from process_bigraph.processes import TOY_PROCESSES
-from vivarium.core.registry import (
-    divider_registry,
-    emitter_registry,
-    serializer_registry,
-)
 
 from wholecell.utils import units
 from ecoli.library.units import Quantity
@@ -67,35 +62,56 @@ from ecoli.library.updaters import (
     inverse_update_unique_numpy,
     inverse_updater_registry,
 )
-from ecoli.shared.registration import ecoli_core
+from ecoli import migrated
+from ecoli.shared.registration import ecoli_core, get_process_module_names
 from ecoli.shared.utils.log import setup_logging
 
 
 logger: logging.Logger = setup_logging(__name__)
 
 
-emitter_registry.register("parquet", ParquetEmitter)
+VERBOSE_REGISTER = eval(os.getenv("VERBOSE_REGISTER", "True"))
+PROCESS_PACKAGES = ["migrated"]  # TODO: add more here
+TYPE_MODULES = ["unum"]  # TODO: add more here
+
+# import and register types
+for modname in TYPE_MODULES:
+    ecoli_core.register_type(modname)
+
+# import and register processes
+for pkg in PROCESS_PACKAGES:
+    ecoli_core.register_process_package(pkg)
+
+# register toy processes
+for name, process in TOY_PROCESSES.items():
+    ecoli_core.process_registry.register(name.lower(), process)
+
+
+# ----- existing registration logic TODO: how to handle this/move to types ----- # 
+
+ecoli_core.process_registry.register("parquet", ParquetEmitter)
 
 # register :term:`updaters`
-inverse_updater_registry.register("accumulate", inverse_update_accumulate)
-inverse_updater_registry.register("set", inverse_update_set)
-inverse_updater_registry.register("null", inverse_update_null)
-inverse_updater_registry.register("merge", inverse_update_merge)
-inverse_updater_registry.register(
+# inverse_updater_registry.register("accumulate", inverse_update_accumulate)
+# inverse_updater_registry.register("set", inverse_update_set)
+# inverse_updater_registry.register("null", inverse_update_null)
+# inverse_updater_registry.register("merge", inverse_update_merge)
+ecoli_core.apply_registry.register(
     "nonnegative_accumulate", inverse_update_nonnegative_accumulate
 )
-inverse_updater_registry.register("bulk_numpy", inverse_update_bulk_numpy)
-inverse_updater_registry.register("unique_numpy", inverse_update_unique_numpy)
+ecoli_core.apply_registry.register("bulk_numpy", inverse_update_bulk_numpy)
+ecoli_core.apply_registry.register("unique_numpy", inverse_update_unique_numpy)
 
 
 # register :term:`dividers`
-divider_registry.register("binomial_ecoli", divide_binomial)
-divider_registry.register("bulk_binomial", divide_bulk)
-divider_registry.register("by_domain", divide_by_domain)
-divider_registry.register("rna_by_domain", divide_RNAs_by_domain)
-divider_registry.register("empty_dict", empty_dict_divider)
-divider_registry.register("ribosome_by_RNA", divide_ribosomes_by_RNA)
-divider_registry.register("set_none", divide_set_none)
+ecoli_core.divide_registry.register("binomial_ecoli", divide_binomial)
+ecoli_core.divide_registry.register("bulk_binomial", divide_bulk)
+ecoli_core.divide_registry.register("by_domain", divide_by_domain)
+ecoli_core.divide_registry.register("rna_by_domain", divide_RNAs_by_domain)
+ecoli_core.divide_registry.register("empty_dict", empty_dict_divider)
+ecoli_core.divide_registry.register("ribosome_by_RNA", divide_ribosomes_by_RNA)
+ecoli_core.divide_registry.register("set_none", divide_set_none)
+
 
 # register serializers
 for serializer_cls in (
@@ -105,16 +121,4 @@ for serializer_cls in (
     MethodSerializer,
 ):
     serializer = serializer_cls()
-    serializer_registry.register(serializer.name, serializer)
-
-
-VERBOSE_REGISTER = eval(os.getenv("VERBOSE_REGISTER", "True"))
-
-
-# register types
-types_dir: str = os.path.join(os.path.dirname(__file__), "types")
-# register_types(ecoli_core, types_dir, bool(VERBOSE_REGISTER))
-
-# register processes
-# TODO: register processes here (explicitly or implicitly via interface)
-ecoli_core.register_processes(TOY_PROCESSES)
+    ecoli_core.serialize_registry.register(serializer.name, serializer)

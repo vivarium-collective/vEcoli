@@ -28,7 +28,6 @@ from ecoli.library.schema import (
 )
 
 from ecoli.migrated.partition import PartitionedProcess
-from ecoli.shared.dtypes import format_active_replisomes_state
 from ecoli.shared.schemas import listener_schema, numpy_schema
 
 

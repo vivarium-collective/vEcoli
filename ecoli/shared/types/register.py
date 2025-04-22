@@ -2,9 +2,6 @@ import importlib
 from logging import getLogger
 from types import ModuleType
 
-from wholecell.utils import units
-from ecoli.shared.registration import Core
-
 
 TYPE_METHODS = ["apply", "check", "divide", "serialize", "deserialize", "slice", "fold"]
 
@@ -83,12 +80,12 @@ def register(schema, core):
     return core.register_types({type_name: schema})
 
 
-def register_type(module_name: str, core: Core):
+def register_type(module_name: str, core):
     schema = construct_schema(module_name)
     return register(schema, core)
 
 
-def test_register_type(ec: Core):
+def test_register_type(ecore):
     modname = "unum"
-    register_type(modname, ec)
-    assert ec.types().get('unum') is not None
+    register_type(modname, ecore)
+    assert ecore.types().get('unum') is not None
