@@ -1,9 +1,0 @@
-{
-  "chromosome_domains_type": {
-    "_inherit": "tuple",
-    "_type": "chromosome_domains_type"
-  },
-  "chromosome_domains": {
-    "_type": "list[chromosome_domains_type]"
-  }
-}

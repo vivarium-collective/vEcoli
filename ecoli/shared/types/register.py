@@ -1,5 +1,7 @@
 import importlib
+import json
 from logging import getLogger
+import os
 from types import ModuleType
 
 
@@ -82,7 +84,14 @@ def register(schema, core):
 
 def register_type(module_name: str, core):
     schema = construct_schema(module_name)
-    return register(schema, core)
+    register(schema, core)
+    definition = core.types().get(module_name)
+    definition.pop("_default", None)
+    def_path = f"/Users/alexanderpatrie/Desktop/repos/v2Ecoli/ecoli/shared/types/definitions/{module_name}.json"
+    if not os.path.exists(def_path):
+        with open(def_path, "w") as f:
+            json.dump(definition, f, indent=4)
+        # return register(schema, core)
 
 
 def test_register_type(ecore):

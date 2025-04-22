@@ -1,6 +1,0 @@
-{
-    "complexation_listener_type": {
-      "_type": "complexation_listener_type",
-      "_inherit": "tree"
-    }
-}

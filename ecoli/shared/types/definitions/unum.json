@@ -1,9 +1,8 @@
 {
-  "unum": {
-    "_type": "unum",
-    "_deserialize": "deserialize_unum",
-    "_serialize": "serialize_unum",
+    "_apply": "apply_unum",
     "_check": "check_unum",
-    "_inherit": "float"
-  }
+    "_divide": "divide_unum",
+    "_serialize": "serialize_unum",
+    "_deserialize": "deserialize_unum",
+    "_type": "unum"
 }

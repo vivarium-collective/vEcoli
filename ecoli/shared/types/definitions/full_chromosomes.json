@@ -1,9 +1,0 @@
-{
-  "full_chromosomes_type": {
-    "_inherit": "tuple",
-    "_type": "full_chromosomes_type"
-  },
-  "full_chromosomes": {
-    "_type": "list[full_chromosomes_type]"
-  }
-}

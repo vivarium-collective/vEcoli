@@ -1,9 +1,0 @@
-{
-  "bytes": {
-    "_type": "bytes",
-    "_default": "bytes()",
-    "_check": "check_bytes",
-    "_apply": "apply_bytes",
-    "_deserialize": "deserialize_bytes"
-  }
-}
