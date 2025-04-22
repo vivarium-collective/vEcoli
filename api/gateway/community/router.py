@@ -14,7 +14,7 @@ from api.data_model.gateway import RouterConfig
 from api.gateway.community import auth
 from api.gateway.handlers.app_config import root_prefix
 from api.gateway.handlers.multi import launch_scan
-from api.gateway.handlers.vivarium import VivariumFactory, new_id
+from api.gateway.handlers.vivarium import VivariumFactory, fetch_vivarium, new_id, new_vivarium, pickle_vivarium
 from ecoli import ecoli_core
 
 from api.data_model.base import BaseClass
@@ -93,20 +93,54 @@ async def get_results(key: str, simulation_id: str):
     pass
 
 
+@config.router.post('/new-vivarium')
+async def create_vivarium(name: str, document: VivariumDocument | None = None):
+    return new_vivarium(name, document)
 
+
+@config.router.get('/get-vivarium')
+async def get_vivarium(viv_id: str = Query(default="testd59659a7-f746-4ce3-a8d1-aeb2e843f208")):
+    viv = fetch_vivarium(viv_id)
+    return viv.make_document()
+
+
+@config.router.post('/run-vivarium')
+async def run_vivarium(
+    viv_id: str = Query(default="testd59659a7-f746-4ce3-a8d1-aeb2e843f208"), 
+    duration: float = Query(default=11.11)
+):
+    try:
+        # get viv pickle
+        viv = fetch_vivarium(viv_id)
+        if "emitter" not in viv.get_state().keys():
+            viv.add_emitter()
+
+        # run
+        viv.run(duration)  # TODO: add timestep?
+
+        # get current state
+        current = viv.make_document()
+
+        # save state
+        pickle_vivarium(viv, viv_id)
+
+        return current
+
+    except Exception as e:
+        raise fastapi.HTTPException(404, str(e))
 
 
 # -- static data -- #
 
 @config.router.get('/get/processes', tags=["CommunityAPI"])
-def get_registered_processes() -> list[str]:
+async def get_registered_processes() -> list[str]:
     # TODO: implement this for ecoli_core
     from ecoli import ecoli_core
     return list(ecoli_core.process_registry.registry.keys())
 
 
 @config.router.get('/get/types', tags=["CommunityAPI"])
-def get_registered_types() -> list[str]:
+async def get_registered_types() -> list[str]:
     # TODO: implement this for ecoli_core
     from ecoli import ecoli_core
     return list(ecoli_core.types().keys())

@@ -20,14 +20,7 @@ dot.load_dotenv()
 
 # config spec and env vars
 APP_CONFIG = app_config.get_config(
-    os.path.join(
-        os.path.dirname(
-            os.path.dirname(__file__)
-        ),
-        'shared',
-        'configs',
-        'app_config.json'
-    )
+    "/Users/alexanderpatrie/Desktop/repos/v2Ecoli/api/shared/configs/app_config.json"
 )
 APP_VERSION = APP_CONFIG['version']
 GATEWAY_PORT = os.getenv("GATEWAY_PORT", "8080")
@@ -56,6 +49,7 @@ config.include(app)
 @app.get("/", tags=["Root"])
 async def api_root():
     return {"GUI": LOCAL_URL + "/docs"}
+
 
 
 # e54d4431-5dab-474e-b71a-0db1fcb9e659

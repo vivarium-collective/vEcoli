@@ -10,7 +10,7 @@ from fastapi.openapi.utils import get_openapi
 from starlette.middleware.cors import CORSMiddleware
 
 from api.data_model.gateway import RouterConfig
-from api.handlers import app_config as config 
+from api.gateway.handlers import app_config as config 
 from api.gateway import auth 
 from api.gateway.routers import community, evolve
 

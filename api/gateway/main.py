@@ -13,7 +13,6 @@ import uvicorn
 
 from api.gateway.handlers import app_config
 from api.gateway.community.app import app as community 
-from api.gateway.evolve.app import app as evolve
 
 
 logger: log.Logger = log.getLogger(__name__)
@@ -42,7 +41,7 @@ cli = typer.Typer()
 
 @cli.command()
 def start(api_name: str, max_timeout: int = 50, buffer: float = 5.0, host="0.0.0.0", port=8080):
-    app = community if api_name == "community" else evolve
+    app = community
     uvicorn.run(app, host=host, port=port)
 
 

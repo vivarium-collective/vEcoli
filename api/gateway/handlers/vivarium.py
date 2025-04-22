@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any
 import uuid
 import shutil
@@ -13,10 +14,13 @@ from api.shared.registries import manager
 from api.data_model.vivarium import VivariumDocument, VivariumMetadata
 
 
+PICKLE_DIR = os.path.abspath("storage")
+
 class VivariumFactory:
     def get_core(self, protocol: str = "base"):
+        from ecoli.shared.registration import ecoli_core
         # TODO: parse protocol here and return different cores if needed 
-        return None
+        return ecoli_core
     
     def new(self, document: VivariumDocument | None = None, core=None) -> Vivarium:
         c = self.get_core() or core
@@ -44,23 +48,24 @@ def pickle_vivarium(v: Vivarium, viv_id: str):
     # encrypted_viv = encrypt_viv(pickled_viv)
     
     # create temp dir
-    temp_dir = tf.mkdtemp()
+    pickle_dir = PICKLE_DIR
 
     # make tmp_pickle_path:-> (temp_dir / viv_id).pckl
-    tmp_pickle_path = os.path.join(temp_dir, f"{viv_id}.pckl")
+    pickle_path = os.path.join(pickle_dir, f"{viv_id}.pckl")
     
     # write pickle to tmp_pickle_path
-    with open(tmp_pickle_path, "wb") as f:
+    with open(pickle_path, "wb") as f:
         f.write(pickled_viv)
 
     # del pickled_viv
     del pickled_viv
     
     # make pickle_location:-> upload/secure store the pickle file (TODO: do this in a bucket)
-    pickler.write(tmp_pickle_path, viv_id)
+    # pickler.write(tmp_pickle_path, viv_id)
     
     # remove tmp dir:-> shutil.rmtree(tmp_dir)
-    shutil.rmtree(temp_dir)
+    # shutil.rmtree(temp_dir)
+    return pickle_path
 
 
 def new_vivarium(name: str, document: VivariumDocument | None = None) -> VivariumMetadata:
@@ -74,7 +79,7 @@ def new_vivarium(name: str, document: VivariumDocument | None = None) -> Vivariu
     viv_id = new_id(name)
     
     # write pickle to db
-    pickle_vivarium(v, viv_id)
+    location = pickle_vivarium(v, viv_id)
     
     return VivariumMetadata(viv_id)
 
@@ -83,17 +88,17 @@ def new_vivarium(name: str, document: VivariumDocument | None = None) -> Vivariu
 
 def fetch_vivarium(vivarium_id: str) -> Vivarium:
     pickler = Pickler()
+    pickle_dir = PICKLE_DIR
+    path = None
+    for f in os.listdir(pickle_dir):
+        if vivarium_id in f:
+            path = os.path.join(pickle_dir, f)
 
-    # get pickle path using viv_id
-    # pickle_location = lookup_pickle(vivarium_id)
-
-    # make tmp dir
-    # temp_dir = tf.mkdtemp()
-
-    # get pickled_viv:-> fetch/download/write .pckl file into tmp_dir from pickle location
-
-    # return json.loads(pickled_viv)
-    return pickler.read(vivarium_id)
+    if path is not None:
+        return pickler.read(Path(path))
+    else:
+        raise Exception("Could not find")
+    
 
 
 def run_vivarium(document: VivariumDocument, duration: float) -> list[dict[str, Any]]:
