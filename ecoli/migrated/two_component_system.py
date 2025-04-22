@@ -12,54 +12,53 @@ and back in response to counts of ligand stimulants.
 import numpy as np
 
 from ecoli.library.schema import bulk_name_to_idx, counts
-from ecoli.shared.dtypes import format_bulk_state
 
+from ecoli.shared.schemas import numpy_schema
 from wholecell.utils import units
+from ecoli.migrated.registries import ecoli_core
 from ecoli.migrated.partition import PartitionedProcess
 
 
 # Register default topology for this process, associating it with process name
-# NAME = "ecoli-two-component-system"
-# TOPOLOGY = {
-#     "listeners": ("listeners",),
-#     "bulk": ("bulk",),
-#     "timestep": ("timestep",),
-# }
-# topology_registry.register(NAME, TOPOLOGY)
+NAME = "ecoli-two-component-system"
+TOPOLOGY = {
+    "listeners": ("listeners",),
+    "bulk": ("bulk",),
+    "timestep": ("timestep",),
+}
+ecoli_core.topology.register(NAME, TOPOLOGY)
 
 
 class TwoComponentSystem(PartitionedProcess):
     """Two Component System PartitionedProcess"""
 
-    config_schema = {
-        "jit": "boolean",
-        "n_avogadro": "float",
-        "cell_density": "float",
-        "moleculeNames": "list",
-        "seed": "integer",
+    name = NAME
+    defaults = {
+        "jit": False,
+        "n_avogadro": 0.0,
+        "cell_density": 0.0,
+        "moleculesToNextTimeStep": (
+            lambda counts, volume, avogadro, timestep, random, method, min_step, jit: (
+                [],
+                [],
+            )
+        ),
+        "moleculeNames": [],
+        "seed": 0,
     }
 
-    # Constructor
     def __init__(self, config=None, core=None):
         super().__init__(config, core)
 
         # Simulation options
-        self.all_molecule_changes = None
-        self.molecules_required = None
-        self.cellVolume = None
-        self.jit = self.config.get("jit", False)
+        self.jit = self.config["jit"]
 
         # Get constants
         self.n_avogadro = self.config["n_avogadro"]
         self.cell_density = self.config["cell_density"]
 
         # Create method
-        self.moleculesToNextTimeStep = (
-            lambda counts, volume, avogadro, timestep, random, method, min_step, jit: (
-                [],
-                [],
-            )
-        )
+        self.moleculesToNextTimeStep = self.config["moleculesToNextTimeStep"]
 
         # Build views
         self.moleculeNames = self.config["moleculeNames"]
@@ -67,19 +66,16 @@ class TwoComponentSystem(PartitionedProcess):
         self.seed = self.config["seed"]
         self.random_state = np.random.RandomState(seed=self.seed)
 
-        # Helper indices for Numpy indexing
-        self.molecule_idx = None
-
     def inputs(self):
         return {
-            "bulk": "bulk",  # numpy_schema("bulk"),
-            "listeners": "tree",  # {"mass": {"cell_mass": {"_default": 0}}},
-            "timestep": "float",
+            "bulk": numpy_schema("bulk"),
+            "listeners": {"mass": {"cell_mass": "float"}},
+            "timestep": self.timestep_schema,
         }
-
+    
     def outputs(self):
         return {
-            "bulk": "bulk",  # numpy_schema("bulk"),
+            "bulk": numpy_schema("bulk")
         }
 
     def calculate_request(self, state):
@@ -117,8 +113,7 @@ class TwoComponentSystem(PartitionedProcess):
         return requests
 
     def update(self, state, interval):
-        bulk_state = format_bulk_state(state)
-        moleculeCounts = counts(bulk_state, self.molecule_idx)
+        moleculeCounts = counts(state["bulk"], self.molecule_idx)
         # Check if any molecules were allocated fewer counts than requested
         if (self.molecules_required > moleculeCounts).any():
             _, self.all_molecule_changes = self.moleculesToNextTimeStep(
@@ -128,7 +123,7 @@ class TwoComponentSystem(PartitionedProcess):
                 10000,
                 self.random_state,
                 method="BDF",
-                # min_time_step=states["timestep"],
+                min_time_step=state["timestep"],
                 jit=self.jit,
             )
         # Increment changes in molecule counts

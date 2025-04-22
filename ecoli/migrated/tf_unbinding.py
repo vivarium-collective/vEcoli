@@ -7,70 +7,56 @@ binding back to DNA.
 import numpy as np
 import warnings
 
-from process_bigraph import Step
-
-# from ecoli.processes.registries import topology_registry
-from ecoli.library.schema import bulk_name_to_idx, attrs, numpy_schema
-from ecoli.shared.dtypes import format_bulk_state
-
+from ecoli.migrated.registries import ecoli_core
+from ecoli.library.schema import bulk_name_to_idx, attrs
+from ecoli.shared.base import StepBase
+from ecoli.shared.schemas import numpy_schema
 
 # Register default topology for this process, associating it with process name
-# NAME = "ecoli-tf-unbinding"
-# TOPOLOGY = {
-#     "bulk": ("bulk",),
-#     "promoters": (
-#         "unique",
-#         "promoter",
-#     ),
-#     "global_time": ("global_time",),
-#     "timestep": ("timestep",),
-#     "next_update_time": ("next_update_time", "tf_unbinding"),
-# }
-# topology_registry.register(NAME, TOPOLOGY)
+NAME = "ecoli-tf-unbinding"
+TOPOLOGY = {
+    "bulk": ("bulk",),
+    "promoters": (
+        "unique",
+        "promoter",
+    ),
+    "global_time": ("global_time",),
+    "timestep": ("timestep",),
+    "next_update_time": ("next_update_time", "tf_unbinding"),
+}
+ecoli_core.topology.register(NAME, TOPOLOGY)
 
 
-class TfUnbinding(Step):
+class TfUnbinding(StepBase):
     """TfUnbinding"""
 
-    config_schema = {
-        "time_step": {
-            "_type": "integer",
-            "_default": 1,
-        },
-        "emit_unique": {
-            "_type": "boolean",
-            "_default": False,
-        },
-        "submass_indices": "maybe[list]",
-        "active_tf_masses": "maybe[list]"
-    }
+    name = NAME
+    defaults = {"time_step": 1, "emit_unique": False}
 
     # Constructor
     def __init__(self, config=None, core=None):
-        super().__init__(config, core)
+        super().__init__(config)
         self.tf_ids = self.config["tf_ids"]
-        self.submass_indices = self.config.get("submass_indices", np.array([]))
-        self.active_tf_masses = self.config.get("active_tf_masses", np.array([]))
+        self.submass_indices = self.config["submass_indices"]
+        self.active_tf_masses = self.config["active_tf_masses"]
 
         # Numpy indices for bulk molecules
         self.active_tf_idx = None
 
     def inputs(self):
         return {
-            "bulk": "bulk",
-            "promoters": "tree",
+            "bulk": numpy_schema("bulk"),
+            "promoters": numpy_schema("promoters"),
             "global_time": "float",
-            "timestep": "float",
-            "next_update_time": "float"
+            "timestep": self.timestep_schema,
+            "next_update_time": self.timestep_schema
         }
-
+    
     def outputs(self):
         return {
-            "bulk": "bulk",
-            "promoters": "tree",
-            "global_time": "float",
-            "timestep": "float",
-            "next_update_time": "float"
+            "bulk": numpy_schema("bulk"),
+            "promoters": numpy_schema("promoters"),
+            "next_update_time": self.timestep_schema
         }
 
     def update_condition(self, state):
@@ -80,7 +66,7 @@ class TfUnbinding(Step):
         if state["next_update_time"] <= state["global_time"]:
             if state["next_update_time"] < state["global_time"]:
                 warnings.warn(
-                    f"TfUnbinding updated at t="
+                    f"{self.name} updated at t="
                     f"{state['global_time']} instead of t="
                     f"{state['next_update_time']}. Decrease the "
                     "timestep for the global clock process for more "
@@ -90,11 +76,10 @@ class TfUnbinding(Step):
         return False
 
     def update(self, state):
-        bulk_state = format_bulk_state(state)
         # At t=0, convert all strings to indices
         if self.active_tf_idx is None:
             self.active_tf_idx = bulk_name_to_idx(
-                [tf + "[c]" for tf in self.tf_ids], bulk_state["id"]
+                [tf + "[c]" for tf in self.tf_ids], state["bulk"]["id"]
             )
 
         # Get attributes of all promoters
@@ -108,13 +93,10 @@ class TfUnbinding(Step):
 
         update = {
             # Free all DNA-bound TFs into free active TFs
-            "bulk": [(
-                self.active_tf_idx.tolist() if isinstance(self.active_tf_idx, np.ndarray) else self.active_tf_idx,
-                n_bound_TF
-            )],
+            "bulk": [(self.active_tf_idx, n_bound_TF)],
             "promoters": {
                 # Reset bound_TF attribute of promoters
-                "set": {"bound_TF": np.zeros_like(bound_TF).tolist()},
+                "set": {"bound_TF": np.zeros_like(bound_TF)}
             },
         }
 
