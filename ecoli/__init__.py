@@ -11,7 +11,13 @@ C. import all required type schemas/defs and register them (or read them via jso
 
 import os
 import warnings
+import logging
 import faulthandler
+
+from ecoli.shared.utils.log import setup_logging
+
+# logger
+logger: logging.Logger = setup_logging(__name__)
 
 # suppress \s errors TODO: fix this in offending modules
 warnings.filterwarnings("ignore", category=SyntaxWarning)
@@ -24,14 +30,13 @@ os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 # TODO: move/replace this?
 faulthandler.enable()
 
-import logging
 from dataclasses import dataclass
 
 from process_bigraph.processes import TOY_PROCESSES
 
 from wholecell.utils import units
 from ecoli.library.units import Quantity
-from ecoli.library.parquet_emitter import ParquetEmitter
+from ecoli.emitters.parquet import ParquetEmitter
 from ecoli.library.schema import (
     divide_binomial,
     divide_bulk,
@@ -57,17 +62,13 @@ from ecoli.library.updaters import (
     inverse_update_unique_numpy,
     inverse_updater_registry,
 )
-from ecoli import migrated
-from ecoli.shared.registration import ecoli_core, get_process_module_names
-from ecoli.shared.utils.log import setup_logging
-
-
-logger: logging.Logger = setup_logging(__name__)
+from ecoli.shared.registration import ecoli_core
 
 
 VERBOSE_REGISTER = eval(os.getenv("VERBOSE_REGISTER", "True"))
 PROCESS_PACKAGES = ["migrated"]  # TODO: add more here
 TYPE_MODULES = ["unum"]  # TODO: add more here
+
 
 # import and register types
 for modname in TYPE_MODULES:

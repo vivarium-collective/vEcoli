@@ -19,7 +19,7 @@ import numpy as np
 import polars as pl
 from scipy.stats import pearsonr
 
-from ecoli.library.parquet_emitter import (
+from ecoli.emitters.parquet import (
     get_config_value,
     get_field_metadata,
     open_arbitrary_sim_data,

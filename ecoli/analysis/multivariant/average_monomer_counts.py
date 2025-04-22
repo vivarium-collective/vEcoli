@@ -14,7 +14,7 @@ import numpy as np
 import polars as pl
 from typing import Any, cast
 
-from ecoli.library.parquet_emitter import (
+from ecoli.emitters.parquet import (
     read_stacked_columns,
     ndlist_to_ndarray,
     open_arbitrary_sim_data,

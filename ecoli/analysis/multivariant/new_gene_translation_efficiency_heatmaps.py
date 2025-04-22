@@ -57,7 +57,7 @@ from typing import Any, Callable, cast, Optional, TYPE_CHECKING
 from tqdm import tqdm
 
 from ecoli.variants.new_gene_internal_shift import get_new_gene_ids_and_indices
-from ecoli.library.parquet_emitter import (
+from ecoli.emitters.parquet import (
     get_field_metadata,
     ndarray_to_ndlist,
     ndlist_to_ndarray,

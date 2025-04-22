@@ -11,7 +11,7 @@ from typing import Any
 from duckdb import DuckDBPyConnection
 import polars as pl
 
-from ecoli.library.parquet_emitter import (
+from ecoli.emitters.parquet import (
     get_field_metadata,
     ndidx_to_duckdb_expr,
     num_cells,
