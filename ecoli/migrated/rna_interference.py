@@ -10,7 +10,7 @@ import numpy as np
 import warnings
 
 from ecoli.library.schema import bulk_name_to_idx, counts, attrs
-from ecoli.migrated.registries import ecoli_core
+from ecoli.shared.registration import ecoli_core
 from ecoli.shared.base import ProcessBase
 from ecoli.processes.unique_update import UniqueUpdate
 from ecoli.shared.schemas import numpy_schema

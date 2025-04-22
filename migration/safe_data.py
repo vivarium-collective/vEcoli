@@ -1,8 +1,7 @@
 from ecoli.migrated.complexation import Complexation
 from vivarium import Vivarium
-from ecoli.migrated.registries import ecoli_core as ec
-from ecoli.shared.utils.migration import Configuration, configure
-from ecoli.shared.encryption import data, bitstring
+from ecoli.shared.registration import ecoli_core as ec
+from ecoli.shared.utils.migration import configure
 
 
 def get_config():

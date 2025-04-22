@@ -4,9 +4,9 @@ from dataclasses import dataclass
 from process_bigraph import Step, Process
 from vivarium.vivarium import Vivarium
 
-from ecoli.shared.data_model import BaseClass
+from ecoli.shared.datamods import BaseClass
 from ecoli.shared.schemas import get_config_schema
-from ecoli.migrated.registries import Core, ecoli_core
+from ecoli.shared.registration import Core, ecoli_core
 
 
 

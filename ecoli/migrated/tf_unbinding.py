@@ -7,7 +7,7 @@ binding back to DNA.
 import numpy as np
 import warnings
 
-from ecoli.migrated.registries import ecoli_core
+from ecoli.shared.registration import ecoli_core
 from ecoli.library.schema import bulk_name_to_idx, attrs
 from ecoli.shared.base import StepBase
 from ecoli.shared.schemas import numpy_schema

@@ -2,6 +2,7 @@
 Migration v2 Utils
 """
 
+import copy
 from dataclasses import dataclass
 import importlib
 import json
@@ -17,14 +18,29 @@ from scipy.stats import mannwhitneyu, chi2_contingency, ttest_ind, bartlett
 from process_bigraph import Composite
 from vivarium.vivarium import Vivarium
 from vivarium.core.engine import Engine, view_values, _process_update
-from vivarium.library.dict_utils import deep_merge
+from bigraph_schema import deep_merge
 
 from ecoli.shared.base import ProcessBase, StepBase, vivarium_factory
-from ecoli.shared.data_model import BaseClass
+from ecoli.shared.datamods import BaseClass
 from wholecell.utils import units
 from ecoli.library.json_state import get_state_from_file
 from migration import LOAD_SIM_DATA, LOAD_SIM_DATA_NO_OPERONS
-from ecoli.migrated.registries import Core, ecoli_core
+from ecoli.shared.registration import Core, ecoli_core
+
+
+def dict_union(a: dict, b: dict, mutate_a: bool = False, secure: bool = False) -> dict:
+    """
+    Performs `bigraph_schema.deep_merge(a, b)` but returns a new object rather than mutating `a` if
+    and only if `mutate_a = True`, otherwise performs a regular call to `deep_merge`. If `secure` is `True`,
+    then both `a` and `b` will be explicitly deleted from memory, leaving only this return.
+    """
+    if not mutate_a:
+        a = copy.deepcopy(a)
+    c = deep_merge(a, b)
+    if secure:
+        del a
+        del b
+    return c
 
 
 PERCENT_ERROR_THRESHOLD = 0.05
@@ -262,7 +278,7 @@ def test_add_process():
     initial_time: int = 0
     from ecoli.migrated.complexation import Complexation
     from vivarium import Vivarium
-    from ecoli.migrated.registries import ecoli_core as ec
+    from ecoli.shared.registration import ecoli_core as ec
     from ecoli.shared.utils.migration import configure
     process_id = 'complexation'
     config = configure(subpackage, module_name, process_class_name, initial_time)

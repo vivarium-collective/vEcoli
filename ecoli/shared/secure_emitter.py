@@ -10,7 +10,7 @@ from cryptography.fernet import Fernet
 from bigraph_schema import get_path, set_path
 from process_bigraph.emitter import Emitter
 
-from ecoli.shared.data_model import IntervalResult
+from ecoli.shared.datamods import IntervalResult
 
 
 class SecureEmitter(Emitter):

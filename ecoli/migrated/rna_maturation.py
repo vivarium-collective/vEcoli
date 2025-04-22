@@ -9,7 +9,7 @@ MIGRATED: RnaMaturation process
 import numpy as np
 
 from ecoli.migrated.partition import PartitionedProcess
-from ecoli.migrated.registries import ecoli_core
+from ecoli.shared.registration import ecoli_core
 from ecoli.library.schema import counts, bulk_name_to_idx
 from ecoli.shared.schemas import listener_schema, numpy_schema
 

@@ -1,11 +1,17 @@
-import os
-import pickle
-import sys
-from typing import Any
-import warnings
+"""
+ecoli: registration and configuration
 
-import process_bigraph
-import unum
+This module should:
+
+A. import all required type functions and register them via core
+B. import all ecoli.migrated processes and register them
+C. import all required type schemas/defs and register them (or read them via json)
+"""
+
+
+import os
+import warnings
+import faulthandler
 
 # suppress \s errors TODO: fix this in offending modules
 warnings.filterwarnings("ignore", category=SyntaxWarning)
@@ -15,6 +21,12 @@ os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 
+# TODO: move/replace this?
+faulthandler.enable()
+
+import pickle
+from typing import Any
+import unum
 import json
 import logging
 from dataclasses import dataclass
@@ -29,7 +41,6 @@ from vivarium.core.registry import (
 
 from wholecell.utils import units
 from ecoli.library.units import Quantity
-
 from ecoli.library.parquet_emitter import ParquetEmitter
 from ecoli.library.schema import (
     divide_binomial,
@@ -56,30 +67,11 @@ from ecoli.library.updaters import (
     inverse_update_unique_numpy,
     inverse_updater_registry,
 )
-from ecoli.migrated.registries import ecoli_core
-import faulthandler
-
-faulthandler.enable()
+from ecoli.shared.registration import ecoli_core
+from ecoli.shared.utils.log import setup_logging
 
 
-def setup_logging(name: str) -> logging.Logger:
-    # Create a root logger
-    root_logger = logging.getLogger(name)
-    root_logger.setLevel(logging.INFO)
-
-    console_handler = logging.StreamHandler(stream=sys.stdout)
-    console_handler.setLevel(logging.INFO)
-    formatter = logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    )
-
-    console_handler.setFormatter(formatter)
-    root_logger.addHandler(console_handler)
-
-    return root_logger
-
-
-logger: logging.Logger = setup_logging("ecoli.init")
+logger: logging.Logger = setup_logging(__name__)
 
 
 emitter_registry.register("parquet", ParquetEmitter)
@@ -114,104 +106,6 @@ for serializer_cls in (
 ):
     serializer = serializer_cls()
     serializer_registry.register(serializer.name, serializer)
-
-
-# required bgs keys: {'_default', '_apply', '_check', '_serialize', '_deserialize', '_fold'}
-# optional bgs keys: {'_type', '_value', '_description', '_type_parameters', '_inherit', '_divide'}
-@dataclass
-class TypeSchema:
-    type_id: str
-    protocol: str = "local"
-
-    @property
-    def attributes(self) -> set:
-        return self.required_keys.union(self.optional_keys)
-
-    @property
-    def required_keys(self) -> set:
-        return {"_default", "_apply", "_check", "_serialize", "_deserialize", "_fold"}
-
-    @property
-    def optional_keys(self) -> set:
-        return {
-            "_type",
-            "_value",
-            "_description",
-            "_type_parameters",
-            "_inherit",
-            "_divide",
-        }
-
-
-def get_type_filepaths(dirpath: str) -> set[str]:
-    paths: set = set()
-    for filename in os.listdir(dirpath):
-        if filename.endswith(".json"):
-            paths.add(os.path.join(dirpath, filename))
-    return paths
-
-
-def register_types(core: ProcessTypes, types_dir: str, verbose: bool) -> None:
-    function_keys = ["_serialize", "_deserialize", "_fold", "_check", "_apply"]
-    types_to_register: set[str] = get_type_filepaths(types_dir)
-    for spec_path in types_to_register:
-        try:
-            with open(spec_path, "r") as f:
-                spec: dict = json.load(f)
-            for type_id, type_spec in spec.items():
-                if isinstance(type_spec, dict):
-                    for key, spec_definition in type_spec.items():
-                        if key in function_keys:
-                            spec[type_id][key] = eval(spec_definition)
-                core.register_types({type_id: type_spec})
-                if verbose:
-                    logger.info(f"Type ID: {type_id} has been registered.\n")
-        except:
-            if verbose:
-                logger.error(f"{spec_path} cannot be registered.\n")
-            continue
-
-
-# -- bytes -- #
-
-def check_bytes(schema, state, core=None):
-    return isinstance(state, bytes)
-
-
-def apply_bytes(schema, current, update: bytes, core=None):
-    return current + update
-
-
-def deserialize_bytes(schema, encoded, core=None):
-    return pickle.loads(encoded)
-
-
-# -- quantity -- #
-
-def deserialize_quantity(value, core=None):
-    return str(Quantity(value))
-
-
-def serialize_quantity(value, core=None):
-    return pickle.dumps(value.m)
-
-
-def apply_quantity(schema, current: Quantity, update: Quantity, core=None):
-    return current + update
-
-
-# -- unum -- #
-
-def check_unum(schema, state, core=None):
-    return isinstance(state, unum.Unum)
-
-
-def serialize_unum(schema, value: unum.Unum, core=None):
-    return str(value)
-
-
-def deserialize_unum(schema, state, core=None):
-    return unum.Unum(state)
 
 
 VERBOSE_REGISTER = eval(os.getenv("VERBOSE_REGISTER", "True"))
