@@ -3,55 +3,44 @@
 MIGRATED: RNA Interference
 ================
 Treats sRNA-mRNA binding as complexation events that create duplexes and free
-bound ribosomes. Decreases ompF translation during micF over-expression.
+bound ribosomes. Decreases ompF translation during micF overexpression.
 """
 
 import numpy as np
 import warnings
 
-from process_bigraph import Process
-from vivarium.core.engine import Engine
-
-from ecoli.library.schema import numpy_schema, bulk_name_to_idx, counts, attrs
-from ecoli.processes.registries import topology_registry
+from ecoli.library.schema import bulk_name_to_idx, counts, attrs
+from ecoli.migrated.registries import ecoli_core
+from ecoli.shared.base import ProcessBase
 from ecoli.processes.unique_update import UniqueUpdate
-from ecoli.shared.dtypes import format_bulk_state
-
+from ecoli.shared.schemas import numpy_schema
 
 # Register default topology for this process, associating it with process name
-# NAME = "ecoli-rna-interference"
-# TOPOLOGY = {
-#     "bulk": ("bulk",),
-#     "RNAs": ("unique", "RNA"),
-#     "active_ribosome": ("unique", "active_ribosome"),
-# }
-# topology_registry.register(NAME, TOPOLOGY)
+NAME = "ecoli-rna-interference"
+TOPOLOGY = {
+    "bulk": ("bulk",),
+    "RNAs": ("unique", "RNA"),
+    "active_ribosome": ("unique", "active_ribosome"),
+}
+ecoli_core.topology.register(NAME, TOPOLOGY)
 
 
-class RnaInterference(Process):
+class RnaInterference(ProcessBase):
+    name = NAME
     defaults = {
-        "srna_ids": "list",
-        "target_tu_ids": "list",
-        "binding_probs": "list",
-        "ribosome30S": {
-            "_type": "string",
-            "_default": "ribosome30S"
-        },
-        "ribosome50S": {
-            "_type": "string",
-            "_default": "ribosome50S"
-        },
-        "duplex_ids": "list",
-        "seed": "integer",
-        "time_step": "integer",
-        "emit_unique": {
-            "_default": False,
-            "_type": "boolean",
-        },
+        "srna_ids": [],
+        "target_tu_ids": [],
+        "binding_probs": [],
+        "ribosome30S": "ribosome30S",
+        "ribosome50S": "ribosome50S",
+        "duplex_ids": [],
+        "seed": 0,
+        "time_step": 2,
+        "emit_unique": False,
     }
 
-    def __init__(self, config=None, core=None):
-        super().__init__(config, core)
+    def __init__(self, config=None):
+        super().__init__(config)
         # Parameters are lists such that the nth element
         # of each list are grouped (e.g. the 1st sRNA ID
         # binds to the first sRNA target with the 1st
@@ -69,22 +58,21 @@ class RnaInterference(Process):
 
     def inputs(self):
         return {
-            "bulk": "bulk",  # numpy_schema("bulk"),
-            "active_ribosome": "list[tuple]",  # numpy_schema("active_ribosome", emit=self.parameters["emit_unique"]),
-            "RNAs": "list[tuple]"  # numpy_schema("RNAs", emit=self.parameters["emit_unique"]),
+            "bulk": numpy_schema("bulk"),
+            "active_ribosome": numpy_schema("active_ribosome"),
+            "RNAs": numpy_schema("RNAs"),
         }
-
+    
     def outputs(self):
         return {
-            "bulk": "bulk",  # numpy_schema("bulk"),
-            "active_ribosome": "list[tuple]",  # numpy_schema("active_ribosome", emit=self.parameters["emit_unique"]),
-            "RNAs": "list[tuple]"  # numpy_schema("RNAs", emit=self.parameters["emit_unique"]),
+            "bulk": numpy_schema("bulk"),
+            "active_ribosome": numpy_schema("active_ribosome"),
+            "RNAs": numpy_schema("RNAs"),
         }
 
     def update(self, state, interval):
-        bulk_state = format_bulk_state(state)
         if self.srna_idx is None:
-            bulk_ids = bulk_state["id"]
+            bulk_ids = state["bulk"]["id"]
             self.srna_idx = bulk_name_to_idx(self.srna_ids, bulk_ids)
             self.subunit_idx = bulk_name_to_idx(
                 [self.ribosome30S, self.ribosome50S], bulk_ids
@@ -110,7 +98,7 @@ class RnaInterference(Process):
             self.srna_idx, self.target_tu_ids, self.binding_probs, self.duplex_idx
         ):
             # Get count of complete sRNAs
-            srna_count = counts(bulk_state, srna_idx)
+            srna_count = counts(state["bulk"], srna_idx)
             if srna_count == 0:
                 continue
 
@@ -122,16 +110,13 @@ class RnaInterference(Process):
                 continue
 
             # Each sRNA has probability binding_prob of binding a target mRNA
-            n_duplexed = np.min([
-                self.random_state.binomial(srna_count, binding_prob),
-                mrna_mask.sum()
-            ]).tolist()
+            n_duplexed = np.min(
+                [self.random_state.binomial(srna_count, binding_prob), mrna_mask.sum()]
+            )
 
             # Choose n_duplexed mRNAs and sRNAs randomly to delete
             mrna_to_delete = self.random_state.choice(
-                size=n_duplexed,
-                a=np.nonzero(mrna_mask)[0],
-                replace=False
+                size=n_duplexed, a=np.nonzero(mrna_mask)[0], replace=False
             ).tolist()
             update["RNAs"]["delete"] += list(mrna_to_delete)
             update["bulk"].append((srna_idx, -n_duplexed))
@@ -234,6 +219,8 @@ def test_rna_interference(return_data=False):
         r"UniqueNumpyUpdater\.updater .+ to key updater, which already "
         r"has the value <bound method UniqueNumpyUpdater\.updater",
     )
+
+    # TODO: replace this with Composite
     experiment = Engine(
         processes={"rna-interference": rna_inter},
         steps={"unique-update": unique_update},
@@ -262,9 +249,4 @@ def test_rna_interference(return_data=False):
 
     if return_data:
         return data, test_config
-
-
-def main():
-    data, config = test_rna_interference(return_data=True)
-    print(data)
 

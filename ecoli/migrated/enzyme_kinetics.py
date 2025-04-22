@@ -5,16 +5,17 @@ MIGRATED: Convenience Kinetics
 """
 
 import numpy as np
-from process_bigraph import Process
 
+from ecoli.shared.base import ProcessBase
 from ecoli.library.kinetic_rate_laws import KineticFluxModel
-from ecoli.library.schema import numpy_schema, bulk_name_to_idx, counts
-from ecoli.shared.dtypes import format_bulk_state
+from ecoli.library.schema import bulk_name_to_idx, counts
+from ecoli.shared.schemas import numpy_schema
+
 
 NAME = "enzyme_kinetics"
 
 
-class EnzymeKinetics(Process):
+class EnzymeKinetics(ProcessBase):
     """Michaelis-Menten-style enzyme kinetics model
 
     Arguments:
@@ -75,9 +76,10 @@ class EnzymeKinetics(Process):
               reverse reaction.
     """
 
-    config_schema = {
-        "reactions": "tree",
-        "kinetic_parameters": "tree",
+    name = NAME
+    defaults: dict[str, dict] = {
+        "reactions": {},
+        "kinetic_parameters": {},
     }
 
     def __init__(self, config=None, core=None):
@@ -96,8 +98,8 @@ class EnzymeKinetics(Process):
 
         self.molecules_idx = None
 
-    # def initial_state(self):
-    #     # TODO: test if this works
+    # def initial_state(self, config):
+    #     # TODO (Cyrus) - test if this works
     #     initial_conc = config['initial_concentrations']
     #     initial_fluxes = self.next_update(
     #         initial_conc, self.parameters['time_step'])
@@ -105,9 +107,9 @@ class EnzymeKinetics(Process):
 
     def inputs(self):
         return {
-            "bulk": "bulk",
+            "bulk": numpy_schema("bulk"),
         }
-
+    
     def outputs(self):
         return {
             "fluxes": {
@@ -117,13 +119,12 @@ class EnzymeKinetics(Process):
         }
 
     def update(self, state, interval):
-        bulk_state = format_bulk_state(state)
         if self.molecules_idx is None:
-            bulk_ids = bulk_state["id"]
+            bulk_ids = state["bulk"]["id"]
             self.molecules_idx = bulk_name_to_idx(self.molecules_ids, bulk_ids)
 
         # TODO (Cyrus) -- convert molecules to concentrations
-        molecule_counts = counts(bulk_state, self.molecules_idx)
+        molecule_counts = counts(state["bulk"], self.molecules_idx)
         tuplified_states = {
             ("bulk", mol): molecule_counts[i]
             for i, mol in enumerate(self.molecules_ids)
@@ -168,9 +169,10 @@ def test_enzyme_kinetics(end_time=100):
     }
     settings = {"total_time": end_time, "initial_state": initial_state}
 
-    # data = simulate_process(kinetic_process, settings)
-    data = kinetic_process.update(initial_state, end_time)
+    data = kinetic_process.update(settings.get("initial_state"), settings.get("total_time"))
     return data is not None
 
 
 # run module with uv run ecoli/processes/enzyme_kinetics.py
+if __name__ == "__main__":
+    test_enzyme_kinetics()

@@ -13,40 +13,36 @@ TODO:
 
 import numpy as np
 
-from ecoli.migrated.partition import PartitionedProcess
 from ecoli.library.data_predicates import (
     monotonically_increasing,
     monotonically_decreasing,
     all_nonnegative,
 )
-from ecoli.library.schema import numpy_schema, counts, bulk_name_to_idx
-from ecoli.shared.dtypes import format_bulk_state
+from ecoli.library.schema import counts, bulk_name_to_idx
+from ecoli.shared.schemas import numpy_schema
+from ecoli.migrated.registries import ecoli_core
+from ecoli.migrated.partition import PartitionedProcess
 
 
 # Register default topology for this process, associating it with process name
-# NAME = "ecoli-protein-degradation"
-# TOPOLOGY = {"bulk": ("bulk",), "timestep": ("timestep",)}
-# topology_registry.register(NAME, TOPOLOGY)
+NAME = "ecoli-protein-degradation"
+TOPOLOGY = {"bulk": ("bulk",), "timestep": ("timestep",)}
+ecoli_core.topology.register(NAME, TOPOLOGY)
 
 
 class ProteinDegradation(PartitionedProcess):
     """Protein Degradation PartitionedProcess"""
 
+    name = NAME
     defaults = {
-        "raw_degradation_rate": "list",
-        "water_id": {
-            "_type": "string",
-            "_default": "h2o"
-        },
-        "amino_acid_ids": "list",
-        "amino_acid_counts": "list",
-        "protein_ids": "list",
-        "protein_lengths": "list",
-        "seed": "integer",
-        "time_step": {
-            "_type": "float",
-            "_default": 1.0,
-        },
+        "raw_degradation_rate": [],
+        "water_id": "h2o",
+        "amino_acid_ids": [],
+        "amino_acid_counts": [],
+        "protein_ids": [],
+        "protein_lengths": [],
+        "seed": 0,
+        "time_step": 1,
     }
 
     # Constructor
@@ -86,32 +82,30 @@ class ProteinDegradation(PartitionedProcess):
 
     def inputs(self):
         return {
-            "bulk": "bulk",  # numpy_schema("bulk"),
-            "timestep": "float",
+            "bulk": numpy_schema("bulk"),
+            "timestep": self.timestep_schema,
         }
-
+    
     def outputs(self):
         return {
-            "bulk": "bulk",
-            "timestep": "float",
+            "bulk": numpy_schema("bulk")
         }
 
-    def calculate_request(self, state):
+    def calculate_request(self, timestep, states):
         # In first timestep, convert all strings to indices
-        bulk_state = format_bulk_state(state)
         if self.metabolite_idx is None:
-            self.water_idx = bulk_name_to_idx(self.water_id, bulk_state["id"])
-            self.protein_idx = bulk_name_to_idx(self.protein_ids, bulk_state["id"])
+            self.water_idx = bulk_name_to_idx(self.water_id, states["bulk"]["id"])
+            self.protein_idx = bulk_name_to_idx(self.protein_ids, states["bulk"]["id"])
             self.metabolite_idx = bulk_name_to_idx(
-                self.metabolite_ids, bulk_state["id"]
+                self.metabolite_ids, states["bulk"]["id"]
             )
 
-        protein_data = counts(bulk_state, self.protein_idx)
+        protein_data = counts(states["bulk"], self.protein_idx)
         # Determine how many proteins to degrade based on the degradation rates
         # and counts of each protein
         nProteinsToDegrade = np.fmin(
             self.random_state.poisson(
-                self._protein_deg_rates(state["timestep"]) * protein_data
+                self._proteinDegRates(states["timestep"]) * protein_data
             ),
             protein_data,
         )
@@ -146,7 +140,7 @@ class ProteinDegradation(PartitionedProcess):
 
         return update
 
-    def _protein_deg_rates(self, timestep):
+    def _proteinDegRates(self, timestep):
         return self.raw_degradation_rate * timestep
 
 
@@ -178,9 +172,9 @@ def test_protein_degradation(return_data=False):
         )
     }
 
-    settings = {"total_time": 100, "initial_state": state}
+    settings = {"interval": 100, "state": state}
 
-    data = protein_degradation.update(state, settings.get("total_time"))  # simulate_process(protein_degradation, settings)
+    data = protein_degradation.update(**settings)
 
     # Assertions =======================================================
     bulk_timeseries = np.array(data["bulk"])
@@ -240,7 +234,3 @@ def test_protein_degradation(return_data=False):
 
     if return_data:
         return data
-
-
-if __name__ == "__main__":
-    test_protein_degradation()

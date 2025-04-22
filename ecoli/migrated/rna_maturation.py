@@ -8,47 +8,26 @@ MIGRATED: RnaMaturation process
 
 import numpy as np
 
-from ecoli.library.schema import counts, bulk_name_to_idx
 from ecoli.migrated.partition import PartitionedProcess
-from ecoli.shared.dtypes import format_bulk_state, format_state, bulk_dtype
+from ecoli.migrated.registries import ecoli_core
+from ecoli.library.schema import counts, bulk_name_to_idx
+from ecoli.shared.schemas import listener_schema, numpy_schema
 
 
 # Register default topology for this process, associating it with process name
-# NAME = "ecoli-rna-maturation"
-# TOPOLOGY = {"bulk": ("bulk",), "bulk_total": ("bulk",), "listeners": ("listeners",)}
-# topology_registry.register(NAME, TOPOLOGY)
+NAME = "ecoli-rna-maturation"
+TOPOLOGY = {"bulk": ("bulk",), "bulk_total": ("bulk",), "listeners": ("listeners",)}
+ecoli_core.topology.register(NAME, TOPOLOGY)
 
 
 class RnaMaturation(PartitionedProcess):
     """RnaMaturation"""
-    config_schema = {
-        "stoich_matrix": "list",
-        "enzyme_matrix": "list",
-        "n_required_enzymes": "integer",
-        "degraded_nt_counts": "integer",
-        "n_ppi_added": "integer",
-        "main_23s_rRNA_id": "string",
-        "main_16s_rRNA_id": "string",
-        "main_5s_rRNA_id": "string",
-        "variant_23s_rRNA_ids": "string",
-        "variant_16s_rRNA_ids": "string",
-        "variant_5s_rRNA_ids": "string",
-        "delta_nt_counts_23s": "string",
-        "delta_nt_counts_16s": "string",
-        "delta_nt_counts_5s": "string",
-        "unprocessed_rna_ids": "list[string]",
-        "mature_rna_ids": "list[string]",
-        "rna_maturation_enzyme_ids": "list[string]",
-        "ppi": "list",
-        "water": "list",
-        "nmps": "list",
-        "proton": "list"
-    }
+
+    name = NAME
 
     # Constructor
     def __init__(self, config=None, core=None):
         super().__init__(config, core)
-        
         # Get matrices and vectors that describe maturation reactions
         self.stoich_matrix = self.config["stoich_matrix"]
         self.enzyme_matrix = self.config["enzyme_matrix"]
@@ -85,44 +64,59 @@ class RnaMaturation(PartitionedProcess):
 
     def inputs(self):
         return {
-            "bulk": "bulk",  # numpy_schema("bulk"),
-            "bulk_total": "bulk",  # numpy_schema("bulk"),
-            "listeners": "tree"
-            # "listeners": {
-            #     "rna_maturation_listener": listener_schema(
-            #         {
-            #             "total_maturation_events": 0,
-            #             "total_degraded_ntps": 0,
-            #             "unprocessed_rnas_consumed": (
-            #                 [0] * len(self.unprocessed_rna_ids),
-            #                 self.unprocessed_rna_ids,
-            #             ),
-            #             "mature_rnas_generated": (
-            #                 [0] * len(self.mature_rna_ids),
-            #                 self.mature_rna_ids,
-            #             ),
-            #             "maturation_enzyme_counts": (
-            #                 [0] * len(self.rna_maturation_enzyme_ids),
-            #                 self.rna_maturation_enzyme_ids,
-            #             ),
-            #         }
-            #     )
-            # },
+            "bulk": numpy_schema("bulk"),
+            "bulk_total": numpy_schema("bulk"),
+            "listeners": {
+                "rna_maturation_listener": listener_schema(
+                    {
+                        "total_maturation_events": 0,
+                        "total_degraded_ntps": 0,
+                        "unprocessed_rnas_consumed": (
+                            [0] * len(self.unprocessed_rna_ids),
+                            self.unprocessed_rna_ids,
+                        ),
+                        "mature_rnas_generated": (
+                            [0] * len(self.mature_rna_ids),
+                            self.mature_rna_ids,
+                        ),
+                        "maturation_enzyme_counts": (
+                            [0] * len(self.rna_maturation_enzyme_ids),
+                            self.rna_maturation_enzyme_ids,
+                        ),
+                    }
+                )
+            },
         }
-
+    
     def outputs(self):
         return {
-            "bulk": "bulk",  # numpy_schema("bulk"),
-            "bulk_total": "bulk",  # numpy_schema("bulk"),
-            "listeners": "tree"
+            "bulk": numpy_schema("bulk"),
+            "listeners": {
+                "rna_maturation_listener": listener_schema(
+                    {
+                        "total_maturation_events": 0,
+                        "total_degraded_ntps": 0,
+                        "unprocessed_rnas_consumed": (
+                            [0] * len(self.unprocessed_rna_ids),
+                            self.unprocessed_rna_ids,
+                        ),
+                        "mature_rnas_generated": (
+                            [0] * len(self.mature_rna_ids),
+                            self.mature_rna_ids,
+                        ),
+                        "maturation_enzyme_counts": (
+                            [0] * len(self.rna_maturation_enzyme_ids),
+                            self.rna_maturation_enzyme_ids,
+                        ),
+                    }
+                )
+            },
         }
 
     def calculate_request(self, state):
         # Get bulk indices
-        bulk_state = format_bulk_state(state)
-        bulk_total_state = format_state(state, "bulk_total", bulk_dtype)
         if self.ppi_idx is None:
-            bulk_ids = bulk_state["id"]
+            bulk_ids = state["bulk"]["id"]
             self.unprocessed_rna_idx = bulk_name_to_idx(
                 self.unprocessed_rna_ids, bulk_ids
             )
@@ -148,16 +142,16 @@ class RnaMaturation(PartitionedProcess):
                 self.variant_5s_rRNA_ids, bulk_ids
             )
 
-        unprocessed_rna_counts = counts(bulk_total_state, self.unprocessed_rna_idx)
+        unprocessed_rna_counts = counts(state["bulk_total"], self.unprocessed_rna_idx)
         variant_23s_rRNA_counts = counts(
-            bulk_total_state, self.variant_23s_rRNA_idx
+            state["bulk_total"], self.variant_23s_rRNA_idx
         )
         variant_16s_rRNA_counts = counts(
-            bulk_total_state, self.variant_16s_rRNA_idx
+            state["bulk_total"], self.variant_16s_rRNA_idx
         )
-        variant_5s_rRNA_counts = counts(bulk_total_state, self.variant_5s_rRNA_idx)
+        variant_5s_rRNA_counts = counts(state["bulk_total"], self.variant_5s_rRNA_idx)
         self.enzyme_availability = counts(
-            bulk_total_state, self.rna_maturation_enzyme_idx
+            state["bulk_total"], self.rna_maturation_enzyme_idx
         ).astype(bool)
 
         # Determine which maturation reactions to turn off based on enzyme
@@ -202,11 +196,7 @@ class RnaMaturation(PartitionedProcess):
 
     def update(self, state, interval):
         # Create copy of bulk counts so can update in real-time
-        bulk_state = format_bulk_state(state)
-        state["bulk"] = counts(
-            bulk_state,
-            np.array([n for n in range(len(state["bulk"]))])
-        )
+        state["bulk"] = counts(state["bulk"], range(len(states["bulk"])))
 
         # Get counts of unprocessed RNAs
         unprocessed_rna_counts = counts(state["bulk"], self.unprocessed_rna_idx)
@@ -236,7 +226,7 @@ class RnaMaturation(PartitionedProcess):
                     "mature_rnas_generated": n_mature_rnas,
                     "maturation_enzyme_counts": counts(
                         state["bulk_total"], self.rna_maturation_enzyme_idx
-                    ).tolist(),
+                    ),
                 }
             },
         }
