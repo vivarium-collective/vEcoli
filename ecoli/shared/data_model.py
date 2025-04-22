@@ -33,8 +33,8 @@ class BaseClass:
 
 @dataclass
 class VivariumDocument(BaseClass):
-    state: dict[str, Any]
-    composition: str
+    state: dict[str, Any] = field(default_factory=dict)
+    composition: str | None = None
 
 
 @dataclass

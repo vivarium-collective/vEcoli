@@ -20,6 +20,7 @@ import logging
 from dataclasses import dataclass
 
 from process_bigraph import ProcessTypes
+from process_bigraph.processes import TOY_PROCESSES
 from vivarium.core.registry import (
     divider_registry,
     emitter_registry,
@@ -213,7 +214,7 @@ def deserialize_unum(schema, state, core=None):
     return unum.Unum(state)
 
 
-VERBOSE_REGISTER = os.getenv("VERBOSE_REGISTER", False)
+VERBOSE_REGISTER = eval(os.getenv("VERBOSE_REGISTER", "True"))
 
 
 # register types
@@ -222,3 +223,4 @@ types_dir: str = os.path.join(os.path.dirname(__file__), "types")
 
 # register processes
 # TODO: register processes here (explicitly or implicitly via interface)
+ecoli_core.register_processes(TOY_PROCESSES)

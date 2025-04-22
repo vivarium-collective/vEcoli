@@ -51,6 +51,7 @@
 
 
 ## _*Misc*_:
+- [] merge topology and state into doc
 - [] refactor bulk_state declarations to be numpy_schema("bulk")
 - [] Look into defining biology-specific module constraints as JSON and parsing rather than explicitly defining them
 - [] For auto-parsed config schemas, ensure that lambda funcs are moved to directly being declared in constructor vs in config schema
@@ -60,3 +61,8 @@
 - [] Add formalized registration at module init of types
 - [] Clean up registration module
 - [] Review partitioned process vs. process/step implementations
+
+
+## _NOTES_:
+- We can infer an example initial state, and thus outputs for a given partitioned process by calling 
+`ecoli.shared.utils.migration.load_initial_state(<TIME INDEX>)`

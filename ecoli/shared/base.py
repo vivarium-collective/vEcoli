@@ -1,9 +1,20 @@
 import abc
+from dataclasses import dataclass
 
 from process_bigraph import Step, Process
+from vivarium.vivarium import Vivarium
 
+from ecoli.shared.data_model import BaseClass
 from ecoli.shared.schemas import get_config_schema
+from ecoli.migrated.registries import Core, ecoli_core
 
+
+
+@dataclass 
+class Topology(BaseClass):
+    inputs: dict
+    outputs: dict
+    
 
 class StepBase(Step):
     defaults = {}
@@ -28,6 +39,17 @@ class StepBase(Step):
     def update(self, state):
         pass
 
+    @property
+    def topology(self):
+        get_topology = lambda port: {k: [k] for k, v in port.items()}
+        return Topology(**dict(zip(
+            ["inputs", "outputs"],
+            list(map(
+                get_topology,
+                [self.inputs(), self.outputs()]
+            ))
+        )))
+
 
 class ProcessBase(Process):
     defaults = {}
@@ -51,3 +73,40 @@ class ProcessBase(Process):
     @abc.abstractmethod
     def update(self, state, interval):
         pass
+
+    @property
+    def topology(self):
+        get_topology = lambda port: {k: [k] for k, v in port.items()}
+        return Topology(**dict(zip(
+            ["inputs", "outputs"],
+            list(map(
+                get_topology,
+                [self.inputs(), self.outputs()]
+            ))
+        )))
+
+
+class VivariumFactory:
+    _default_core: Core = ecoli_core
+
+    def __init__(self, default_protocol: str | None = None) -> None:
+        self.default_protocol = default_protocol or "community"
+
+    @property
+    def default_core(self):
+        return self._default_core
+    
+    def new(self, document: dict | None = None, core=None) -> Vivarium:
+        c = core or self.default_core
+        return Vivarium(
+            core=c, 
+            processes=c.process_registry.registry, 
+            types=c.types(), 
+            document=document
+        )
+    
+    def __call__(self, document: dict | None = None, core=None) -> Vivarium:
+        return self.new(document, core)
+
+
+vivarium_factory = VivariumFactory()

@@ -1,20 +1,46 @@
+"""
+Migration v2 Utils
+"""
+
+from dataclasses import dataclass
+import importlib
 import json
+import os
+from typing import Any, Union
+import uuid
 import numpy as np
+import process_bigraph
 from unum import Unum
 import numbers
 import warnings
 from scipy.stats import mannwhitneyu, chi2_contingency, ttest_ind, bartlett
+from process_bigraph import Composite
+from vivarium.vivarium import Vivarium
 from vivarium.core.engine import Engine, view_values, _process_update
 from vivarium.library.dict_utils import deep_merge
 
+from ecoli.shared.base import ProcessBase, StepBase, vivarium_factory
+from ecoli.shared.data_model import BaseClass
 from wholecell.utils import units
 from ecoli.library.json_state import get_state_from_file
 from migration import LOAD_SIM_DATA, LOAD_SIM_DATA_NO_OPERONS
+from ecoli.migrated.registries import Core, ecoli_core
 
 
 PERCENT_ERROR_THRESHOLD = 0.05
 PVALUE_THRESHOLD = 0.05
 
+
+@dataclass
+class Configuration(BaseClass):
+    data_prefix: str 
+    process: ProcessBase | StepBase 
+    initial_state: dict
+
+    @property
+    def view(self):
+        return self.process, self.initial_state
+    
 
 def get_process_state(process, topology, initial_state):
     # make an experiment
@@ -52,6 +78,7 @@ def run_non_partitioned_process(
     Returns:
         an update from the perspective of the Process.
     """
+    
     # make an experiment
     experiment_config = {
         "processes": {process.name: process},
@@ -94,14 +121,58 @@ def run_non_partitioned_process(
     return actual_update
 
 
-def run_partitioned_process(
-    process, topology, initial_time=0, initial_state=None, data_prefix="data/migration"
+def run_partitioned(
+    subpackage: str, 
+    module_name: str, 
+    process_class_name: str, 
+    process_address: str,
+    sim_id: str | None = None,
+    initial_time=0, 
+    data_prefix="data/migration",
+    core: Core | None = None
 ):
     """Given an initial state dictionary, run the calculate_request method of
     a process, then load a json of partitioned molecule counts to be merged
-    into the process state before running the evolve_state method."""
+    into the process state before running the evolve_state method.
+    
+    1. use this configure to get the process and state:
+    config = configure(...)
+
+    2. create vivarium interface 
+    viv = Vivarium(...)
+
+    3. viv.add_process(process_name, process_id, config.process.inputs(), config.process.outputs())
+
+    4. viv.set_value(initial time, initial_state)
+
+    4a. Map comments to new interface
+
+    5. add emitter 
+
+    6. viv.run...
+    
+    """
+
+    
+
+    config = configure(subpackage, module_name,  process_class_name, initial_time)
+
     # Cache bulk_total count for later
-    bulk_total = initial_state["bulk"]["count"].copy()
+    bulk_total = config.initial_state["bulk"]["count"].copy()
+
+    viv = vivarium_factory(core=core)
+
+    proc_name = sim_id or __name__ + str(uuid.uuid4())
+    process_id = process_address.split(":")[-1]
+    viv.add_process(
+        process_id=process_id, 
+        name=proc_name, 
+        config=config.process.config,
+        inputs=config.process.inputs(),
+        outputs=config.process.outputs()
+    )
+
+    viv.add_emitter()
 
     # make an experiment
     experiment_config = {
@@ -169,21 +240,258 @@ def run_partitioned_process(
     return actual_requests, actual_update
 
 
-def run_and_compare(
-    init_time, process_class, partition=True, layer=0, post=False, operons=True
+def find_process(subpackage: str, module_name: str, process_name: str):
+    root_package = "ecoli"
+    module = importlib.import_module(f"{root_package}.{subpackage}.{module_name}")
+    return getattr(module, process_name)
+
+
+def test_config(
+        subpackage: str = "migrated", 
+        module_name: str = "complexation", 
+        process_class_name: str = "Complexation", 
+        initial_time: int = 0
 ):
-    # Set time parameters
-    init_time = init_time
+    return configure(subpackage, module_name, process_class_name, initial_time)
+
+
+def test_add_process():
+    subpackage: str = "migrated"
+    module_name: str = "complexation"
+    process_class_name: str = "Complexation"
+    initial_time: int = 0
+    from ecoli.migrated.complexation import Complexation
+    from vivarium import Vivarium
+    from ecoli.migrated.registries import ecoli_core as ec
+    from ecoli.shared.utils.migration import configure
+    process_id = 'complexation'
+    config = configure(subpackage, module_name, process_class_name, initial_time)
+    bulk_total = config.initial_state["bulk"]["count"].copy()  # Cache bulk_total count for later
+    ec.processes.registry.update({module_name: Complexation})
+    viv = Vivarium(core=ec, processes=ec.processes.registry)
+
+    viv.add_process(
+        process_id=process_id, 
+        name="cmplx", 
+        config=config.process.config,
+        inputs=config.process.inputs(),
+        outputs=config.process.outputs()
+    )
+    viv.add_emitter()
+
+    return viv
+
+
+def configure(
+    subpackage: str,
+    module_name: str, 
+    process_name: str,
+    init_time=0, 
+    layer=0, 
+    post=False, 
+    operons=True
+) -> Configuration:
+    """
+    1. use this function to get the process and state:
+    proc, state = configure(...)
+
+    2. create vivarium interface 
+    viv = Vivarium(...)
+
+    3. 
+    """
+    # -- setup -- #
 
     # Create process, experiment, loading in initial state from file.
+    config = {"seed": 0}
+
+    process_class = find_process(subpackage, module_name, process_name)
+
     if process_class.name == "replication_data_listener":
-        config = {"time_step": 1}
+        config.update({"time_step": 1})
     else:
         if operons:
-            config = LOAD_SIM_DATA.get_config_by_name(process_class.name)
+            config.update(LOAD_SIM_DATA.get_config_by_name(process_class.name))
         else:
-            config = LOAD_SIM_DATA_NO_OPERONS.get_config_by_name(process_class.name)
-    config["seed"] = 0
+            config.update(LOAD_SIM_DATA_NO_OPERONS.get_config_by_name(process_class.name))
+
+    process = process_class(config, ecoli_core)
+
+    process.is_step = lambda: False
+
+    if operons:
+        data_prefix = "data/migration"
+    else:
+        data_prefix = "data/migration_no_operons"
+
+    if post:
+        initial_state = get_state_from_file(
+            path=f"{data_prefix}/wcecoli_t{init_time}_before_post.json"
+        )
+        # By this point the clock process would have advanced the global time
+        initial_state["global_time"] = init_time + 1
+    else:
+        initial_state = get_state_from_file(
+            path=f"{data_prefix}/wcecoli_t{init_time}_before_layer_{layer}.json"
+        )
+
+    # Complexation sets seed weirdly
+    if process_class.__name__ == "Complexation":
+        from stochastic_arrow import StochasticSystem
+
+        process.system = StochasticSystem(process.stoichiometry, random_seed=0)
+    # Metabolism requires gtp_to_hydrolyze
+    elif process_class.__name__ == "Metabolism":
+        updates_file = f"{data_prefix}/process_updates_t{init_time}.json"
+        with open(updates_file, "r") as f:
+            proc_updates = json.load(f)
+        gtp_hydro = proc_updates["PolypeptideElongation"]["process_state"][
+            "gtp_to_hydrolyze"
+        ]
+        aa_exchange_rates = (
+            units.mol
+            / units.L
+            / units.s
+            * np.array(
+                proc_updates["PolypeptideElongation"]["process_state"][
+                    "aa_exchange_rates"
+                ]
+            )
+        )
+        initial_state["process_state"] = {
+            "polypeptide_elongation": {
+                "gtp_to_hydrolyze": gtp_hydro,
+                "aa_exchange_rates": aa_exchange_rates,
+                "aa_count_diff": proc_updates["PolypeptideElongation"]["process_state"][
+                    "aa_count_diff"
+                ],
+            }
+        }
+        process.aa_targets = proc_updates["Metabolism"]["process_state"]["aa_targets"]
+    # MassListener needs initial masses to calculate fold changes
+    elif process_class.__name__ == "MassListener":
+        t0_file = f"{data_prefix}/wcecoli_t0.json"
+        with open(t0_file, "r") as f:
+            t0_data = json.load(f)
+        t0_mass = t0_data["listeners"]["mass"]
+        process.first_time_step = False
+        process.dryMassInitial = t0_mass["dry_mass"]
+        process.proteinMassInitial = t0_mass["protein_mass"]
+        process.rnaMassInitial = t0_mass["rna_mass"]
+        process.smallMoleculeMassInitial = t0_mass["smallMolecule_mass"]
+        process.timeInitial = 0
+        process.match_wcecoli = True
+    # Ribosome data listener requires transcription data
+    elif process_class.__name__ == "RibosomeData":
+        with open(f"{data_prefix}/wcecoli_listeners_t{init_time}.json", "r") as f:
+            wc_listeners = json.load(f)
+        initial_state["listeners"]["ribosome_data"]["rRNA_initiated_TU"] = wc_listeners[
+            "ribosome_data"
+        ]["rRNA_initiated_TU"]
+        initial_state["listeners"]["ribosome_data"]["rRNA_init_prob_TU"] = wc_listeners[
+            "ribosome_data"
+        ]["rRNA_init_prob_TU"]
+    # RNA synth prob listener requires transcription data
+    elif process_class.__name__ == "RnaSynthProb":
+        with open(f"{data_prefix}/wcecoli_listeners_t{init_time}.json", "r") as f:
+            wc_listeners = json.load(f)
+        initial_state["listeners"]["rna_synth_prob"] = {
+            "total_rna_init": wc_listeners["rna_synth_prob"]["total_rna_init"],
+            "n_bound_TF_per_TU": wc_listeners["rna_synth_prob"]["n_bound_TF_per_TU"],
+            "actual_rna_synth_prob": wc_listeners["rna_synth_prob"][
+                "actual_rna_synth_prob"
+            ],
+            "target_rna_synth_prob": wc_listeners["rna_synth_prob"][
+                "target_rna_synth_prob"
+            ],
+        }
+    # RNAP data listener requires transcription data
+    elif process_class.__name__ == "RnapData":
+        with open(f"{data_prefix}/wcecoli_listeners_t{init_time}.json", "r") as f:
+            wc_listeners = json.load(f)
+        initial_state["listeners"]["rnap_data"] = {
+            "rna_init_event": wc_listeners["rnap_data"]["rna_init_event"]
+        }
+    
+    return Configuration(data_prefix, process, initial_state)
+
+
+def run(
+    subpackage: str,
+    module_name: str,
+    process_name: str,
+    init_time, 
+    partition=True, 
+    layer=0, 
+    post=False, 
+    operons=True
+) -> Union[tuple[np.ndarray, dict[str, Any]], dict[str, Any]]:
+    config: Configuration = configure(subpackage, module_name, process_name, init_time, layer, post, operons)
+    if partition:
+        # run the process and get an update
+        return run_partitioned_process(
+            config.process,
+            config.process.topology,
+            initial_time=init_time,
+            initial_state=config.initial_state,
+            data_prefix=config.data_prefix,
+        )
+    else:
+        return run_non_partitioned_process(
+            config.process,
+            config.process.topology,
+            initial_time=init_time,
+            initial_state=config.initial_state,
+            data_prefix=config.data_prefix,
+        )
+
+@dataclass
+class RunParams(BaseClass):
+    subpackage: str 
+    module_name: str 
+    process_name: str 
+    init_time: int = 0
+    partition: bool = True
+    layer: int = 0 
+    post: bool = False 
+    operons: bool = True
+
+
+def test_run():
+    params = RunParams("migrated", "complexation", "Complexation")
+    a, b = run(**params.as_dict())
+    print(a)
+    
+
+# -- compare -- # 
+def compare_partitioned(config, init_time, actual_request, process_class):
+    # Compare requested bulk counts
+    with open(f"{config.data_prefix}/bulk_requested_t{init_time}.json", "r") as f:
+        wc_request = json.load(f)
+    assert np.all(actual_request == wc_request[process_class.__name__])
+
+
+def _run_and_compare(
+    init_time, 
+    process_class, 
+    partition=True, 
+    layer=0, 
+    post=False, 
+    operons=True
+):
+    # -- setup -- #
+
+    # Create process, experiment, loading in initial state from file.
+    config = {"seed": 0}
+
+    if process_class.name == "replication_data_listener":
+        config.update({"time_step": 1})
+    else:
+        if operons:
+            config.update(LOAD_SIM_DATA.get_config_by_name(process_class.name))
+        else:
+            config.update(LOAD_SIM_DATA_NO_OPERONS.get_config_by_name(process_class.name))
+
     process = process_class(config)
 
     process.is_step = lambda: False
@@ -282,6 +590,9 @@ def run_and_compare(
             "rna_init_event": wc_listeners["rnap_data"]["rna_init_event"]
         }
 
+
+    # -- run -- #
+
     if partition:
         # run the process and get an update
         actual_request, actual_update = run_partitioned_process(
@@ -304,6 +615,10 @@ def run_and_compare(
             initial_state=initial_state,
             data_prefix=data_prefix,
         )
+    
+
+    # -- compare -- # 
+
     if process_class.__name__ == "PolypeptideElongation":
         actual_update["process_state"] = actual_update["process_state"][
             "polypeptide_elongation"

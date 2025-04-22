@@ -20,11 +20,10 @@ simulation.
 import numpy as np
 from stochastic_arrow import StochasticSystem
 
-from ecoli.library.schema import bulk_name_to_idx, counts  # these are now registered types -> listener_schema, numpy_schema
+from ecoli.library.schema import bulk_name_to_idx, counts
 from ecoli.migrated.partition import PartitionedProcess
 from ecoli.migrated.registries import ecoli_core
 from ecoli.shared.schemas import listener_schema, numpy_schema
-
 
 
 NAME = "ecoli-complexation"
@@ -34,6 +33,7 @@ ecoli_core.topology.register(NAME, TOPOLOGY)
 
 class Complexation(PartitionedProcess):
     """Complexation PartitionedProcess"""
+    name = NAME 
     defaults = {
         "stoichiometry": np.array([[]]),
         "rates": np.array([]),
@@ -57,7 +57,25 @@ class Complexation(PartitionedProcess):
         self.seed = self.randomState.randint(2**31)
         self.system = StochasticSystem(self.stoichiometry, random_seed=self.seed)
 
-    def ports_schema(self):
+    def inputs(self):
+        return {
+            "bulk": numpy_schema("bulk"),
+            "listeners": {
+                "complexation_listener": {
+                    **listener_schema(
+                        {
+                            "complexation_events": (
+                                [0] * len(self.reaction_ids),
+                                self.reaction_ids,
+                            )
+                        }
+                    )
+                },
+            },
+            "timestep": self.timestep_schema,
+        }
+
+    def outputs(self):
         return {
             "bulk": numpy_schema("bulk"),
             "listeners": {
