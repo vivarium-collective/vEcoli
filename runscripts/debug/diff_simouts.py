@@ -2,7 +2,7 @@ import argparse
 import duckdb
 import numpy as np
 
-from ecoli.library.parquet_emitter import get_dataset_sql, ndlist_to_ndarray
+from ecoli.emitters.parquet import get_dataset_sql, ndlist_to_ndarray
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

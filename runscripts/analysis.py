@@ -13,7 +13,7 @@ from pyarrow import fs
 
 from ecoli.composites.ecoli_configs import CONFIG_DIR_PATH
 from ecoli.experiments.ecoli_master_sim import SimConfig
-from ecoli.library.parquet_emitter import get_dataset_sql, open_output_file
+from ecoli.emitters.parquet import get_dataset_sql, open_output_file
 
 FILTERS = {
     "experiment_id": str,

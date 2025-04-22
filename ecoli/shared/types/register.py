@@ -82,16 +82,20 @@ def register(schema, core):
     return core.register_types({type_name: schema})
 
 
-def register_type(module_name: str, core):
+def register_type(module_name: str, core, export: bool = True):
     schema = construct_schema(module_name)
     register(schema, core)
-    definition = core.types().get(module_name)
-    definition.pop("_default", None)
-    def_path = f"/Users/alexanderpatrie/Desktop/repos/v2Ecoli/ecoli/shared/types/definitions/{module_name}.json"
+
+    def_path = os.path.join(
+        os.path.dirname(__file__),
+        "definitions",
+        f"{module_name}.json"
+    )
     if not os.path.exists(def_path):
+        definition = core.types().get(module_name)
+        definition.pop("_default", None)
         with open(def_path, "w") as f:
             json.dump(definition, f, indent=4)
-        # return register(schema, core)
 
 
 def test_register_type(ecore):

@@ -68,3 +68,4 @@ example.ipynb
 *.todo
 notes.md
 puzzle.py
+*.pckl
