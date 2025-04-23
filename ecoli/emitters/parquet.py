@@ -6,6 +6,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, cast, Mapping, Optional
 from urllib import parse
+import uuid
 
 import duckdb
 import numpy as np
@@ -16,8 +17,9 @@ from pyarrow import fs
 from pyarrow import json as pj
 from pyarrow import parquet as pq
 from tqdm import tqdm
-from vivarium.core.emitter import Emitter
+from process_bigraph.emitter import Emitter
 from vivarium.core.serialize import make_fallback_serializer_function
+
 
 METADATA_PREFIX = "output_metadata__"
 """
@@ -657,13 +659,28 @@ def flatten_dict(d: dict):
     return dict(results)
 
 
+def format_out_dir(out_dir: os.PathLike[str], experiment_id: str):
+    """Format local out dirpath to pyarrow.fs.FileSystem-compliant uri format."""
+    return f"file://{out_dir}/{experiment_id}.dat"
+
+
 class ParquetEmitter(Emitter):
-    # TODO: migrate this
     """
     Emit data to a Parquet dataset.
     """
 
-    def __init__(self, config: dict[str, Any]) -> None:
+    config_schema = {
+        'batch_size': {
+            '_type': 'integer',
+            '_default': 400
+        },
+        # ONE of the following:
+        'out_dir': 'maybe[string]',  # local output directory (absolute/relative),
+        'out_uri': 'maybe[string]',  # Google Cloud storage bucket URI
+        'experiment_id': 'maybe[string]'
+    }
+
+    def __init__(self, config=None, core=None) -> None:
         """
         Configure emitter.
 
@@ -672,7 +689,7 @@ class ParquetEmitter(Emitter):
 
                 {
                     'type': 'parquet',
-                    'emits_to_batch': Number of emits per Parquet row
+                    'batch_size': Number of emits per Parquet row
                         group (optional, default: 400),
                     # One of the following is REQUIRED
                     'out_dir': local output directory (absolute/relative),
@@ -680,12 +697,17 @@ class ParquetEmitter(Emitter):
                 }
 
         """
-        if "out_uri" not in config:
-            out_uri = os.path.abspath(config["out_dir"])
-        else:
-            out_uri = config["out_uri"]
+        super().__init__(config, core)
+        self.experiment_id = self.config.get("experiment_id", str(uuid.uuid4()))
+
+        out_uri = self.config.get("out_uri")
+        if out_uri is None:
+            out_dir = os.path.abspath(self.config["out_dir"])
+            out_uri = format_out_dir(out_dir, self.experiment_id)
+
         self.filesystem, self.outdir = fs.FileSystem.from_uri(out_uri)
-        self.batch_size = config.get("batch_size", 400)
+        self.batch_size = self.config["batch_size"]
+
         self.fallback_serializer = make_fallback_serializer_function()
         # Batch emits as newline-delimited JSONs in temporary file
         self.temp_data = tempfile.NamedTemporaryFile(delete=False)
@@ -695,6 +717,7 @@ class ParquetEmitter(Emitter):
         self.schema = pa.schema([])
         self.non_null_keys: set[str] = set()
         self.num_emits = 0
+        self.history = {}
         atexit.register(self._finalize)
 
     def _finalize(self):
@@ -773,9 +796,11 @@ class ParquetEmitter(Emitter):
         pq.write_metadata(
             unified_schema, experiment_schema_path, filesystem=self.filesystem
         )
-
-    def emit(self, data: dict[str, Any]):
+    
+    def update(self, state):
         """
+        State keys will be dynamically set when emitter is added
+
         Flattens emit dictionary by concatenating nested key names with double
         underscores (:py:func:~.flatten_dict), serializes flattened emit with
         ``orjson``, and writes newline-delimited JSONs in a temporary file to be
@@ -807,9 +832,19 @@ class ParquetEmitter(Emitter):
         This Hive-partioned directory structure can be efficiently filtered
         and queried using DuckDB (see :py:func:`~.get_dataset_sql`).
         """
+        vals = {
+            "data": {
+                port_name: value
+                for port_name, value in state.items()
+            },
+            "experiment_id": self.experiment_id
+        }
+        state.update(vals)
+        state["table"] = "configuration"
+
         # Config will always be first emit
-        if data["table"] == "configuration":
-            data = {**data["data"].pop("metadata"), **data["data"]}
+        if state["table"] == "configuration":
+            data = {**state["data"].pop("metadata", None), **state["data"]}
             data["time"] = data.get("initial_global_time", 0.0)
             # Manually create filepaths with hive partitioning
             # Start agent ID with 1 to avoid leading zeros
@@ -828,6 +863,7 @@ class ParquetEmitter(Emitter):
             self.partitioning_path = os.path.join(
                 *(f"{k}={v}" for k, v in partitioning_keys.items())
             )
+            self.history[self.experiment_id] = data
             data = flatten_dict(data)
             data_str = orjson.dumps(
                 data,
@@ -881,10 +917,10 @@ class ParquetEmitter(Emitter):
         # Engine in timestep immediately after division (first with 2 cells)
         # In colony simulations, EngineProcess will terminate simulation
         # immediately upon division (following branch is never invoked)
-        if len(data["data"]["agents"]) > 1:
+        if len(state["data"]["agents"]) > 1:
             return
-        for agent_data in data["data"]["agents"].values():
-            agent_data["time"] = float(data["data"]["time"])
+        for agent_data in state["data"]["agents"].values():
+            agent_data["time"] = float(state["data"]["time"])
             agent_data = flatten_dict(agent_data)
             # If we encounter columns that have, up until this point,
             # been NULL, serialize/deserialize them and update their
@@ -939,3 +975,9 @@ class ParquetEmitter(Emitter):
                 self.filesystem,
             )
             self.temp_data = tempfile.NamedTemporaryFile(delete=False)
+    
+    def query(self, query=None):
+        data = self.history[self.experiment_id]
+        return data 
+
+            

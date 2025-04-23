@@ -18,6 +18,6 @@ push:
 test:
 	@[ -n "$(dest)" ] && pytest -s "$(dest)" || pytest -s
 
-.PHONY: api
-api:
-	@uv run uvicorn api.gateway.app:app --reload --host 0.0.0.0 --port 8080
+.PHONY: gateway
+gateway:
+	@uvicorn api.gateway.community.app:app --reload --host 0.0.0.0 --port 8080

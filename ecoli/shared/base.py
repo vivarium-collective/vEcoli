@@ -1,5 +1,5 @@
 import abc
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from process_bigraph import Step, Process
 from vivarium.vivarium import Vivarium
@@ -86,6 +86,14 @@ class ProcessBase(Process):
         )))
 
 
+@dataclass
+class EmitterConfig(BaseClass):
+    address: str 
+    config: dict = field(default_factory=dict)  # config schema
+    mode: str = "all"
+    path: tuple[str] = ("emitter",)
+
+
 class VivariumFactory:
     _default_core: Core = ecoli_core
 
@@ -96,17 +104,28 @@ class VivariumFactory:
     def default_core(self):
         return self._default_core
     
-    def new(self, document: dict | None = None, core=None) -> Vivarium:
+    def new(
+            self, 
+            document: dict | None = None, 
+            core=None,
+            emitter_config: EmitterConfig | None = None
+    ) -> Vivarium:
         c = core or self.default_core
         return Vivarium(
             core=c, 
             processes=c.process_registry.registry, 
             types=c.types(), 
-            document=document
+            document=document,
+            emitter_config=emitter_config.as_dict() if emitter_config else None
         )
     
-    def __call__(self, document: dict | None = None, core=None) -> Vivarium:
-        return self.new(document, core)
+    def __call__(
+            self, 
+            document: dict | None = None, 
+            core=None,
+            emitter_config: EmitterConfig | None = None
+    ) -> Vivarium:
+        return self.new(document, core, emitter_config)
 
 
 vivarium_factory = VivariumFactory()

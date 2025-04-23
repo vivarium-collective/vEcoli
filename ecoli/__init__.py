@@ -83,9 +83,9 @@ for name, process in TOY_PROCESSES.items():
     ecoli_core.process_registry.register(name.lower(), process)
 
 
-# ----- existing registration logic TODO: how to handle this/move to types ----- # 
+# NOTE: emitters are delimited with -
+ecoli_core.process_registry.register("parquet-emitter", ParquetEmitter)
 
-ecoli_core.process_registry.register("parquet", ParquetEmitter)
 
 # register :term:`updaters`
 # inverse_updater_registry.register("accumulate", inverse_update_accumulate)
