@@ -130,6 +130,11 @@ async def run_vivarium(
         raise fastapi.HTTPException(404, str(e))
 
 
+@config.router.post('/sensitivity-analysis')
+async def sensitivity_analysis(parameter_path: str):
+    pass
+
+
 # -- static data -- #
 
 @config.router.get('/get/processes', tags=["CommunityAPI"])

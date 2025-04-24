@@ -66,3 +66,12 @@
 ## _NOTES_:
 - We can infer an example initial state, and thus outputs for a given partitioned process by calling 
 `ecoli.shared.utils.migration.load_initial_state(<TIME INDEX>)`
+
+- refactor parca mig. and p
+- tensor types
+- VQE for optim
+- sens. analy.
+- infernc. bay. vs optim.
+- parcel python dask ray (hpc)
+
+

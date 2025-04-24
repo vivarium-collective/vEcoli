@@ -1,4 +1,6 @@
 import atexit
+import copy
+import datetime
 import os
 import pathlib
 from itertools import pairwise
@@ -832,16 +834,22 @@ class ParquetEmitter(Emitter):
         This Hive-partioned directory structure can be efficiently filtered
         and queried using DuckDB (see :py:func:`~.get_dataset_sql`).
         """
-        vals = {
-            "data": {
-                port_name: value
-                for port_name, value in state.items()
-            },
-            "experiment_id": self.experiment_id
+        state_k = copy.deepcopy(state)
+        data_k = {
+            "metadata": {
+                "timestamp": str(datetime.datetime.now())
+            }
         }
-        state.update(vals)
-        state["table"] = "configuration"
-
+        data_k.update({
+            port_name: value
+            for port_name, value in state_k.items()
+        })
+        vals = {
+            "data": data_k,
+            "experiment_id": self.experiment_id,
+            "table": "configuration",
+        }
+        state = vals
         # Config will always be first emit
         if state["table"] == "configuration":
             data = {**state["data"].pop("metadata", None), **state["data"]}

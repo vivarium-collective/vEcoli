@@ -1,7 +1,16 @@
 """
 This folder is used to store frequently used JSON configuration files for
 :py:class:`~ecoli.experiments.ecoli_master_sim.EcoliSim`.
+
+config json will do the following:
+
+sim_data_path: skips parca and reads sim data directly
+
+
+workflow will first run parca if no sim data, then pickle it.
 """
+
+
 
 import copy
 import json
