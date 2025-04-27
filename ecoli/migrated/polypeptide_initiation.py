@@ -28,14 +28,14 @@ from ecoli.shared.schemas import numpy_schema, listener_schema
 
 # Register default topology for this process, associating it with process name
 # NAME = "ecoli-polypeptide-initiation"
-# TOPOLOGY = {
-#     "environment": ("environment",),
-#     "listeners": ("listeners",),
-#     "active_ribosome": ("unique", "active_ribosome"),
-#     "RNA": ("unique", "RNA"),
-#     "bulk": ("bulk",),
-#     "timestep": ("timestep",),
-# }
+TOPOLOGY = {
+    "environment": ("environment",),
+    "listeners": ("listeners",),
+    "active_ribosome": ("unique", "active_ribosome"),
+    "RNA": ("unique", "RNA"),
+    "bulk": ("bulk",),
+    "timestep": ("timestep",),
+}
 # topology_registry.register(NAME, TOPOLOGY)
 
 

@@ -226,10 +226,10 @@ class PartitionedProcess(ProcessBase):
     This is the base class for all processes whose updates can be partitioned.
     Each partitioned process should define the following:
 
-    ports_schema()
-    calculate_request(state, interval)
-    evolve_state(state, interval)
-    listener_schemas()
+    @property listener_schemas()
+    def ports_schema()
+    def calculate_request(state, interval)
+    def evolve_state(state, interval)
     """
 
     def initialize(self, config):
@@ -244,19 +244,6 @@ class PartitionedProcess(ProcessBase):
         assert self.topology
         # topology_registry.register(self.name, self.topology)
 
-    @abc.abstractmethod
-    def ports_schema(self):
-        # TODO: use this for initial state
-        return {}
-    
-    @abc.abstractmethod
-    def calculate_request(self, state, interval):
-        return {}
-
-    @abc.abstractmethod
-    def evolve_state(self, state, interval):
-        return {}
-    
     @property 
     @abc.abstractmethod
     def listener_schemas(self) -> dict:
@@ -275,6 +262,19 @@ class PartitionedProcess(ProcessBase):
             }
         """
         pass
+
+    @abc.abstractmethod
+    def ports_schema(self):
+        # TODO: use this for initial state
+        return {}
+    
+    @abc.abstractmethod
+    def calculate_request(self, state, interval):
+        return {}
+
+    @abc.abstractmethod
+    def evolve_state(self, state, interval):
+        return {}
 
     def initial_state(self):
         # get bidirectional schema and defaults

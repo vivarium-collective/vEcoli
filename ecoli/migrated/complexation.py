@@ -28,12 +28,13 @@ from ecoli.shared.schemas import listener_schema, numpy_schema
 
 NAME = "ecoli-complexation"
 TOPOLOGY = {"bulk": ("bulk",), "listeners": ("listeners",), "timestep": ("timestep",)}
-ecoli_core.topology.register(NAME, TOPOLOGY)
+# ecoli_core.topology.register(NAME, TOPOLOGY)
 
 
 class Complexation(PartitionedProcess):
     """Complexation PartitionedProcess"""
     name = NAME 
+    topology = TOPOLOGY
     defaults = {
         "stoichiometry": np.array([[]]),
         "rates": np.array([]),
@@ -44,56 +45,40 @@ class Complexation(PartitionedProcess):
         "time_step": 1,
     }
 
-    def __init__(self, config=None, core=None):
-        super().__init__(config, core)
+    def initialize(self, config):
+        self.stoichiometry = config["stoichiometry"]
+        self.rates = config["rates"]
+        self.molecule_names = config["molecule_names"]
+        self.reaction_ids = config["reaction_ids"]
+        self.complex_ids = config["complex_ids"]
 
-        self.stoichiometry = self.config["stoichiometry"]
-        self.rates = self.config["rates"]
-        self.molecule_names = self.config["molecule_names"]
-        self.reaction_ids = self.config["reaction_ids"]
-        self.complex_ids = self.config["complex_ids"]
-
-        self.randomState = np.random.RandomState(seed=self.config["seed"])
+        self.randomState = np.random.RandomState(seed=config["seed"])
         self.seed = self.randomState.randint(2**31)
         self.system = StochasticSystem(self.stoichiometry, random_seed=self.seed)
-
-    def inputs(self):
+    
+    @property
+    def listener_schemas(self) -> dict:
+        return {
+            "complexation_listener": {
+                **listener_schema(
+                    {
+                        "complexation_events": (
+                            [0] * len(self.reaction_ids),
+                            self.reaction_ids,
+                        )
+                    }
+                )
+            }
+        }
+    
+    def ports_schema(self):
         return {
             "bulk": numpy_schema("bulk"),
-            "listeners": {
-                "complexation_listener": {
-                    **listener_schema(
-                        {
-                            "complexation_events": (
-                                [0] * len(self.reaction_ids),
-                                self.reaction_ids,
-                            )
-                        }
-                    )
-                },
-            },
-            "timestep": self.timestep_schema,
+            "listeners": self.listener_schemas,
+            "timestep": {"_default": self.config["time_step"]},
         }
 
-    def outputs(self):
-        return {
-            "bulk": numpy_schema("bulk"),
-            "listeners": {
-                "complexation_listener": {
-                    **listener_schema(
-                        {
-                            "complexation_events": (
-                                [0] * len(self.reaction_ids),
-                                self.reaction_ids,
-                            )
-                        }
-                    )
-                },
-            },
-            "timestep": self.timestep_schema,
-        }
-
-    def calculate_request(self, state):
+    def calculate_request(self, state, interval):
         timestep = state["timestep"]
         if self.molecule_idx is None:
             self.molecule_idx = bulk_name_to_idx(
@@ -109,8 +94,8 @@ class Complexation(PartitionedProcess):
             (self.molecule_idx, np.fmax(moleculeCounts - updatedMoleculeCounts, 0))
         ]
         return requests
-
-    def update(self, state, interval):
+    
+    def evolve_state(self, state, interval):
         timestep = state["timestep"]
         substrate = counts(state["bulk"], self.molecule_idx)
 
@@ -129,8 +114,8 @@ class Complexation(PartitionedProcess):
         }
 
         return update
-
-
+    
+    
 def test_partition():
     # TODO: here use parameterization from migration.migration_utils in run_partitioned_process
     pass

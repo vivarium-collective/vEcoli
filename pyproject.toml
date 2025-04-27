@@ -58,6 +58,7 @@ dependencies = [
     "astor",
     "process-bigraph>=0.0.30",
     "vivarium-interface>=0.0.4",
+    "dask[complete]>=2025.4.1",
 ]
 
 [project.scripts]

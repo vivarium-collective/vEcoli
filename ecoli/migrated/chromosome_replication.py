@@ -17,173 +17,135 @@ molecules.
 """
 
 import numpy as np
-from vivarium.library.units import Quantity
 
-from wholecell.utils import units
-from wholecell.utils.polymerize import buildSequences, polymerize, computeMassIncrease
 from ecoli.library.schema import (
+    numpy_schema,
     counts,
     attrs,
     bulk_name_to_idx,
+    listener_schema,
 )
 
+from wholecell.utils import units
+from wholecell.utils.polymerize import buildSequences, polymerize, computeMassIncrease
+
+from ecoli.processes.registries import topology_registry
 from ecoli.migrated.partition import PartitionedProcess
-from ecoli.shared.schemas import listener_schema, numpy_schema
 
 
-# TODO: do we need to keep these topology and name definitions? (they exist in every module)
 # Register default topology for this process, associating it with process name
-# NAME = "ecoli-chromosome-replication"
-# TOPOLOGY = {
-#     "bulk": ("bulk",),
-#     "active_replisomes": ("unique", "active_replisome"),
-#     "oriCs": ("unique", "oriC"),
-#     "chromosome_domains": ("unique", "chromosome_domain"),
-#     "full_chromosomes": ("unique", "full_chromosome"),
-#     "listeners": ("listeners",),
-#     "environment": ("environment",),
-#     "timestep": ("timestep",),
-# }
+NAME = "ecoli-chromosome-replication"
+TOPOLOGY = {
+    "bulk": ("bulk",),
+    "active_replisomes": ("unique", "active_replisome"),
+    "oriCs": ("unique", "oriC"),
+    "chromosome_domains": ("unique", "chromosome_domain"),
+    "full_chromosomes": ("unique", "full_chromosome"),
+    "listeners": ("listeners",),
+    "environment": ("environment",),
+    "timestep": ("timestep",),
+}
 # topology_registry.register(NAME, TOPOLOGY)
 
 
 class ChromosomeReplication(PartitionedProcess):
-    """Chromosome Replication LinkedProcess"""
+    """Chromosome Replication PartitionedProcess"""
 
-    config_schema = {
-        "max_time_step": {
-            "_type": 2.0,
-            "_default": "float"
-        },
-        "criticalInitiationMass": {
-            "_type": "float",
-            "_default": 975
-        },
-        "nutrientToDoublingTime": "tree",
-        "replichore_lengths": "list",
-        "sequences": "list",
-        "polymerized_dntp_weights": "list",
-        "replication_coordinate": "list",
-        "D_period": "list",
-        "replisome_protein_mass": "float",
-        "no_child_place_holder": {
-            "_type": "integer",
-            "_default": -1
-        },
-        "basal_elongation_rate": {
-            "_type": "float",
-            "_default": 967.0,
-        },
-        "mechanistic_replisome": {
-            "_type": "boolean",
-            "_default": True
-        },
+    name = NAME
+    topology = TOPOLOGY
+    defaults = {
+        "max_time_step": 2.0,
+        "get_dna_critical_mass": lambda doubling_time: units.Unum,
+        "criticalInitiationMass": 975 * units.fg,
+        "nutrientToDoublingTime": {},
+        "replichore_lengths": np.array([]),
+        "sequences": np.array([]),
+        "polymerized_dntp_weights": [],
+        "replication_coordinate": np.array([]),
+        "D_period": np.array([]),
+        "replisome_protein_mass": 0,
+        "no_child_place_holder": -1,
+        "basal_elongation_rate": 967,
+        "mechanistic_replisome": True,
         # molecules
-        "replisome_trimers_subunits": "list",
-        "replisome_monomers_subunits": "list",
-        "dntps": "list",
-        "ppi": "list",
+        "replisome_trimers_subunits": [],
+        "replisome_monomers_subunits": [],
+        "dntps": [],
+        "ppi": [],
         # random seed
-        "seed": "integer",
-        "emit_unique": {
-            "_type": "boolean",
-            "_default": False
-        },
+        "seed": 0,
+        "emit_unique": False,
     }
 
-    def __init__(self, config=None, core=None):
-        super().__init__(config, core)
-
-        self.dntps_idx = None
-        self.replisome_monomers_idx = None
-        self.replisome_trimers_idx = None
-        self.elongation_rates = None
-        self.criticalMassPerOriC = None
-        self.max_time_step = self.config["max_time_step"]
+    def initialize(self, config):
+        self.max_time_step = config["max_time_step"]
 
         # Load parameters
-        self.get_dna_critical_mass = lambda doubling_time: units.Unum
-
-        self.criticalInitiationMass = Quantity(
-            value=self.config["criticalInitiationMass"],
-            units=units.fg
+        self.get_dna_critical_mass = config["get_dna_critical_mass"]
+        self.criticalInitiationMass = config["criticalInitiationMass"]
+        self.nutrientToDoublingTime = config["nutrientToDoublingTime"]
+        self.replichore_lengths = config["replichore_lengths"]
+        self.sequences = self.config["sequences"]
+        self.polymerized_dntp_weights = config["polymerized_dntp_weights"]
+        self.replication_coordinate = config["replication_coordinate"]
+        self.D_period = config["D_period"]
+        self.replisome_protein_mass = config["replisome_protein_mass"]
+        self.no_child_place_holder = config["no_child_place_holder"]
+        self.basal_elongation_rate = config["basal_elongation_rate"]
+        self.make_elongation_rates = (
+            lambda random, replisomes, base, time_step: units.Unum
         )
-        self.nutrientToDoublingTime = self.config["nutrientToDoublingTime"]
-
-        self.replichore_lengths = np.array(self.config["replichore_lengths"])
-        self.sequences = np.array(self.config["sequences"])
-        self.polymerized_dntp_weights = self.config["polymerized_dntp_weights"]
-        self.replication_coordinate = np.array(self.config["replication_coordinate"])
-        self.D_period = np.array(self.config["D_period"])
-
-        self.replisome_protein_mass = self.config["replisome_protein_mass"]
-        self.no_child_place_holder = self.config["no_child_place_holder"]
-        self.basal_elongation_rate = self.config["basal_elongation_rate"]
-
-        self.make_elongation_rates = (lambda random, replisomes, base, time_step: units.Unum)
 
         # Sim options
-        self.mechanistic_replisome = self.config["mechanistic_replisome"]
+        self.mechanistic_replisome = config["mechanistic_replisome"]
 
         # random state
-        self.seed = self.config["seed"]
+        self.seed = config["seed"]
         self.random_state = np.random.RandomState(seed=self.seed)
 
-        self.emit_unique = self.config.get("emit_unique", True)
+        self.emit_unique = config.get("emit_unique", True)
 
         # Bulk molecule names
-        self.replisome_trimers_subunits = self.config["replisome_trimers_subunits"]
-        self.replisome_monomers_subunits = self.config[
+        self.replisome_trimers_subunits = config["replisome_trimers_subunits"]
+        self.replisome_monomers_subunits = config[
             "replisome_monomers_subunits"
         ]
-        self.dntps = self.config["dntps"]
-        self.ppi = self.config["ppi"]
+        self.dntps = config["dntps"]
+        self.ppi = config["ppi"]
 
         self.ppi_idx = None
 
-    def inputs(self):
+    @property
+    def listener_schemas(self):
+        return {
+            "mass": listener_schema({"cell_mass": 0.0}),
+            "replication_data": listener_schema(
+                {"critical_initiation_mass": 0.0, "critical_mass_per_oriC": 0.0}
+            )
+        }
+
+    def ports_schema(self):
         return {
             # bulk molecules
             "bulk": numpy_schema("bulk"),
-            "listeners": {
-                "mass": listener_schema({"cell_mass": 0.0}),
-                "replication_data": listener_schema({
-                    "critical_initiation_mass": 0.0,
-                    "critical_mass_per_oriC": 0.0
-                }),
-            },
+            "listeners": self.listener_schemas,
             "environment": {
-                "media_id": "string"
+                "media_id": {"_default": "", "_updater": "set"},
             },
-            "active_replisomes": "active_replisomes",
+            "active_replisomes": numpy_schema(
+                "active_replisomes"
+            ),
             "oriCs": numpy_schema("oriCs"),
-            "chromosome_domains": numpy_schema("chromosome_domains"),
-            "full_chromosomes": numpy_schema("full_chromosomes"),
+            "chromosome_domains": numpy_schema(
+                "chromosome_domains"
+            ),
+            "full_chromosomes": numpy_schema(
+                "full_chromosomes"
+            ),
             "timestep": {"_default": self.config["time_step"]},
         }
 
-    def outputs(self):
-        return {
-            # bulk molecules
-            "bulk": numpy_schema("bulk"),
-            "listeners": {
-                "mass": listener_schema({"cell_mass": 0.0}),
-                "replication_data": listener_schema({
-                    "critical_initiation_mass": 0.0,
-                    "critical_mass_per_oriC": 0.0
-                }),
-            },
-            "environment": {
-                "media_id": "string"
-            },
-            "active_replisomes": "active_replisomes",
-            "oriCs": numpy_schema("oriCs"),
-            "chromosome_domains": numpy_schema("chromosome_domains"),
-            "full_chromosomes": numpy_schema("full_chromosomes"),
-            "timestep": {"_default": self.config["time_step"]},
-        }
-
-    def calculate_request(self, state):
+    def calculate_request(self, state, interval):
         if self.ppi_idx is None:
             self.ppi_idx = bulk_name_to_idx(self.ppi, state["bulk"]["id"])
             self.replisome_trimers_idx = bulk_name_to_idx(
@@ -224,22 +186,20 @@ class ChromosomeReplication(PartitionedProcess):
             requests["bulk"].append((self.replisome_trimers_idx, 6 * n_oriC))
             requests["bulk"].append((self.replisome_monomers_idx, 2 * n_oriC))
 
-        active_replisomes_state = format_active_replisomes_state(state)
-
         # If there are no active forks return
-        n_active_replisomes = active_replisomes_state["_entryState"].sum()
+        n_active_replisomes = state["active_replisomes"]["_entryState"].sum()
         if n_active_replisomes == 0:
             return requests
 
         # Get current locations of all replication forks
-        (fork_coordinates,) = attrs(active_replisomes_state, ["coordinates"])
+        (fork_coordinates,) = attrs(state["active_replisomes"], ["coordinates"])
         sequence_length = np.abs(np.repeat(fork_coordinates, 2))
 
         self.elongation_rates = self.make_elongation_rates(
             self.random_state,
             len(self.sequences),
             self.basal_elongation_rate,
-            state["timestep"]
+            state["timestep"],
         )
 
         sequences = buildSequences(
@@ -271,7 +231,7 @@ class ChromosomeReplication(PartitionedProcess):
 
         return requests
 
-    def update(self, state, interval):
+    def evolve_state(self, state, interval):
         # Initialize the update dictionary
         update = {
             "bulk": [],
@@ -282,11 +242,9 @@ class ChromosomeReplication(PartitionedProcess):
             "listeners": {"replication_data": {}},
         }
 
-        active_replisomes_state = format_active_replisomes_state(state)
-
         # Module 1: Replication initiation
         # Get number of existing replisomes and oriCs
-        n_active_replisomes = active_replisomes_state["_entryState"].sum()
+        n_active_replisomes = state["active_replisomes"]["_entryState"].sum()
         n_oriC = state["oriCs"]["_entryState"].sum()
 
         # If there are no origins, return immediately
@@ -409,7 +367,7 @@ class ChromosomeReplication(PartitionedProcess):
             right_replichore,
             coordinates_replisome,
         ) = attrs(
-            active_replisomes_state,
+            state["active_replisomes"],
             ["domain_index", "right_replichore", "coordinates"],
         )
 
@@ -456,7 +414,7 @@ class ChromosomeReplication(PartitionedProcess):
         updated_coordinates[~right_replichore] = -updated_coordinates[~right_replichore]
 
         # Update attributes and submasses of replisomes
-        (current_dna_mass,) = attrs(active_replisomes_state, ["massDiff_DNA"])
+        (current_dna_mass,) = attrs(state["active_replisomes"], ["massDiff_DNA"])
         update["active_replisomes"].update(
             {
                 "set": {
@@ -580,3 +538,5 @@ def test_chromosome_replication():
     assert process is not None
 
 
+if __name__ == "__main__":
+    test_chromosome_replication()
