@@ -15,7 +15,7 @@ from ecoli.library.schema import bulk_name_to_idx, counts
 
 from ecoli.shared.schemas import numpy_schema
 from wholecell.utils import units
-from ecoli.shared.registration import ecoli_core
+from ecoli.shared.registry import ecoli_core
 from ecoli.migrated.partition import PartitionedProcess
 
 

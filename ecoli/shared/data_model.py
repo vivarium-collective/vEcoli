@@ -31,6 +31,24 @@ class BaseClass:
         return [attr for attr in dir(self) if not attr in self._builtins and not attr.startswith("_")]
 
 
+# --- composition --- #
+
+@dataclass
+class EmitterConfig(BaseClass):
+    address: str 
+    config: dict = field(default_factory=dict)  # config schema
+    mode: str = "all"
+    path: tuple[str] = ("emitter",)
+
+
+@dataclass 
+class Topology(BaseClass):
+    inputs: dict = field(default_factory=dict)
+    outputs: dict = field(default_factory=dict)
+
+
+# --- API Requests/Responses/etc --- # 
+
 @dataclass
 class VivariumDocument(BaseClass):
     state: dict[str, Any] = field(default_factory=dict)
@@ -57,3 +75,5 @@ class SimulationResult(BaseClass):
     simulation_id: str
     timestamp: str
     data: list[IntervalResult]
+
+

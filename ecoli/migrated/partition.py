@@ -22,7 +22,7 @@ import warnings
 
 from bigraph_schema import deep_merge
 
-from ecoli.shared.base import StepBase, ProcessBase, collapse_defaults
+from ecoli.shared.interface import StepBase, ProcessBase, collapse_defaults
 from ecoli.processes.registries import topology_registry
 from ecoli.shared.schemas import numpy_schema
 

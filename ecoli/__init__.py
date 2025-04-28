@@ -62,7 +62,7 @@ from ecoli.library.updaters import (
     inverse_update_unique_numpy,
     inverse_updater_registry,
 )
-from ecoli.shared.registration import ecoli_core
+from ecoli.shared.registry import ecoli_core
 
 
 VERBOSE_REGISTER = eval(os.getenv("VERBOSE_REGISTER", "True"))

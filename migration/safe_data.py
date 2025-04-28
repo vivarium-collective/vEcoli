@@ -1,6 +1,6 @@
 from ecoli.migrated.complexation import Complexation
 from vivarium import Vivarium
-from ecoli.shared.registration import ecoli_core as ec
+from ecoli.shared.registry import ecoli_core as ec
 from ecoli.shared.utils.migration import configure
 
 

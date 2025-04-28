@@ -14,7 +14,43 @@ from process_bigraph import ProcessTypes, Process
 from vivarium.core.registry import Registry as VivRegistry
 from bigraph_schema import Registry as BgsRegistry
 
+from ecoli.shared.data_model import BaseClass
 from ecoli.shared.types.register import register_type
+
+
+PROCESS_SUBPACKAGES = [
+    'antibiotics',
+    'chemotaxis',
+    'environment',
+    'listeners',
+    'membrane',
+    'spatiality',
+    'stubs'
+]
+            
+            
+def get_migration_module_mapping():
+    """Collect all the existing (v1) implementation process id's (found in the configs) from the given 
+    module_path and return the migration-version. So, 'ecoli.processes.listeners...', becomes 'ecoli.migrated.listeners...'
+    """
+    from ecoli import processes
+
+    name_mapping = {}
+    for imp in dir(processes):
+        if imp[0].isupper():
+            proc = getattr(processes, imp)
+            location_path = f'{proc.__module__}.{imp}'
+            name_mapping[proc.name] = location_path.replace("processes", "migrated")
+    return name_mapping
+
+
+def get_primary_process_mapping():
+    mapping = get_migration_module_mapping()
+    return {
+        k: v
+        for k, v in mapping.items() \
+        if v.split('.')[2] not in PROCESS_SUBPACKAGES
+    }
 
 
 class TopologyRegistry(VivRegistry):
@@ -26,6 +62,29 @@ class ProcessRegistry(BgsRegistry):
     pass
 
 
+class ModelProcesses:
+    all = get_migration_module_mapping()
+    primary = get_primary_process_mapping()
+
+    @property
+    def dict(self):
+        return {'all': self.all, 'primary': self.primary}
+
+
+@dataclass
+class Processes:
+    _processes: ProcessRegistry | BgsRegistry
+
+    @property
+    def model(self):
+        return ModelProcesses
+
+    @property
+    def registered(self):
+        return list(self._processes.registry.keys())
+    
+
+
 @dataclass
 class DataView:
     _core: ProcessTypes
@@ -34,7 +93,7 @@ class DataView:
 
     @property
     def processes(self):
-        return list(self._processes.registry.keys())
+        return Processes(self._processes)
     
     @property
     def types(self):
@@ -43,6 +102,7 @@ class DataView:
     @property
     def topology(self):
         return self._topology.registry if self._topology else {}
+
 
 @dataclass
 class Register:
@@ -93,6 +153,10 @@ class Core(ProcessTypes):
     def view(self, v):
         raise AssertionError("You cannot set the view.")
     
+    @property
+    def ecoli_processes(self):
+        return ModelProcesses()
+    
     def register_type(self, module_name: str):
         return register_type(module_name, core=self)
     
@@ -102,7 +166,8 @@ class Core(ProcessTypes):
         for process in package.__all__:
             try:
                 proc = getattr(package, process)
-                process_id = proc.__module__.split('.')[-1]
+                # process_id = proc.__module__.split('.')[-1]
+                process_id = proc.name
                 self.add.process(process_id, proc)
                 if verbose:
                     print(f'{process_id} registered to processes')

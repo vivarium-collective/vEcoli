@@ -15,7 +15,7 @@ from scipy.sparse import csr_matrix
 import cvxpy as cp
 from vivarium.library.units import units as vivunits
 
-from ecoli.shared.base import StepBase
+from ecoli.shared.interface import StepBase
 from ecoli.shared.schemas import get_config_schema, numpy_schema, listener_schema
 from wholecell.utils import units
 from reconstruction.ecoli.dataclasses.process.metabolism import REVERSE_TAG

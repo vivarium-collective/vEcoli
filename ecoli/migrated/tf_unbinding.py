@@ -7,9 +7,9 @@ binding back to DNA.
 import numpy as np
 import warnings
 
-from ecoli.shared.registration import ecoli_core
+from ecoli.shared.registry import ecoli_core
 from ecoli.library.schema import bulk_name_to_idx, attrs
-from ecoli.shared.base import StepBase
+from ecoli.shared.interface import StepBase
 from ecoli.shared.schemas import numpy_schema
 
 # Register default topology for this process, associating it with process name

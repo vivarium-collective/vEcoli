@@ -13,14 +13,14 @@ from process_bigraph import Step
 from ecoli.library.schema import counts, numpy_schema, bulk_name_to_idx, listener_schema
 
 
-# NAME = "allocator"
-# TOPOLOGY = {
-#     "request": ("request",),
-#     "allocate": ("allocate",),
-#     "bulk": ("bulk",),
-#     "listeners": ("listeners",),
-#     "allocator_rng": ("allocator_rng",),
-# }
+NAME = "allocator"
+TOPOLOGY = {
+    "request": ("request",),
+    "allocate": ("allocate",),
+    "bulk": ("bulk",),
+    "listeners": ("listeners",),
+    "allocator_rng": ("allocator_rng",),
+}
 # topology_registry.register(NAME, TOPOLOGY)
 # # Register "allocator-1", "allocator-2", "allocator-3" to support
 # # multi-tiered partitioning scheme

@@ -20,12 +20,12 @@ from vivarium.vivarium import Vivarium
 from vivarium.core.engine import Engine, view_values, _process_update
 from bigraph_schema import deep_merge
 
-from ecoli.shared.base import ProcessBase, StepBase, vivarium_factory
-from ecoli.shared.datamods import BaseClass
+from ecoli.shared.interface import ProcessBase, StepBase
+from ecoli.shared.data_model import BaseClass
 from wholecell.utils import units
 from ecoli.library.json_state import get_state_from_file
 from migration import LOAD_SIM_DATA, LOAD_SIM_DATA_NO_OPERONS
-from ecoli.shared.registration import Core, ecoli_core
+from ecoli.shared.registry import Core, ecoli_core
 
 
 def dict_union(a: dict, b: dict, mutate_a: bool = False, secure: bool = False) -> dict:
@@ -278,7 +278,7 @@ def test_add_process():
     initial_time: int = 0
     from ecoli.migrated.complexation import Complexation
     from vivarium import Vivarium
-    from ecoli.shared.registration import ecoli_core as ec
+    from ecoli.shared.registry import ecoli_core as ec
     from ecoli.shared.utils.migration import configure
     process_id = 'complexation'
     config = configure(subpackage, module_name, process_class_name, initial_time)

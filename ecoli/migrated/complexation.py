@@ -22,7 +22,7 @@ from stochastic_arrow import StochasticSystem
 
 from ecoli.library.schema import bulk_name_to_idx, counts
 from ecoli.migrated.partition import PartitionedProcess
-from ecoli.shared.registration import ecoli_core
+from ecoli.shared.registry import ecoli_core
 from ecoli.shared.schemas import listener_schema, numpy_schema
 
 

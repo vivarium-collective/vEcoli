@@ -96,6 +96,9 @@ api = [
     "uvicorn>=0.34.1",
     "websockets>=15.0.1",
 ]
+graph = [
+    "rustworkx[mpl]>=0.16.0",
+]
 
 [tool.setuptools]
 packages = [

@@ -5,12 +5,12 @@ import json
 import os
 from typing import Any
 import uuid
-from cryptography.fernet import Fernet
 
+from cryptography.fernet import Fernet
 from bigraph_schema import get_path, set_path
 from process_bigraph.emitter import Emitter
 
-from ecoli.shared.datamods import IntervalResult
+from ecoli.shared.data_model import IntervalResult
 
 
 class SecureEmitter(Emitter):
