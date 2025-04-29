@@ -9,7 +9,7 @@ from ecoli.library.schema import attrs
 
 from ecoli.shared.interface import StepBase
 from ecoli.shared.registry import ecoli_core
-from ecoli.shared.utils.schemas import listener_schema, numpy_schema
+from ecoli.shared.utils.schemas import get_defaults_schema, listener_schema, numpy_schema
 
 
 NAME = "dna_supercoiling_listener"
@@ -40,12 +40,14 @@ class DnaSupercoiling(StepBase):
         self.relaxed_DNA_base_pairs_per_turn = config[
             "relaxed_DNA_base_pairs_per_turn"
         ]
-        self.input_schema = {
+
+        # the following dics should be taken directly from ports schema
+        self.input_ports = {
             "chromosomal_segments": numpy_schema("chromosomal_segments"),
-            "global_time": "float",
+            "global_time": {"_default": 0.0},
             "timestep": self.timestep_schema
         }
-        self.output_schema = {
+        self.output_ports = {
             "listeners": {
                 "dna_supercoiling": listener_schema(
                     {
@@ -57,31 +59,19 @@ class DnaSupercoiling(StepBase):
                 )
             }
         }
+    
+    def inputs(self):
+        return get_defaults_schema(self.input_ports)
 
-
-    def ports_schema(self):
-        return {
-            "listeners": {
-                "dna_supercoiling": listener_schema(
-                    {
-                        "segment_left_boundary_coordinates": [],
-                        "segment_right_boundary_coordinates": [],
-                        "segment_domain_indexes": [],
-                        "segment_superhelical_densities": [],
-                    }
-                )
-            },
-            "chromosomal_segments": numpy_schema("chromosomal_segments"),
-            "global_time": "float",
-            "timestep": self.timestep_schema,
-        }
+    def outputs(self):
+        return get_defaults_schema(self.output_ports) 
 
     def update_condition(self, timestep, states):
         return (states["global_time"] % states["timestep"]) == 0
 
-    def next_update(self, timestep, states):
+    def update(self, state):
         boundary_coordinates, domain_indexes, linking_numbers = attrs(
-            states["chromosomal_segments"],
+            state["chromosomal_segments"],
             ["boundary_coordinates", "domain_index", "linking_number"],
         )
 

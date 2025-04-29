@@ -57,7 +57,7 @@ class Aggregator(StepBase):
     def outputs(self):
         return self.output_ports
 
-    def update(self, state, interval):
+    def update(self, state):
         counts = {}
         for path, func in zip(self.paths, self.funcs):
             variable = f"{path[-1]}_{func.__name__}"
