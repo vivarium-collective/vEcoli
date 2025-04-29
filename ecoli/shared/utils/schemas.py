@@ -38,12 +38,33 @@ def get_defaults_schema(d):
     Used for migration.
     """
     if isinstance(d, dict):
-        if '_default' in d:
-            value = d['_default'] 
-            return get_schema_type(value)
+        extracted_attrs = ['_divider', '_type', '_default']
+        is_inner = any([k in extracted_attrs for k in d])
+
+        # case: is inner dict from which val type is extracted
+        if is_inner:
+            schema = {}
+            if '_divider' in d:
+                schema['_divide'] = d['_divider']
+
+            if '_type' in d:
+                schema['_type'] = d['_type']
+            
+            if '_default' in d:
+                value = d['_default'] 
+                type_id = get_schema_type(value)
+                schema['_type'] = type_id
+            
+            if len(schema.keys()) == 1 and "_type" in list(schema.keys()):
+                return schema['_type']
+            else:
+                return schema
+        # case: is outer dict
         else:
+            # and empty (return)
             if not len(d.keys()):
                 return "tree"
+            # or nested (recurse)
             else:
                 return {k: get_defaults_schema(v) for k, v in d.items()}
     else:

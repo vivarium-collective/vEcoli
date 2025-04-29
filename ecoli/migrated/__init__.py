@@ -9,15 +9,15 @@
 # from ecoli.migrated.environment.media_update import MediaUpdate
 
 # --- Antibiotics Processes --- #
+from ecoli.migrated.antibiotics.antibiotic_transport_odeint import (
+    AntibioticTransportOdeint,
+)
 # from ecoli.migrated.antibiotics.lysis_initiation import LysisInitiation
 # from ecoli.migrated.antibiotics.cell_wall import CellWall
 # from ecoli.migrated.antibiotics.pbp_binding import PBPBinding
 # from ecoli.migrated.antibiotics.death import DeathFreezeState
 # from ecoli.migrated.antibiotics.antibiotic_transport_steady_state import (
 #     AntibioticTransportSteadyState,
-# )
-# from ecoli.migrated.antibiotics.antibiotic_transport_odeint import (
-#     AntibioticTransportOdeint,
 # )
 # from ecoli.migrated.antibiotics.permeability import Permeability
 # from ecoli.migrated.antibiotics.tetracycline_ribosome_equilibrium import (
@@ -70,6 +70,7 @@ from ecoli.migrated.listeners.mass_listener import (
 
 # TODO: add the rest here
 __all__ = [
+    "AntibioticTransportOdeint",
     "Aggregator",
     "RNACounts",
     "MonomerCounts",
