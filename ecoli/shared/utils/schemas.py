@@ -42,7 +42,10 @@ def get_defaults_schema(d):
             value = d['_default'] 
             return get_schema_type(value)
         else:
-            return {k: get_defaults_schema(v) for k, v in d.items()}
+            if not len(d.keys()):
+                return "tree"
+            else:
+                return {k: get_defaults_schema(v) for k, v in d.items()}
     else:
         return d
     
@@ -206,14 +209,14 @@ def find_defaults(params: dict) -> dict:
     return result
 
 
-def get_schema_type(value: Any) -> SchemaType:
+def get_schema_type(value: Any) -> str:
     type_name = type(value).__name__
     if isinstance(value, np.ndarray):
         shape = str(value.shape)
         _type = PORTS_MAPPER.get(str(value.dtype), 'any')
-        return SchemaType(f"array[{_type}|{shape}]")
+        return SchemaType(f"array[{_type}|{shape}]").id
     else:
-        return SchemaType(PORTS_MAPPER.get(type_name, 'any'))
+        return SchemaType(PORTS_MAPPER.get(type_name, 'any')).id
 
 
 def translate_vivarium_types(defaults: dict) -> dict:

@@ -2,6 +2,86 @@
 ------------------------------
 MIGRATED: Antibiotic Transport
 ------------------------------
+
+Expected config:
+---------------
+proc_config = {
+        "initial_reaction_parameters": {
+            "antibiotic": {},
+        },
+    }
+
+Expected inputs():
+------------------
+initial_state = {
+        "antibiotic": {
+            "species": {
+                "periplasm": 0 * units.mM,
+                "hydrolyzed_periplasm": 0 * units.mM,
+                "cytoplasm": 0 * units.mM,
+                "hydrolyzed_cytoplasm": 0 * units.mM,
+                "external": 3 * units.mM,
+            },
+            "reaction_parameters": {
+                "diffusion": {
+                    "outer_permeability": 2 * units.dm / units.sec,
+                    "outer_area": 3 * units.dm**2,
+                    "periplasm_volume": 2 * units.L,
+                    "charge": 0 * units.count,
+                    "inner_permeability": 0 * units.dm / units.sec,
+                    "inner_area": 3 * units.dm**2,
+                    "cytoplasm_volume": 2 * units.L,
+                },
+                "export": {
+                    "outer_kcat": 4 / units.sec,
+                    "outer_km": 2 * units.mM,
+                    "outer_enzyme_conc": 1 * units.mM,
+                    "outer_n": 1 * units.count,
+                    "inner_kcat": 0 / units.sec,
+                    "inner_km": 2 * units.mM,
+                    "inner_enzyme_conc": 1 * units.mM,
+                    "inner_n": 1 * units.count,
+                },
+                "hydrolysis": {
+                    "outer_kcat": 4 / units.sec,
+                    "outer_km": 2 * units.mM,
+                    "outer_enzyme_conc": 0.5 * units.mM,
+                    "outer_n": 1 * units.count,
+                    "inner_kcat": 0 / units.sec,
+                    "inner_km": 2 * units.mM,
+                    "inner_enzyme_conc": 0.5 * units.mM,
+                    "inner_n": 1 * units.count,
+                },
+            },
+        },
+    }
+
+Expected outputs():
+-------------------
+expected_update = {
+        "species": {
+            "periplasm": delta_arr[1] * units.mM,
+            "hydrolyzed_periplasm": delta_arr[2] * units.mM,
+            "cytoplasm": 0 * units.mM,
+            "hydrolyzed_cytoplasm": 0 * units.mM,
+            "external": 0 * units.mM,
+        },
+        "exchanges": {
+            # Exchanges are in units of counts, but the species are in
+            # units of mM with a volume of 1L.
+            "external": (
+                delta_arr[0]
+                * units.mM
+                * initial_state["antibiotic"]["reaction_parameters"]["diffusion"][
+                    "periplasm_volume"
+                ]
+                * N_A
+                / units.mol
+            )
+            .to(units.count)
+            .magnitude,
+        },
+    }
 """
 
 import numpy as np
@@ -24,6 +104,7 @@ from ecoli.processes.antibiotics.antibiotic_transport_steady_state import (
     species_dict_to_array,
 )
 from ecoli.shared.interface import ProcessBase
+from ecoli.shared.utils.schemas import get_defaults_schema
 
 
 def update_from_odeint(
@@ -73,18 +154,14 @@ class AntibioticTransportOdeint(ProcessBase):
 
     def initialize(self, config):
         self.antibiotics = list(config["initial_reaction_parameters"].keys())
-        ports = {
+
+        self.input_ports = {
             antibiotic: {
                 "species": {
                     species: {
                         "_default": 0.0 * units.mM,
                     }
                     for species in SPECIES
-                },
-                "exchanges": {
-                    "external": {
-                        "_default": 0,
-                    }
                 },
                 "reaction_parameters": {
                     reaction: {
@@ -101,10 +178,34 @@ class AntibioticTransportOdeint(ProcessBase):
             for antibiotic in self.antibiotics
         }
 
-    def initial_state(self, config=None):
+        self.output_ports = {
+            antibiotic: {
+                "species": {
+                    species: {
+                        "_default": 0.0 * units.mM,
+                    }
+                    for species in SPECIES
+                },
+                "exchanges": {
+                    "external": {
+                        "_default": 0,
+                    }
+                }
+            }
+            for antibiotic in self.antibiotics
+        }
+
+    def inputs(self):
+        return get_defaults_schema(self.input_ports)
+    
+    def outputs(self):
+        return get_defaults_schema(self.output_ports)
+
+    def initial_state(self):
+        """Initial State needs to match the inputs() schema!!"""
         state = {
             antibiotic: {
-                "reaction_parameters": self.parameters["initial_reaction_parameters"][
+                "reaction_parameters": self.config["initial_reaction_parameters"][
                     antibiotic
                 ]
             }
@@ -263,7 +364,7 @@ def test_antibiotic_transport_odeint():
             },
         },
     }
-    update = proc.next_update(1, initial_state)["antibiotic"]
+    update = proc.update(initial_state, 1)["antibiotic"]
 
     # Compute expected update
     initial_arr = np.array([3, 0, 0])
