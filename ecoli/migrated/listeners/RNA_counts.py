@@ -1,14 +1,15 @@
 """
 ====================
-RNA Counts Listener
+MIGRATED: RNA Counts Listener
 ====================
 """
 
 import numpy as np
 from ecoli.library.schema import numpy_schema, attrs, listener_schema
-from vivarium.core.process import Step
 
-from ecoli.processes.registries import topology_registry
+from ecoli.shared.registry import ecoli_core
+from ecoli.shared.interface import StepBase
+from ecoli.shared.utils.schemas import collapse_defaults, get_defaults_schema
 
 
 NAME = "RNA_counts_listener"
@@ -18,10 +19,10 @@ TOPOLOGY = {
     "global_time": ("global_time",),
     "timestep": ("timestep",),
 }
-topology_registry.register(NAME, TOPOLOGY)
+ecoli_core.topology.register(NAME, TOPOLOGY)
 
 
-class RNACounts(Step):
+class RNACounts(StepBase):
     """
     Listener for the counts of each mRNA and rRNA transcription units and
         cistrons. Includes the counts of both partial and full transcripts.
@@ -37,28 +38,30 @@ class RNACounts(Step):
         "emit_unique": False,
     }
 
-    def __init__(self, parameters=None):
-        super().__init__(parameters)
-
+    def initialize(self, config):
         # Get IDs and indexes of all mRNA and rRNA transcription units
-        self.all_TU_ids = self.parameters["all_TU_ids"]
-        self.mRNA_indexes = self.parameters["mRNA_indexes"]
-        self.mRNA_TU_ids = self.parameters["mRNA_TU_ids"]
-        self.rRNA_indexes = self.parameters["rRNA_indexes"]
-        self.rRNA_TU_ids = self.parameters["rRNA_TU_ids"]
+        self.all_TU_ids = config["all_TU_ids"]
+        self.mRNA_indexes = config["mRNA_indexes"]
+        self.mRNA_TU_ids = config["mRNA_TU_ids"]
+        self.rRNA_indexes = config["rRNA_indexes"]
+        self.rRNA_TU_ids = config["rRNA_TU_ids"]
 
         # Get IDs and indexes of all mRNA and rRNA cistrons
-        self.all_cistron_ids = self.parameters["all_cistron_ids"]
-        self.cistron_is_mRNA = self.parameters["cistron_is_mRNA"]
-        self.mRNA_cistron_ids = self.parameters["mRNA_cistron_ids"]
-        self.cistron_is_rRNA = self.parameters["cistron_is_rRNA"]
-        self.rRNA_cistron_ids = self.parameters["rRNA_cistron_ids"]
+        self.all_cistron_ids = config["all_cistron_ids"]
+        self.cistron_is_mRNA = config["cistron_is_mRNA"]
+        self.mRNA_cistron_ids = config["mRNA_cistron_ids"]
+        self.cistron_is_rRNA = config["cistron_is_rRNA"]
+        self.rRNA_cistron_ids = config["rRNA_cistron_ids"]
 
         # Get mapping matrix between TUs and cistrons
-        self.cistron_tu_mapping_matrix = self.parameters["cistron_tu_mapping_matrix"]
+        self.cistron_tu_mapping_matrix = config["cistron_tu_mapping_matrix"]
 
-    def ports_schema(self):
-        return {
+        self.input_ports = {
+            "RNAs": numpy_schema("RNAs"),
+            "global_time": {"_default": 0.0},
+            "timestep": {"_default": config["time_step"]},
+        }
+        self.output_ports = {
             "listeners": {
                 "rna_counts": listener_schema(
                     {
@@ -72,19 +75,25 @@ class RNACounts(Step):
                         "partial_rRNA_cistron_counts": ([], self.rRNA_cistron_ids),
                     }
                 )
-            },
-            "RNAs": numpy_schema("RNAs", emit=self.parameters["emit_unique"]),
-            "global_time": {"_default": 0.0},
-            "timestep": {"_default": self.parameters["time_step"]},
+            }
         }
 
     def update_condition(self, timestep, states):
         return (states["global_time"] % states["timestep"]) == 0
+    
+    def inputs(self):
+        return get_defaults_schema(self.input_ports)
+    
+    def outputs(self):
+        return get_defaults_schema(self.output_ports)
+    
+    def initial_state(self):
+        return collapse_defaults(self.output_ports)
 
-    def next_update(self, timestep, states):
+    def update(self, state):
         # Get attributes of mRNAs
         TU_indexes, can_translate, is_full_transcript = attrs(
-            states["RNAs"], ["TU_index", "can_translate", "is_full_transcript"]
+            state["RNAs"], ["TU_index", "can_translate", "is_full_transcript"]
         )
         is_rRNA = np.isin(TU_indexes, self.rRNA_indexes)
 
@@ -138,14 +147,14 @@ def test_rna_counts_listener():
     from ecoli.experiments.ecoli_master_sim import EcoliSim
 
     sim = EcoliSim.from_file()
-    sim.total_time = 2
-    sim.raw_output = False
+
+    args = [('total_time', 2), ('raw_output', False)]
+    for attr, value in args:
+        setattr(sim, attr, value)
+
     sim.build_ecoli()
     sim.run()
     listeners = sim.query()["agents"]["0"]["listeners"]
     assert isinstance(listeners["rna_counts"]["mRNA_counts"][0], list)
     assert isinstance(listeners["rna_counts"]["mRNA_counts"][1], list)
 
-
-if __name__ == "__main__":
-    test_rna_counts_listener()
