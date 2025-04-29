@@ -94,3 +94,7 @@ class Complexation(PartitionedProcess):
 
         return update
 ```
+
+
+### _*RE: Units*_:
+The pre-migration version of this project/model used `vivarium.core.library.units` whereas the migrated version (process bigraph), uses `bigraph_schema.units.units`.

@@ -28,6 +28,7 @@ PORTS_MAPPER = {
     "uint16": "integer",
     "Unum": "unum",
     "str": "string",
+    "Quantity": "unit"
 
 }
 DEFAULT_DICT_TYPE = "tree"
@@ -273,4 +274,32 @@ def test_get_config_schema():
     from ecoli.migrated.transcript_elongation import TranscriptElongation
     defaults = TranscriptElongation.defaults
     config_schema = get_config_schema(defaults)
+
+
+def export_vivarium_unit_schemas(types_dir: str | None = None):
+    import json
+    import os
+    from vivarium.library.units import units as vivunits
+    from ecoli import shared
+
+    if types_dir is None:
+        types_dir = shared.__path__.pop() + '/types/definitions'
+        
+    for item in dir(vivunits):
+        v = getattr(vivunits, item)
+        if type(v).__name__.lower() == "unit":
+            atomic_unit = 1 * v
+            type_name = str(atomic_unit.u).replace(' ', '')
+            schema_fp = os.path.join(types_dir, f'{type_name}.json')
+            if not os.path.exists(schema_fp):
+                schema = {
+                    '_apply': 'apply_units',
+                    '_check': 'check_units',
+                    '_serialize': 'serialize_units',
+                    '_deserialize': 'deserialize_units',
+                    '_description': 'type to represent values with scientific units',
+                    '_type': type_name
+                }
+                with open(schema_fp, 'w') as fp:
+                    json.dump(schema, fp, indent=4)
 

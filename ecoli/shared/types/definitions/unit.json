@@ -1,0 +1,8 @@
+{
+    "_apply": "apply_units",
+    "_check": "check_units",
+    "_serialize": "serialize_units",
+    "_deserialize": "deserialize_units",
+    "_description": "type to represent values with scientific units",
+    "_type": "unit"
+}
