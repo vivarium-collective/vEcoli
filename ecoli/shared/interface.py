@@ -7,7 +7,7 @@ import json
 from process_bigraph import Step, Process
 
 from ecoli.shared.data_model import Topology
-from ecoli.shared.utils.schemas import get_config_schema, collapse_defaults
+from ecoli.shared.utils.schemas import get_config_schema, collapse_defaults, get_defaults_schema
 
 
 class EdgeBase(abc.ABC):
@@ -52,6 +52,38 @@ class StepBase(EdgeBase, Step):
         schema.update(self.outputs())
         return schema
 
+
+class ListenerBase(StepBase, abc.ABC):
+    _input_ports = {}
+    _output_ports = {}
+
+    @property
+    @abc.abstractmethod
+    def input_ports(self):
+        return self._input_ports
+    
+    @input_ports.setter
+    def input_ports(self, ports):
+        self._input_ports = ports
+    
+    @property
+    @abc.abstractmethod
+    def output_ports(self):
+        return self._output_ports
+    
+    @output_ports.setter
+    def output_ports(self, ports):
+        self._output_ports = ports
+    
+    def inputs(self):
+        return get_defaults_schema(self.input_ports)
+    
+    def outputs(self):
+        return get_defaults_schema(self.output_ports)
+    
+    def initial_state(self):
+        return collapse_defaults(self.output_ports)
+    
 
 class ProcessBase(EdgeBase, Process):
     defaults = {}
