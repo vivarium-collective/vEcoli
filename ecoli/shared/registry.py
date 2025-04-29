@@ -18,6 +18,9 @@ from ecoli.shared.data_model import BaseClass
 from ecoli.shared.types.register import register_type
 
 
+__all__ = ["ecoli_core", "topology_registry"]
+
+
 PROCESS_SUBPACKAGES = [
     'antibiotics',
     'chemotaxis',

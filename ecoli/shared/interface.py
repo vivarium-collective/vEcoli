@@ -54,6 +54,10 @@ class StepBase(EdgeBase, Step):
 
 
 class ListenerBase(StepBase, abc.ABC):
+    defaults = {
+        "time_step": 1,
+        "emit_unique": False,
+    }
     _input_ports = {}
     _output_ports = {}
 

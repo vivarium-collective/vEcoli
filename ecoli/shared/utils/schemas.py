@@ -160,7 +160,7 @@ def listener_schema(elements: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     return schema
 
 
-def numpy_schema(name: str) -> Dict[str, Any]:
+def numpy_schema(name: str, emit: bool = True) -> Dict[str, Any]:
     """TODO: parse schema function keys more carefully.
     Helper function used in ports schemas for bulk and unique molecules
 
