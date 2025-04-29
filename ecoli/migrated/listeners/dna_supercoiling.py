@@ -7,9 +7,9 @@ MIGRATED: DNA Supercoiling Listener
 import numpy as np
 from ecoli.library.schema import attrs
 
-from ecoli.shared.interface import StepBase
+from ecoli.shared.interface import ListenerBase
 from ecoli.shared.registry import ecoli_core
-from ecoli.shared.utils.schemas import get_defaults_schema, listener_schema, numpy_schema
+from ecoli.shared.utils.schemas import listener_schema, numpy_schema
 
 
 NAME = "dna_supercoiling_listener"
@@ -22,7 +22,7 @@ TOPOLOGY = {
 ecoli_core.topology.register(NAME, TOPOLOGY)
 
 
-class DnaSupercoiling(StepBase):
+class DnaSupercoiling(ListenerBase):
     """
     Listener for DNA supercoiling data.
     """
@@ -31,9 +31,8 @@ class DnaSupercoiling(StepBase):
     topology = TOPOLOGY
 
     defaults = {
-        "relaxed_DNA_base_pairs_per_turn": 0,
-        "emit_unique": False,
-        "time_step": 1,
+        **ListenerBase.defaults,
+        "relaxed_DNA_base_pairs_per_turn": 0
     }
 
     def initialize(self, config):
@@ -45,7 +44,7 @@ class DnaSupercoiling(StepBase):
         self.input_ports = {
             "chromosomal_segments": numpy_schema("chromosomal_segments"),
             "global_time": {"_default": 0.0},
-            "timestep": self.timestep_schema
+            "timestep": {"_default": 1}
         }
         self.output_ports = {
             "listeners": {
@@ -59,12 +58,6 @@ class DnaSupercoiling(StepBase):
                 )
             }
         }
-    
-    def inputs(self):
-        return get_defaults_schema(self.input_ports)
-
-    def outputs(self):
-        return get_defaults_schema(self.output_ports) 
 
     def update_condition(self, timestep, states):
         return (states["global_time"] % states["timestep"]) == 0

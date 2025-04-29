@@ -10,7 +10,7 @@ Represents the total cellular mass.
 import numpy as np
 from numpy.lib import recfunctions as rfn
 
-from ecoli.shared.interface import StepBase
+from ecoli.shared.interface import ListenerBase
 from ecoli.shared.utils.schemas import collapse_defaults, get_defaults_schema, numpy_schema
 from wholecell.utils import units
 from ecoli.library.schema import counts, attrs, bulk_name_to_idx
@@ -31,13 +31,14 @@ ecoli_core.topology.register(NAME, TOPOLOGY)
 ecoli_core.topology.register("post-division-mass-listener", TOPOLOGY)
 
 
-class MassListener(StepBase):
+class MassListener(ListenerBase):
     """MassListener"""
 
     name = NAME
     topology = TOPOLOGY
 
     defaults = {
+        **ListenerBase.defaults,
         "cellDensity": 1100.0,
         "bulk_ids": [],
         "bulk_masses": np.zeros([1, 9]),
@@ -68,8 +69,6 @@ class MassListener(StepBase):
         "compartment_id_to_index": {},
         "compartment_abbrev_to_index": {},
         "n_avogadro": 6.0221409e23,  # 1/mol
-        "time_step": 1.0,
-        "emit_unique": False,
         "match_wcecoli": False,
     }
 
@@ -219,15 +218,6 @@ class MassListener(StepBase):
 
     def update_condition(self, timestep, states):
         return (states["global_time"] % states["timestep"]) == 0
-
-    def inputs(self):
-        return get_defaults_schema(self.input_ports)
-
-    def outputs(self):
-        return get_defaults_schema(self.output_ports)
-
-    def initial_state(self):
-        return collapse_defaults(self.output_ports)
      
     def update(self, state):
         if self.bulk_idx is None:

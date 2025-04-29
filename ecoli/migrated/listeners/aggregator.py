@@ -13,11 +13,11 @@ import copy
 from vivarium.core.process import Step
 from vivarium.library.topology import assoc_path, get_in
 
-from ecoli.shared.interface import StepBase
+from ecoli.shared.interface import ListenerBase
 from ecoli.shared.utils.schemas import collapse_defaults, get_defaults_schema
 
 
-class Aggregator(StepBase):
+class Aggregator(ListenerBase):
     """
     Given a list of paths and a list of functions, this will apply the ith
     function to the ith path and write the results through `aggregated`.
@@ -46,16 +46,10 @@ class Aggregator(StepBase):
         self.input_ports = schema
         self.output_ports = {
             "aggregated": {
-                variable: "integer"
+                variable: {"_default": 0.0}
                 for variable in variables
             }
         }
-
-    def inputs(self):
-        return self.input_ports
-
-    def outputs(self):
-        return self.output_ports
 
     def update(self, state):
         counts = {}

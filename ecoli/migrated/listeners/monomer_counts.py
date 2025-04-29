@@ -8,7 +8,7 @@ import numpy as np
 
 from ecoli.library.schema import counts, bulk_name_to_idx
 from ecoli.shared.registry import ecoli_core
-from ecoli.shared.interface import StepBase
+from ecoli.shared.interface import ListenerBase
 from ecoli.shared.utils.schemas import collapse_defaults, get_defaults_schema, numpy_schema
 
 
@@ -23,7 +23,7 @@ TOPOLOGY = {
 ecoli_core.topology.register(NAME, TOPOLOGY)
 
 
-class MonomerCounts(StepBase):
+class MonomerCounts(ListenerBase):
     """
     Listener for the counts of each protein monomer species.
     """
@@ -32,6 +32,7 @@ class MonomerCounts(StepBase):
     topology = TOPOLOGY
 
     defaults = {
+        **ListenerBase.defaults,
         "bulk_molecule_ids": [],
         "unique_ids": [],
         "complexation_molecule_ids": [],
@@ -48,9 +49,7 @@ class MonomerCounts(StepBase):
         "replisome_monomer_subunits": [],
         "complexation_stoich": [],
         "equilibrium_stoich": [],
-        "two_component_system_stoich": [],
-        "emit_unique": False,
-        "time_step": 1,
+        "two_component_system_stoich": []
     }
 
     def initialize(self, config):
@@ -136,8 +135,6 @@ class MonomerCounts(StepBase):
             "listeners": {
                 "monomer_counts": {
                     "_default": [],
-                    "_updater": "set",
-                    "_emit": True,
                     "_description": {"metadata": self.monomer_ids},
                 }
             }
@@ -145,15 +142,6 @@ class MonomerCounts(StepBase):
 
     def update_condition(self, timestep, states):
         return (states["global_time"] % states["timestep"]) == 0
-    
-    def inputs(self):
-        return get_defaults_schema(self.input_ports)
-    
-    def outputs(self):
-        return get_defaults_schema(self.output_ports)
-    
-    def initial_state(self):
-        return collapse_defaults(self.output_ports)
 
     def update(self, state):
         if self.monomer_idx is None:

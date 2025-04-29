@@ -36,11 +36,10 @@ class RnapData(ListenerBase):
     topology = TOPOLOGY
 
     defaults = {
+        **ListenerBase.defaults,
         "stable_RNA_indexes": [],
         "cistron_ids": [],
-        "cistron_tu_mapping_matrix": [],
-        "time_step": 1,
-        "emit_unique": False,
+        "cistron_tu_mapping_matrix": []
     }
 
     def initialize(self, config):

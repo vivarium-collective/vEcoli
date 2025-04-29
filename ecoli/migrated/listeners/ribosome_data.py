@@ -9,7 +9,7 @@ import warnings
 from ecoli.library.schema import attrs, bulk_name_to_idx
 
 from ecoli.shared.registry import ecoli_core
-from ecoli.shared.interface import StepBase
+from ecoli.shared.interface import ListenerBase
 from ecoli.shared.utils.schemas import collapse_defaults, get_defaults_schema, listener_schema, numpy_schema
 
 
@@ -25,7 +25,7 @@ TOPOLOGY = {
 ecoli_core.topology.register(NAME, TOPOLOGY)
 
 
-class RibosomeData(StepBase):
+class RibosomeData(ListenerBase):
     """
     Listener for ribosome data.
     """
@@ -34,13 +34,12 @@ class RibosomeData(StepBase):
     topology = TOPOLOGY
 
     defaults = {
+        **ListenerBase.defaults,
         "n_monomers": [],
         "rRNA_cistron_tu_mapping_matrix": [],
         "rRNA_is_5S": [],
         "rRNA_is_16S": [],
-        "rRNA_is_23S": [],
-        "time_step": 1,
-        "emit_unique": False,
+        "rRNA_is_23S": []
     }
 
     def initialize(self, config):
@@ -113,15 +112,6 @@ class RibosomeData(StepBase):
                 )
             return True
         return False
-    
-    def inputs(self):
-        return get_defaults_schema(self.input_ports)
-    
-    def outputs(self):
-        return get_defaults_schema(self.output_ports)
-    
-    def initial_state(self):
-        return collapse_defaults(self.output_ports)
 
     def update(self, state):
         # Get attributes of RNAs and ribosomes

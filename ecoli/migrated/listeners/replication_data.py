@@ -8,7 +8,7 @@ import numpy as np
 from ecoli.library.schema import attrs
 
 from ecoli.shared.registry import ecoli_core
-from ecoli.shared.interface import StepBase
+from ecoli.shared.interface import ListenerBase
 from ecoli.shared.utils.schemas import get_defaults_schema, listener_schema, numpy_schema, collapse_defaults
 
 
@@ -24,7 +24,7 @@ TOPOLOGY = {
 ecoli_core.topology.register(NAME, TOPOLOGY)
 
 
-class ReplicationData(StepBase):
+class ReplicationData(ListenerBase):
     """
     Listener for replication data.
     """
@@ -32,7 +32,7 @@ class ReplicationData(StepBase):
     name = NAME
     topology = TOPOLOGY
 
-    defaults = {"time_step": 1, "emit_unique": False}
+    # defaults = {"time_step": 1, "emit_unique": False}
 
     def initialize(self, config):
         self.input_ports = {
@@ -40,7 +40,7 @@ class ReplicationData(StepBase):
             "active_replisomes": numpy_schema("active_replisomes"),
             "DnaA_boxes": numpy_schema("DnaA_boxes"),
             "global_time": {"_default": 0.0},
-            "timestep": self.timestep_schema
+            "timestep": {"_default": config["time_step"]}
         }
 
         self.output_ports = {
@@ -57,15 +57,6 @@ class ReplicationData(StepBase):
                 )
             }   
         }
-
-    def inputs(self):
-        return get_defaults_schema(self.input_ports)
-
-    def outputs(self):
-        return get_defaults_schema(self.output_ports)
-    
-    def initial_state(self):
-        return collapse_defaults(self.output_ports)
     
     def update_condition(self, timestep, states):
         return (states["global_time"] % states["timestep"]) == 0

@@ -31,11 +31,6 @@ class RnaSynthProb(ListenerBase):
     name = NAME
     topology = TOPOLOGY
 
-    defaults = {
-        "time_step": 1,
-        "emit_unique": False,
-    }
-
     def initialize(self, config):
         self.rna_ids = config["rna_ids"]
         self.gene_ids = config["gene_ids"]

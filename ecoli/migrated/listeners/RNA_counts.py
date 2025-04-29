@@ -8,7 +8,7 @@ import numpy as np
 from ecoli.library.schema import numpy_schema, attrs, listener_schema
 
 from ecoli.shared.registry import ecoli_core
-from ecoli.shared.interface import StepBase
+from ecoli.shared.interface import ListenerBase, StepBase
 from ecoli.shared.utils.schemas import collapse_defaults, get_defaults_schema
 
 
@@ -22,7 +22,7 @@ TOPOLOGY = {
 ecoli_core.topology.register(NAME, TOPOLOGY)
 
 
-class RNACounts(StepBase):
+class RNACounts(ListenerBase):
     """
     Listener for the counts of each mRNA and rRNA transcription units and
         cistrons. Includes the counts of both partial and full transcripts.
@@ -32,10 +32,9 @@ class RNACounts(StepBase):
     topology = TOPOLOGY
 
     defaults = {
+        **ListenerBase.defaults,
         "rna_ids": [],
-        "mrna_indexes": [],
-        "time_step": 1,
-        "emit_unique": False,
+        "mrna_indexes": []
     }
 
     def initialize(self, config):

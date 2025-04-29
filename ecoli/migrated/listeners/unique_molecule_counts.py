@@ -1,16 +1,17 @@
 """
 ===============================
-Unique Molecule Counts Listener
+MIGRATED: Unique Molecule Counts Listener
 ===============================
 
 Counts unique molecules
 """
 
-from vivarium.core.process import Step
-from ecoli.library.schema import numpy_schema, listener_schema
-from ecoli.processes.registries import topology_registry
 
-# Register default topology for this process, associating it with process name
+from ecoli.shared.interface import ListenerBase
+from ecoli.shared.registry import ecoli_core
+from ecoli.shared.utils.schemas import listener_schema, numpy_schema
+
+
 NAME = "unique_molecule_counts"
 TOPOLOGY = {
     "unique": ("unique",),
@@ -18,61 +19,56 @@ TOPOLOGY = {
     "global_time": ("global_time",),
     "timestep": ("timestep",),
 }
-topology_registry.register(NAME, TOPOLOGY)
+ecoli_core.topology.register(NAME, TOPOLOGY)
 
 
-class UniqueMoleculeCounts(Step):
+class UniqueMoleculeCounts(ListenerBase):
     """UniqueMoleculeCounts"""
 
     name = NAME
     topology = TOPOLOGY
 
-    defaults = {
-        "time_step": 1,
-        "emit_unique": False,
-    }
+    def initialize(self, config):
+        self.unique_ids = config["unique_ids"]
 
-    def __init__(self, parameters=None):
-        super().__init__(parameters)
-        self.unique_ids = self.parameters["unique_ids"]
-
-    def ports_schema(self):
-        ports = {
+        self.input_ports = {
             "unique": {
                 str(mol_id): numpy_schema(
-                    mol_id + "s", emit=self.parameters["emit_unique"]
+                    mol_id + "s", emit=config["emit_unique"]
                 )
                 for mol_id in self.unique_ids
                 if mol_id not in ["DnaA_box", "active_ribosome"]
             },
+            "global_time": {"_default": 0.0},
+            "timestep": {"_default": config["time_step"]},
+        }
+        self.input_ports["unique"].update(
+            {
+                "active_ribosome": numpy_schema(
+                    "active_ribosome", emit=config["emit_unique"]
+                ),
+                "DnaA_box": numpy_schema(
+                    "DnaA_boxes", emit=config["emit_unique"]
+                ),
+            }
+        )
+
+        self.output_ports = {
             "listeners": {
                 "unique_molecule_counts": listener_schema(
                     {str(mol_id): 0 for mol_id in self.unique_ids}
                 )
             },
-            "global_time": {"_default": 0.0},
-            "timestep": {"_default": self.parameters["time_step"]},
         }
-        ports["unique"].update(
-            {
-                "active_ribosome": numpy_schema(
-                    "active_ribosome", emit=self.parameters["emit_unique"]
-                ),
-                "DnaA_box": numpy_schema(
-                    "DnaA_boxes", emit=self.parameters["emit_unique"]
-                ),
-            }
-        )
-        return ports
 
     def update_condition(self, timestep, states):
         return (states["global_time"] % states["timestep"]) == 0
 
-    def next_update(self, timestep, states):
+    def update(self, state):
         return {
             "listeners": {
                 "unique_molecule_counts": {
-                    str(unique_id): states["unique"][unique_id]["_entryState"].sum()
+                    str(unique_id): state["unique"][unique_id]["_entryState"].sum()
                     for unique_id in self.unique_ids
                 }
             }
