@@ -23,8 +23,7 @@ import warnings
 from bigraph_schema import deep_merge
 
 from ecoli.shared.interface import StepBase, ProcessBase, collapse_defaults
-from ecoli.processes.registries import topology_registry
-from ecoli.shared.utils.schemas import numpy_schema
+from ecoli.shared.utils.schemas import get_defaults_schema, numpy_schema
 
 
 class Requester(StepBase):
@@ -41,7 +40,23 @@ class Requester(StepBase):
         if config["process"].parallel:
             raise RuntimeError("PartitionedProcess objects cannot be parallelized.")
         config["name"] = f'{config["process"].name}_requester'
-        super().__init__(config)
+
+        process = self.config.get("process")
+
+        self.input_ports = process.get_schema()
+        self.input_ports["request"] = {
+            "bulk": numpy_schema("bulk")
+        }
+        self.input_ports["process"] = "tuple"
+        self.input_ports["global_time"] = "float"
+        self.input_ports["timestep"] = {"_default": process.parameters["time_step"], "_type": "float"}
+        self.input_ports["next_update_time"] = {
+            "_default": process.config["timestep"],
+            "_type": "float"
+        }
+
+        self.output_ports = process.requester_outputs
+        self.cached_bulk_ports = list(self.output_ports["request"].keys())
 
     def update_condition(self, timestep, states):
         """
@@ -72,41 +87,17 @@ class Requester(StepBase):
             return True
         return False
     
-    def initial_state(self):
-        return {
-            "process": tuple(),
-            "request": {"bulk": {}}
-        }
-
     def inputs(self):
-        process = self.config.get("process")
-        ports = process.inputs()
-        ports["request"] = {
-            "bulk": {
-                "_updater": "set",
-                "_divider": "null",
-                "_emit": False,
-            }
-        }
-        ports["process"] = {
-            "_default": tuple(),
-            "_updater": "set",
-            "_divider": "null",
-            "_emit": False,
-        }
-        ports["global_time"] = {"_default": 0.0}
-        ports["timestep"] = {"_default": process.parameters["time_step"]}
-        ports["next_update_time"] = {
-            "_default": process.parameters["timestep"],
-            "_updater": "set",
-            "_divider": "set",
-        }
-        self.cached_bulk_ports = list(ports["request"].keys())
-        return ports
+        """Requester inputs needs to match the state passed into PartitionedProcess.calculate_request plus process timestep and next_update_time"""
+        return get_defaults_schema(self.input_ports)
+    
+    def outputs(self):
+        """Requester outputs should be a union of the outputs of PartitionedProcess.calculate_request and listeners, process"""
+        return get_defaults_schema(self.output_ports)
 
-    def next_update(self, timestep, states):
-        process = states["process"][0]
-        request = process.calculate_request(self.parameters["time_step"], states)
+    def update(self, state, interval):
+        process = state["process"][0]
+        request = process.calculate_request(state, self.config["time_step"])
         process.request_set = True
 
         request["request"] = {}
@@ -139,6 +130,20 @@ class Evolver(StepBase):
         assert isinstance(config["process"], PartitionedProcess)
         self.config["name"] = f'{config["process"].name}_evolver'
 
+        process = self.config.get("process")
+        self.output_ports = process.get_schema()
+        self.output_ports["allocate"] = {
+            "bulk": numpy_schema("bulk")  # TODO: is this correct?
+        }
+        self.output_ports["process"] = tuple()
+        self.output_ports["global_time"] = {"_default": 0.0}
+        self.output_ports["timestep"] = {"_default": process.config["timestep"]}
+        self.output_ports["next_update_time"] = {
+            "_default": process.parameters["timestep"],
+            "_updater": "set",
+            "_divider": "set",
+        }
+
     def update_condition(self, timestep, states):
         """
         See :py:meth:`~.Requester.update_condition`.
@@ -154,52 +159,18 @@ class Evolver(StepBase):
                 )
             return True
         return False
-
-    def port_defaults(self):
-        process = self.config.get("process")
-        ports = process.get_schema()
-        ports["allocate"] = {
-            "bulk": "list[tuple]"
-        }
-        ports["process"] = tuple()
-        ports["global_time"] = {"_default": 0.0}
-        ports["timestep"] = {"_default": process.parameters["timestep"]}
-        ports["next_update_time"] = {
-            "_default": process.parameters["timestep"],
-            "_updater": "set",
-            "_divider": "set",
-        }
-        return ports
     
     def inputs(self):
         process = self.config.get("process")
         return process.evolve_inputs()
     
     def outputs(self):
-        process = self.config.get("process")
-        ports = process.get_schema()
-        ports["allocate"] = {
-            "bulk": "list[tuple]"
-        }
-        ports["process"] = {
-            "_default": tuple(),
-            "_updater": "set",
-            "_divider": "null",
-            "_emit": False,
-        }
-        ports["global_time"] = {"_default": 0.0}
-        ports["timestep"] = {"_default": process.parameters["timestep"]}
-        ports["next_update_time"] = {
-            "_default": process.parameters["timestep"],
-            "_updater": "set",
-            "_divider": "set",
-        }
-        return ports
+        return get_defaults_schema(self.output_ports)
 
-    def next_update(self, timestep, states):
-        allocations = states.pop("allocate")
-        states = deep_merge(states, allocations)
-        process = states["process"][0]
+    def update(self, state, interval):
+        allocations = state.pop("allocate")
+        state = deep_merge(state, allocations)
+        process = state["process"][0]
 
         # If the Requester has not run yet, skip the Evolver's update to
         # let the Requester run in the next time step. This problem
@@ -213,10 +184,10 @@ class Evolver(StepBase):
         # crash, so having a slightly off timestep is preferable.
         if not process.request_set:
             return {}
-        {}
-        update = process.evolve_state(timestep, states)
+        update = process.evolve_state(state, interval)
         update["process"] = (process,)
-        update["next_update_time"] = states["global_time"] + states["timestep"]
+        update["next_update_time"] = state["global_time"] + state["timestep"]
+
         return update
 
 
@@ -290,35 +261,38 @@ class PartitionedProcess(ProcessBase):
 
         return collapse_defaults(defaults)
     
-    def evolve_inputs(self):
+    def evolver_inputs(self):
         return {
             "timestep": "float",
             "bulk": numpy_schema("bulk")
         }
     
-    def evolve_outputs(self):
+    def evolver_outputs(self):
         return {
             "bulk": numpy_schema("bulk"),
             "listeners": self.listener_schemas
         }
     
-    def request_inputs(self):
+    def requester_inputs(self):
         return {
             "bulk": numpy_schema("bulk"),
+            "timestep": "float",
             "environment": {
                 "media_id": "string"
             },
             "listeners": self.listener_schemas
         }
     
-    def request_outputs(self):
+    def requester_outputs(self):
         return {
-            "bulk": numpy_schema("bulk")
+            "request": "tree",
+            "listeners": self.listener_schemas,
+            "process": "tuple"
         }
     
     def inputs(self):
         """Needs to be a summation of args parsable by both calc request and evolve state!"""
-        return self.request_inputs()
+        return self.requester_inputs()
     
     def outputs(self):
         """Returns the schema for one of the following situational outputs:
@@ -327,7 +301,7 @@ class PartitionedProcess(ProcessBase):
 
         Evolve outputs is a superset of these and thus is used.
         """
-        return self.evolve_outputs()
+        return self.evolver_outputs()
     
     def update(self, state, interval):
         """

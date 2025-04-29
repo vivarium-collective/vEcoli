@@ -43,8 +43,8 @@ class Aggregator(StepBase):
         
         assert "aggregated" not in schema
 
-        self.input_schema = schema
-        self.output_schema = {
+        self.input_ports = schema
+        self.output_ports = {
             "aggregated": {
                 variable: "integer"
                 for variable in variables
@@ -52,10 +52,10 @@ class Aggregator(StepBase):
         }
 
     def inputs(self):
-        return self.input_schema
+        return self.input_ports
 
     def outputs(self):
-        return self.output_schema
+        return self.output_ports
 
     def update(self, state, interval):
         counts = {}
@@ -77,6 +77,8 @@ def len_plus_one(x):
 
 
 def test_aggregator():
+    # TODO: fix this
+    
     from ecoli.shared.registry import ecoli_core as ec
     state = {
         "a": {
@@ -107,17 +109,16 @@ def test_aggregator():
             "b_len_plus_one": "integer"
         },
     }
-    print(proc.config)
-    # assert schema == expected_schema
-    # update = proc.update(0, state)
-    # expected_update = {
-    #     "aggregated": {
-    #         "b_len_squared": 9,
-    #         "c_len_plus_one": 1,
-    #         "b_len_plus_one": 4,
-    #     }
-    # }
-    # assert update == expected_update
+    assert schema == expected_schema
+    update = proc.update(0, state)
+    expected_update = {
+        "aggregated": {
+            "b_len_squared": 9,
+            "c_len_plus_one": 1,
+            "b_len_plus_one": 4,
+        }
+    }
+    assert update == expected_update
 
 
 if __name__ == "__main__":

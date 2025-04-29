@@ -35,7 +35,7 @@ class ReplicationData(StepBase):
     defaults = {"time_step": 1, "emit_unique": False}
 
     def initialize(self, config):
-        self.input_schema = {
+        self.input_ports = {
             "oriCs": numpy_schema("oriCs"),
             "active_replisomes": numpy_schema("active_replisomes"),
             "DnaA_boxes": numpy_schema("DnaA_boxes"),
@@ -43,7 +43,7 @@ class ReplicationData(StepBase):
             "timestep": self.timestep_schema
         }
 
-        self.output_schema = {
+        self.output_ports = {
             "listeners": {
                 "replication_data": listener_schema(
                     {
@@ -59,13 +59,13 @@ class ReplicationData(StepBase):
         }
 
     def inputs(self):
-        return get_defaults_schema(self.input_schema)
+        return get_defaults_schema(self.input_ports)
 
     def outputs(self):
-        return get_defaults_schema(self.output_schema)
+        return get_defaults_schema(self.output_ports)
     
     def initial_state(self):
-        return collapse_defaults(self.output_schema)
+        return collapse_defaults(self.output_ports)
     
     def update_condition(self, timestep, states):
         return (states["global_time"] % states["timestep"]) == 0
