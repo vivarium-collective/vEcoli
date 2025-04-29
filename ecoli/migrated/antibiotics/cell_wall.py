@@ -72,7 +72,7 @@ from ecoli.library.parameters import param_store
 from ecoli.processes.shape import length_from_volume, surface_area_from_length
 from ecoli.shared.interface import ProcessBase
 from ecoli.shared.registry import ecoli_core
-from ecoli.shared.utils.schemas import numpy_schema
+from ecoli.shared.utils.schemas import collapse_defaults, get_defaults_schema, numpy_schema
 
 
 
@@ -175,15 +175,14 @@ class CellWall(ProcessBase):
                 },
             }
         }
-
         self.input_ports = {
             "bulk": numpy_schema("bulk"),
             "shape": {"volume": {"_default": 0 * units.fL, "_emit": True}},
             "murein_state": bidirectional_ports['murein_state'],
             "wall_state": bidirectional_ports['wall_state'],
             "pbp_state": {
-                "active_fraction_PBP1A": {"_default": 0.0, "_updater": "set"},
-                "active_fraction_PBP1B": {"_default": 0.0, "_updater": "set"},
+                "active_fraction_PBP1A": {"_default": 0.0},
+                "active_fraction_PBP1B": {"_default": 0.0},
             }
         }
         self.output_ports = {
@@ -225,6 +224,15 @@ class CellWall(ProcessBase):
                 },
             }
         }
+    
+    def inputs(self):
+        return get_defaults_schema(self.input_ports)
+    
+    def outputs(self):
+        return get_defaults_schema(self.output_ports)
+    
+    def initial_state(self):
+        return collapse_defaults(self.input_ports)
 
     def update(self, state, interval):
         if self.pbp_idx is None:

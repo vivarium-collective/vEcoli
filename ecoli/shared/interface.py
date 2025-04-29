@@ -20,7 +20,7 @@ class EdgeBase(abc.ABC):
     name = None
     topology = {}  # topology will already be nested
     directed_topology = Topology()
-    _initial_state = {}
+    timestep_schema = {"_default": 1.0, "_type": "float"}
 
     def ports_schema(self):
         return {}
@@ -36,16 +36,22 @@ class EdgeBase(abc.ABC):
         return all([key in list(cls.topology.keys()) for key in schema.keys()])
     
 
+# --- steps --- # 
+
 class StepBase(EdgeBase, Step):
     defaults = {}
     config_schema = {}
 
+    def __init_subclass__(cls, **kwargs): 
+        cls.config_schema = {
+            **get_config_schema(cls.defaults),
+            "time_step": {"_default": 1.0, "_type": "float"}
+        }
+
     def __init__(self, config=None, core=None):
-        self.timestep_schema = {"_default": 1.0, "_type": "float"}
-        self.config_schema = get_config_schema(self.defaults)
-        self.config_schema['time_step'] = self.timestep_schema
         super().__init__(config, core)
-        self.timestep = self.config["time_step"]
+        self.timestep_schema = self.config_schema["time_step"]
+        self.timestep = self.timestep_schema['_default']
     
     def get_schema(self):
         schema = copy.deepcopy(self.inputs())
@@ -86,19 +92,25 @@ class ListenerBase(StepBase, abc.ABC):
         return get_defaults_schema(self.output_ports)
     
     def initial_state(self):
-        return collapse_defaults(self.output_ports)
+        return collapse_defaults(self.input_ports)
     
+
+# --- processes --- # 
+# TODO: should we apply the listenerbase interface to 1 level of inheritance prior? 
 
 class ProcessBase(EdgeBase, Process):
     defaults = {}
-    config_schema = {}
+
+    def __init_subclass__(cls, **kwargs): 
+        cls.config_schema = {
+            **get_config_schema(cls.defaults),
+            "time_step": {"_default": 1.0, "_type": "float"}
+        }
 
     def __init__(self, config=None, core=None):
-        self.timestep_schema = {"_default": 1.0, "_type": "float"}
-        self.config_schema = get_config_schema(self.defaults)
-        self.config_schema['time_step'] = self.timestep_schema
         super().__init__(config, core)
-        self.timestep = self.config["time_step"]
+        self.timestep_schema = self.config_schema["time_step"]
+        self.timestep = self.timestep_schema['_default']
     
     def get_schema(self):
         schema = copy.deepcopy(self.inputs())
