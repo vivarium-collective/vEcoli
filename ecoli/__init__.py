@@ -9,6 +9,7 @@ C. import all required type schemas/defs and register them (or read them via jso
 """
 
 
+import json
 import os
 import warnings
 import logging
@@ -33,8 +34,9 @@ faulthandler.enable()
 from dataclasses import dataclass
 
 from process_bigraph.processes import TOY_PROCESSES
+from bigraph_schema.units import units
 
-from wholecell.utils import units
+# from wholecell.utils import units
 from ecoli.library.units import Quantity
 from ecoli.emitters.parquet import ParquetEmitter
 from ecoli.library.schema import (
@@ -67,12 +69,23 @@ from ecoli.shared.registry import ecoli_core
 
 VERBOSE_REGISTER = eval(os.getenv("VERBOSE_REGISTER", "True"))
 PROCESS_PACKAGES = ["migrated"]  # TODO: add more here
-TYPE_MODULES = ["unum"]  # TODO: add more here
+TYPE_MODULES = ["unum", "unit"]  # TODO: add more here
 
 
 # import and register types
 for modname in TYPE_MODULES:
-    ecoli_core.register_type(modname)
+    ecoli_root = os.path.abspath(
+        os.path.dirname(__file__)
+    )
+    schema_fp = os.path.join(ecoli_root, 'shared', 'types', 'definitions', f'{modname}.json')
+    with open(schema_fp, 'r') as f:
+        schema = json.load(f)
+        if "_default" in schema:
+            try:
+                schema["_default"] = eval(schema["_default"])
+            except:
+                schema.pop("_default", None)
+        ecoli_core.register_type(schema)
 
 # import and register processes
 for pkg in PROCESS_PACKAGES:

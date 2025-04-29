@@ -24,7 +24,7 @@ implement :py:meth:`DetectorInterface.check_can_survive` as specified in
 its documentation.
 
 ---------------------
-Death Process Classes
+MIGRATED: Death Process Classes
 ---------------------
 
 During a simulation, death is executed by a death :term:`process`, whose
@@ -42,14 +42,12 @@ from vivarium.core.composition import (
     simulate_composite,
     PROCESS_OUT_DIR,
 )
-from vivarium.core.composer import Composer
-from vivarium.core.registry import process_registry
-from vivarium.core.process import Process
 from vivarium.processes.injector import Injector
 from vivarium.plots.simulation_output import plot_simulation_output
 from vivarium.library.units import units
 
-# from pbg.data_model.base_process import BaseProcess
+from ecoli.shared.registry import ecoli_core
+from ecoli.shared.interface import ProcessBase
 
 
 TOY_ANTIBIOTIC_THRESHOLD = 5.0 * units.mM
@@ -76,7 +74,7 @@ class DetectorInterface:
     def __init__(self):
         self.needed_state_keys = {}
 
-    def check_can_survive(self, states):
+    def check_can_survive(self, state):
         """Check whether the current state is survivable by the cell
 
         Each subclass MUST implement this method. The implementation
@@ -84,7 +82,7 @@ class DetectorInterface:
         state.
 
         Arguments:
-            states (dict): The states of each port in the cell, as a
+            state (dict): The state of each port in the cell, as a
                 dictionary.
 
         Returns:
@@ -111,7 +109,7 @@ class AntibioticDetector(DetectorInterface):
         self.key = antibiotic_key
         self.needed_state_keys.setdefault("internal", set()).add(antibiotic_key)
 
-    def check_can_survive(self, states):
+    def check_can_survive(self, state):
         """Checks if the current antibiotic concentration is survivable
 
         The internal antibiotic concentration MUST be stored in a
@@ -121,7 +119,7 @@ class AntibioticDetector(DetectorInterface):
             bool: False if the antibiotic concentration is strictly
                 greater than the the threshold. True otherwise.
         """
-        concentration = states["internal"][self.key]
+        concentration = state["internal"][self.key]
         if concentration > self.threshold:
             return False
         return True
@@ -133,16 +131,8 @@ DETECTOR_CLASSES = {
 }
 
 
-class DeathFreezeState(Process):
-    name = "death"
-    defaults: dict[str, Any] = {
-        "detectors": tuple(),
-        "to_remove": tuple(),
-        "to_add": None,
-    }
-
-    def __init__(self, initial_parameters=None):
-        """Model Death by Removing Processes
+class DeathFreezeState(ProcessBase):
+    """Model Death by Removing Processes
 
         This process class models death by, with a few exceptions,
         freezing the internal state of the cell. We implement this by
@@ -175,37 +165,43 @@ class DeathFreezeState(Process):
           :term:`store`.
         * **``processes``**: Should be linked to the store that has
           the processes as children.
-        """
-        super().__init__(initial_parameters)
+    """
+    name = "death"
+    defaults: dict[str, Any] = {
+        "detectors": tuple(),
+        "to_remove": tuple(),
+        "to_add": None,
+    }
+
+    def initialize(self, config):
         self.detectors = [
             DETECTOR_CLASSES[name](**config)
-            for name, config in self.parameters["detectors"]
+            for name, config in config["detectors"]
         ]
 
-    def ports_schema(self):
-        schema = {
-            "global": {
-                "dead": {
-                    "_default": 0,
-                    "_emit": True,
-                    "_updater": "set",
-                },
-            },
-            "processes": {},
+        # TODO: are these correct?
+        self.input_ports: dict[str, Any] = {
+            "internal": "tree"
         }
-
         # detector ports
         for detector in self.detectors:
             needed_keys = detector.needed_state_keys
-            for port, states in needed_keys.items():
-                if port not in schema:
-                    schema[port] = {}
-                for state in states:
-                    schema[port][state] = {"_default": 0 * units.mM}
+            for port, state in needed_keys.items():
+                if port not in self.input_ports:
+                    self.input_ports[port] = "tree"
+                for state in state:
+                    self.input_ports[port][state] = {"_default": 0 * units.mM}
 
-        return schema
+        self.output_ports = {
+            "global": {
+                "dead": "integer"
+            },
+            "processes": "tree",
+        }
 
-    def next_update(self, timestep, states):
+        
+
+    def update(self, state, interval):
         """If any detector triggers death, kill the cell
 
         When we kill the cell, we convey this by setting the ``dead``
@@ -213,17 +209,17 @@ class DeathFreezeState(Process):
         ``0``.
         """
         for detector in self.detectors:
-            if not detector.check_can_survive(states):
+            if not detector.check_can_survive(state):
                 new_processes = {}
                 new_topologies = {}
-                to_add = self.parameters["to_add"]
+                to_add = self.config["to_add"]
                 if len(set(to_add)) != len(to_add):
                     raise RuntimeError(
                         f"Duplicate processes in to_add: {to_add.keys()}"
                     )
                 for name, tup in to_add.items():
                     registry_key, config, topology = tup
-                    process_class = process_registry.access(registry_key)
+                    process_class = ecoli_core.process_registry.access(registry_key)
                     if not process_class:
                         raise RuntimeError(
                             f"Process {registry_key} not found in registry."
@@ -237,7 +233,7 @@ class DeathFreezeState(Process):
                         "dead": 1,
                     },
                     "processes": {
-                        "_delete": self.parameters["to_remove"],
+                        "_delete": self.config["to_remove"],
                         "_generate": [
                             {
                                 "processes": new_processes,

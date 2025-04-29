@@ -1,3 +1,5 @@
+"""Antibiotic transport steady state"""
+
 import numpy as np
 from scipy.constants import N_A
 from scipy.integrate import solve_ivp

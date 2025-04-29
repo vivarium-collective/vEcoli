@@ -73,13 +73,18 @@ def construct_schema(modname: str):
         mod_functions
     ))
     schema["_type"] = type_name
-    schema["_default"] = mod.default()
+    # schema["_default"] = mod.default()
     return schema
 
 
 def register(schema, core):
     type_name = schema.get("_type")
-    return core.register_types({type_name: schema})
+    type_definition = {type_name: schema}
+
+    # default_val = schema.get("_default")
+    # if default_val is not None:
+    #     type_definition["_default"] = eval(default_val)
+    return core.register_types(type_definition)
 
 
 def register_type(module_name: str, core, export: bool = True):

@@ -15,7 +15,7 @@ from vivarium.core.registry import Registry as VivRegistry
 from bigraph_schema import Registry as BgsRegistry
 
 from ecoli.shared.data_model import BaseClass
-from ecoli.shared.types.register import register_type
+from ecoli.shared.types.register import register, register_type
 
 
 __all__ = ["ecoli_core", "topology_registry"]
@@ -161,8 +161,8 @@ class Core(ProcessTypes):
     def model_processes(self):
         return ModelProcesses()
     
-    def register_type(self, module_name: str):
-        return register_type(module_name, core=self)
+    def register_type(self, schema):
+        return register(schema, self)
     
     def register_process_package(self, package_name: str, verbose=False):
         """Assumes there to be an __all__ definition in the referenced package"""
