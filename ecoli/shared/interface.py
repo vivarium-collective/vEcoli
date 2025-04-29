@@ -1,4 +1,5 @@
 import abc
+import copy
 from dataclasses import dataclass, field
 from functools import wraps
 import json
@@ -6,8 +7,7 @@ import json
 from process_bigraph import Step, Process
 
 from ecoli.shared.data_model import Topology
-from ecoli.shared.schemas import get_config_schema
-from ecoli.shared.vivarium_instances.base import collapse_defaults
+from ecoli.shared.utils.schemas import get_config_schema, collapse_defaults
 
 
 class EdgeBase(abc.ABC):
@@ -20,7 +20,7 @@ class EdgeBase(abc.ABC):
     name = None
     topology = {}  # topology will already be nested
     directed_topology = Topology()
-    _captured_state = {}
+    _initial_state = {}
 
     def ports_schema(self):
         return {}
@@ -46,6 +46,11 @@ class StepBase(EdgeBase, Step):
         self.config_schema['time_step'] = self.timestep_schema
         super().__init__(config, core)
         self.timestep = self.config["time_step"]
+    
+    def get_schema(self):
+        schema = copy.deepcopy(self.inputs())
+        schema.update(self.outputs())
+        return schema
 
 
 class ProcessBase(EdgeBase, Process):
@@ -58,6 +63,11 @@ class ProcessBase(EdgeBase, Process):
         self.config_schema['time_step'] = self.timestep_schema
         super().__init__(config, core)
         self.timestep = self.config["time_step"]
+    
+    def get_schema(self):
+        schema = copy.deepcopy(self.inputs())
+        schema.update(self.outputs())
+        return schema
 
 
 

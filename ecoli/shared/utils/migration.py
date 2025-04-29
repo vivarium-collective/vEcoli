@@ -4,13 +4,13 @@ Migration v2 Utils
 
 import copy
 from dataclasses import dataclass
+from functools import wraps
 import importlib
 import json
 import os
 from typing import Any, Union
 import uuid
 import numpy as np
-import process_bigraph
 from unum import Unum
 import numbers
 import warnings
@@ -20,7 +20,6 @@ from vivarium.vivarium import Vivarium
 from vivarium.core.engine import Engine, view_values, _process_update
 from bigraph_schema import deep_merge
 
-from ecoli.shared.interface import ProcessBase, StepBase
 from ecoli.shared.data_model import BaseClass
 from wholecell.utils import units
 from ecoli.library.json_state import get_state_from_file
@@ -28,34 +27,8 @@ from migration import LOAD_SIM_DATA, LOAD_SIM_DATA_NO_OPERONS
 from ecoli.shared.registry import Core, ecoli_core
 
 
-def dict_union(a: dict, b: dict, mutate_a: bool = False, secure: bool = False) -> dict:
-    """
-    Performs `bigraph_schema.deep_merge(a, b)` but returns a new object rather than mutating `a` if
-    and only if `mutate_a = True`, otherwise performs a regular call to `deep_merge`. If `secure` is `True`,
-    then both `a` and `b` will be explicitly deleted from memory, leaving only this return.
-    """
-    if not mutate_a:
-        a = copy.deepcopy(a)
-    c = deep_merge(a, b)
-    if secure:
-        del a
-        del b
-    return c
-
-
 PERCENT_ERROR_THRESHOLD = 0.05
 PVALUE_THRESHOLD = 0.05
-
-
-@dataclass
-class Configuration(BaseClass):
-    data_prefix: str 
-    process: ProcessBase | StepBase 
-    initial_state: dict
-
-    @property
-    def view(self):
-        return self.process, self.initial_state
     
 
 def get_process_state(process, topology, initial_state):
@@ -306,7 +279,7 @@ def configure(
     layer=0, 
     post=False, 
     operons=True
-) -> Configuration:
+):
     """
     1. use this function to get the process and state:
     proc, state = configure(...)

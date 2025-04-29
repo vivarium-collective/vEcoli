@@ -1,9 +1,12 @@
+import copy
 import dataclasses
+from functools import wraps
 from typing import Dict, Any
 
 import numpy as np
 import unum
 from pint import Quantity
+from bigraph_schema import deep_merge
 
 from ecoli.library.schema import UniqueNumpyUpdater, get_bulk_counts, bulk_numpy_updater, get_unique_fields, UNIQUE_DIVIDERS, divide_bulk
 
@@ -28,6 +31,87 @@ PORTS_MAPPER = {
 
 }
 DEFAULT_DICT_TYPE = "tree"
+
+
+def get_defaults_schema(d):
+    """Returns a dict whose keys match that of d, except replacing innermost values (v) with their corresponding _default declarations.
+    Used for migration.
+    """
+    if isinstance(d, dict):
+        if '_default' in d:
+            value = d['_default'] 
+            return get_schema_type(value)
+        else:
+            return {k: get_defaults_schema(v) for k, v in d.items()}
+    else:
+        return d
+    
+
+def collapse_defaults(d):
+    """Returns a dict whose keys match that of d, except replacing innermost values (v) with their corresponding _default declarations.
+    Used for migration.
+    """
+    if isinstance(d, dict):
+        if '_default' in d:
+            return d['_default'] 
+        else:
+            return {k: collapse_defaults(v) for k, v in d.items()}
+    else:
+        return d
+
+
+def flatten_state(state, parent_key='', sep='.'):
+    """Returns a flat dict in which the keys express port nesting via dot notation and the values being store values.
+    Used for migration.
+    """
+    items = {}
+    for k, v in state.items():
+        new_key = f"{parent_key}{sep}{k}" if parent_key else k
+        if isinstance(v, dict):
+            items.update(flatten_state(v, new_key, sep=sep))
+        else:
+            items[new_key] = v
+    return items
+
+
+def capture_arg(arg_to_capture: str):
+    """
+    Usage:
+
+    @capture_arg('state')
+    def update(self, state):
+        # self._captured_state will be available here
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            self_obj = args[0]  # first argument is always `self`
+
+            arg_names = func.__code__.co_varnames[:func.__code__.co_argcount]
+            all_args = dict(zip(arg_names, args))
+            all_args.update(kwargs)
+
+            captured_value = all_args.get(arg_to_capture)
+            setattr(self_obj, f"_captured_{arg_to_capture}", captured_value)
+
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
+def dict_union(a: dict, b: dict, mutate_a: bool = False, secure: bool = False) -> dict:
+    """
+    Performs `bigraph_schema.deep_merge(a, b)` but returns a new object rather than mutating `a` if
+    and only if `mutate_a = True`, otherwise performs a regular call to `deep_merge`. If `secure` is `True`,
+    then both `a` and `b` will be explicitly deleted from memory, leaving only this return.
+    """
+    if not mutate_a:
+        a = copy.deepcopy(a)
+    c = deep_merge(a, b)
+    if secure:
+        del a
+        del b
+    return c
 
 
 @dataclasses.dataclass
@@ -87,7 +171,9 @@ def numpy_schema(name: str) -> Dict[str, Any]:
     Returns:
         Fully configured and bigraph-schema-compliant ports schema for molecules of type `name`
     """
-    schema = {"_default": [()], "_type": "list[tuple]"}  # TODO: should this be "bulk" or "oriCs", etc instead (use registered type)?
+    from ecoli.shared.dtypes import bulk_dtype
+
+    schema = {"_default": np.empty((0,), dtype=bulk_dtype), "_type": "list[tuple]"}  # TODO: should this be "bulk" or "oriCs", etc instead (use registered type)?
     # TODO: fix below.
     # if name == "bulk":
     #     schema["_apply"] = bulk_numpy_updater

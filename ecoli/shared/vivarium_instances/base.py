@@ -26,6 +26,7 @@ from vivarium import Vivarium
 
 from ecoli.experiments.ecoli_master_sim import EcoliSim
 from ecoli.shared.registry import ecoli_core
+from ecoli.shared.utils.schemas import flatten_state
 from ecoli.shared.vivarium_instances.factory import EmitterConfig, VivariumFactory
 
 
@@ -50,53 +51,6 @@ default_emitter_config = EmitterConfig(
 )
 
 # vivarium_default = vivarium_factory(core=ecoli_core, emitter_config=default_emitter_config)
-
-
-def capture_arg(arg_to_capture: str):
-    """
-    Usage:
-
-    @capture_arg('state')
-    def update(self, state):
-        # self._captured_state will be available here
-    """
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            self_obj = args[0]  # first argument is always `self`
-
-            arg_names = func.__code__.co_varnames[:func.__code__.co_argcount]
-            all_args = dict(zip(arg_names, args))
-            all_args.update(kwargs)
-
-            captured_value = all_args.get(arg_to_capture)
-            setattr(self_obj, f"_captured_{arg_to_capture}", captured_value)
-
-            return func(*args, **kwargs)
-        return wrapper
-    return decorator
-
-
-def collapse_defaults(d):
-    if isinstance(d, dict):
-        if '_default' in d:
-            return d['_default'] 
-        else:
-            return {k: collapse_defaults(v) for k, v in d.items()}
-    else:
-        return d
-
-
-def flatten_state(state, parent_key='', sep='.'):
-    items = {}
-    for k, v in state.items():
-        new_key = f"{parent_key}{sep}{k}" if parent_key else k
-        if isinstance(v, dict):
-            items.update(flatten_state(v, new_key, sep=sep))
-        else:
-            items[new_key] = v
-    return items
-
 
 def generate_vivarium_from_files(state_data_path: str, config_path: str) -> Vivarium:
     """

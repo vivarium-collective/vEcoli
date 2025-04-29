@@ -63,8 +63,13 @@ class ProcessRegistry(BgsRegistry):
 
 
 class ModelProcesses:
-    all = get_migration_module_mapping()
-    primary = get_primary_process_mapping()
+    @property
+    def all(self):
+        return get_migration_module_mapping()
+    
+    @property
+    def primary(self):
+        return get_primary_process_mapping()
 
     @property
     def dict(self):
@@ -77,7 +82,7 @@ class Processes:
 
     @property
     def model(self):
-        return ModelProcesses
+        return ModelProcesses()
 
     @property
     def registered(self):
@@ -137,24 +142,20 @@ class Core(ProcessTypes):
     def topology(self) -> TopologyRegistry:
         return self._topology
     
-    @property
-    def view(self) -> DataView:
+    @property 
+    def get(self) -> DataView:
         """
         Allows for dot notation throughout a get call, ie: Core().view.processes <- gets process names that are registered.
         Possibly view callables are: processes, types, and topology
         """
         return self._view
     
-    @property 
-    def get(self) -> DataView:
-        return self.view
-    
-    @view.setter
+    @get.setter
     def view(self, v):
         raise AssertionError("You cannot set the view.")
     
     @property
-    def ecoli_processes(self):
+    def model_processes(self):
         return ModelProcesses()
     
     def register_type(self, module_name: str):
