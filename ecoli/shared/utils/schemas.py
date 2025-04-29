@@ -11,6 +11,7 @@ from bigraph_schema import deep_merge
 from ecoli.library.schema import UniqueNumpyUpdater, get_bulk_counts, bulk_numpy_updater, get_unique_fields, UNIQUE_DIVIDERS, divide_bulk
 
 
+DEFAULT_DICT_TYPE = "tree"
 PORTS_MAPPER = {
     "int": "integer",
     "bool": "boolean",
@@ -18,7 +19,7 @@ PORTS_MAPPER = {
     "tuple": "tuple",
     "float": "float",
     "ndarray": "list",  # TODO: eventually formalize this to "array",
-    "dict": "tree",
+    "dict": DEFAULT_DICT_TYPE,
     "NoneType": "any",  # TODO: be less general here (attempt further parsing if need be)
     "int64": "integer",
     "float32": "float",
@@ -29,9 +30,7 @@ PORTS_MAPPER = {
     "Unum": "unum",
     "str": "string",
     "Quantity": "unit"
-
 }
-DEFAULT_DICT_TYPE = "tree"
 
 
 def get_defaults_schema(d):
