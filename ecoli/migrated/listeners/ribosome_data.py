@@ -1,15 +1,16 @@
 """
 ======================
-Ribosome Data Listener
+MIGRATED: Ribosome Data Listener
 ======================
 """
 
 import numpy as np
 import warnings
-from ecoli.library.schema import numpy_schema, listener_schema, attrs, bulk_name_to_idx
-from vivarium.core.process import Step
+from ecoli.library.schema import attrs, bulk_name_to_idx
 
-from ecoli.processes.registries import topology_registry
+from ecoli.shared.registry import ecoli_core
+from ecoli.shared.interface import StepBase
+from ecoli.shared.utils.schemas import collapse_defaults, get_defaults_schema, listener_schema, numpy_schema
 
 
 NAME = "ribosome_data_listener"
@@ -21,10 +22,10 @@ TOPOLOGY = {
     "timestep": ("timestep",),
     "next_update_time": ("next_update_time", NAME),
 }
-topology_registry.register(NAME, TOPOLOGY)
+ecoli_core.topology.register(NAME, TOPOLOGY)
 
 
-class RibosomeData(Step):
+class RibosomeData(StepBase):
     """
     Listener for ribosome data.
     """
@@ -42,20 +43,20 @@ class RibosomeData(Step):
         "emit_unique": False,
     }
 
-    def __init__(self, parameters=None):
-        super().__init__(parameters)
-        self.monomer_ids = self.parameters["monomer_ids"]
+    def initialize(self, config):
+        self.monomer_ids = config["monomer_ids"]
         self.n_monomers = len(self.monomer_ids)
-        self.rRNA_cistron_tu_mapping_matrix = self.parameters[
+        self.rRNA_cistron_tu_mapping_matrix = config[
             "rRNA_cistron_tu_mapping_matrix"
         ]
-        self.rRNA_is_5S = self.parameters["rRNA_is_5S"]
-        self.rRNA_is_16S = self.parameters["rRNA_is_16S"]
-        self.rRNA_is_23S = self.parameters["rRNA_is_23S"]
+        self.rRNA_is_5S = config["rRNA_is_5S"]
+        self.rRNA_is_16S = config["rRNA_is_16S"]
+        self.rRNA_is_23S = config["rRNA_is_23S"]
 
-    def ports_schema(self):
+        # inputs: RNAs, active_ribosomes, listeners, next_update_time, global_time, timestep
+        # outputs: listeners, next_update_time
         n_rRNA_TUs = self.rRNA_cistron_tu_mapping_matrix.shape[1]
-        ports = {
+        bidirectional_ports = {
             "listeners": {
                 "ribosome_data": listener_schema(
                     {
@@ -83,19 +84,19 @@ class RibosomeData(Step):
                     }
                 )
             },
-            "RNAs": numpy_schema("RNAs", emit=self.parameters["emit_unique"]),
-            "active_ribosomes": numpy_schema(
-                "active_ribosome", emit=self.parameters["emit_unique"]
-            ),
-            "global_time": {"_default": 0.0},
-            "timestep": {"_default": self.parameters["time_step"]},
             "next_update_time": {
-                "_default": self.parameters["time_step"],
-                "_updater": "set",
-                "_divider": "set",
-            },
+                "_default": config["time_step"]
+            }
         }
-        return ports
+
+        self.input_ports = {
+            **bidirectional_ports,
+            "RNAs": numpy_schema("RNAs"),
+            "active_ribosomes": numpy_schema("active_ribosome"),
+            "global_time": {"_default": 0.0},
+            "timestep": {"_default": config["time_step"]}, 
+        }
+        self.output_ports = bidirectional_ports
 
     def update_condition(self, timestep, states):
         """
@@ -112,23 +113,32 @@ class RibosomeData(Step):
                 )
             return True
         return False
+    
+    def inputs(self):
+        return get_defaults_schema(self.input_ports)
+    
+    def outputs(self):
+        return get_defaults_schema(self.output_ports)
+    
+    def initial_state(self):
+        return collapse_defaults(self.output_ports)
 
-    def next_update(self, timestep, states):
+    def update(self, state):
         # Get attributes of RNAs and ribosomes
         (is_full_transcript_RNA, unique_index_RNA, can_translate, TU_index) = attrs(
-            states["RNAs"],
+            state["RNAs"],
             ["is_full_transcript", "unique_index", "can_translate", "TU_index"],
         )
 
         (protein_index_ribosomes, mRNA_index_ribosomes, massDiff_protein_ribosomes) = (
             attrs(
-                states["active_ribosomes"],
+                state["active_ribosomes"],
                 ["protein_index", "mRNA_index", "massDiff_protein"],
             )
         )
 
-        rRNA_initiated_TU = states["listeners"]["ribosome_data"]["rRNA_initiated_TU"]
-        rRNA_init_prob_TU = states["listeners"]["ribosome_data"]["rRNA_init_prob_TU"]
+        rRNA_initiated_TU = state["listeners"]["ribosome_data"]["rRNA_initiated_TU"]
+        rRNA_init_prob_TU = state["listeners"]["ribosome_data"]["rRNA_init_prob_TU"]
 
         # Get mask for ribosomes that are translating proteins on partially
         # transcribed mRNAs
@@ -217,6 +227,6 @@ class RibosomeData(Step):
                     "protein_mass_on_polysomes": protein_mass_on_polysomes,
                 }
             },
-            "next_update_time": states["global_time"] + states["timestep"],
+            "next_update_time": state["global_time"] + state["timestep"],
         }
         return update
