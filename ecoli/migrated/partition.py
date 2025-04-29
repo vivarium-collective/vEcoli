@@ -24,7 +24,7 @@ from bigraph_schema import deep_merge
 
 from ecoli.shared.interface import StepBase, ProcessBase, collapse_defaults
 from ecoli.processes.registries import topology_registry
-from ecoli.shared.schemas import numpy_schema
+from ecoli.shared.utils.schemas import numpy_schema
 
 
 class Requester(StepBase):
@@ -315,11 +315,6 @@ class PartitionedProcess(ProcessBase):
         return {
             "bulk": numpy_schema("bulk")
         }
-    
-    def get_schema(self):
-        schema = copy.deepcopy(self.inputs())
-        schema.update(self.outputs())
-        return schema
     
     def inputs(self):
         """Needs to be a summation of args parsable by both calc request and evolve state!"""

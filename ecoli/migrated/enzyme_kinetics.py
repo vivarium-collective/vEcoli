@@ -9,7 +9,7 @@ import numpy as np
 from ecoli.shared.interface import ProcessBase
 from ecoli.library.kinetic_rate_laws import KineticFluxModel
 from ecoli.library.schema import bulk_name_to_idx, counts
-from ecoli.shared.schemas import numpy_schema
+from ecoli.shared.utils.schemas import numpy_schema
 
 
 NAME = "enzyme_kinetics"

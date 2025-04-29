@@ -31,7 +31,7 @@ from ecoli.library.schema import (
 from ecoli.library.data_predicates import monotonically_increasing
 from ecoli.processes.unique_update import UniqueUpdate
 from ecoli.migrated.partition import PartitionedProcess
-from ecoli.shared.schemas import listener_schema, numpy_schema, get_config_schema
+from ecoli.shared.utils.schemas import listener_schema, numpy_schema, get_config_schema
 
 
 # Register default topology for this process, associating it with process name

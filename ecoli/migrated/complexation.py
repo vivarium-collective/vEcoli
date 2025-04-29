@@ -23,7 +23,7 @@ from stochastic_arrow import StochasticSystem
 from ecoli.library.schema import bulk_name_to_idx, counts
 from ecoli.migrated.partition import PartitionedProcess
 from ecoli.shared.registry import ecoli_core
-from ecoli.shared.schemas import listener_schema, numpy_schema
+from ecoli.shared.utils.schemas import listener_schema, numpy_schema
 
 
 NAME = "ecoli-complexation"

@@ -19,7 +19,7 @@ from ecoli.library.data_predicates import (
     all_nonnegative,
 )
 from ecoli.library.schema import counts, bulk_name_to_idx
-from ecoli.shared.schemas import numpy_schema
+from ecoli.shared.utils.schemas import numpy_schema
 from ecoli.shared.registry import ecoli_core
 from ecoli.migrated.partition import PartitionedProcess
 

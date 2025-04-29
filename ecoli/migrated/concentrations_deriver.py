@@ -3,7 +3,7 @@ from scipy.constants import N_A
 from ecoli.shared.interface import StepBase
 from vivarium.library.units import units, Quantity
 from ecoli.library.schema import bulk_name_to_idx, counts
-from ecoli.shared.schemas import numpy_schema
+from ecoli.shared.utils.schemas import numpy_schema
 
 AVOGADRO = N_A / units.mol
 

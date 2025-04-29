@@ -17,7 +17,7 @@ from process_bigraph import Step
 
 from ecoli.migrated.global_clock import GlobalClock
 from ecoli.migrated.unique_update import UniqueUpdate
-from ecoli.shared.schemas import listener_schema, numpy_schema
+from ecoli.shared.utils.schemas import listener_schema, numpy_schema
 from ecoli.processes.registries import topology_registry
 from ecoli.library.schema import (
     attrs,

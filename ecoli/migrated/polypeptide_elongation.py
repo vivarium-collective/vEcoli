@@ -36,7 +36,7 @@ from ecoli.library.schema import (
     bulk_name_to_idx
 )
 from ecoli.migrated.partition import PartitionedProcess
-from ecoli.shared.schemas import listener_schema, numpy_schema
+from ecoli.shared.utils.schemas import listener_schema, numpy_schema
 
 
 MICROMOLAR_UNITS = units.umol / units.L

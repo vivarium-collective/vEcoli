@@ -41,7 +41,7 @@ from ecoli.library.schema import (
     counts,
     attrs
 )
-from ecoli.shared.schemas import numpy_schema, listener_schema, get_config_schema
+from ecoli.shared.utils.schemas import numpy_schema, listener_schema, get_config_schema
 from ecoli.migrated.partition import PartitionedProcess
 
 

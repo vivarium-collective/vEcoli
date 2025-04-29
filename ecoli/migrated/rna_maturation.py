@@ -11,7 +11,7 @@ import numpy as np
 from ecoli.migrated.partition import PartitionedProcess
 from ecoli.shared.registry import ecoli_core
 from ecoli.library.schema import counts, bulk_name_to_idx
-from ecoli.shared.schemas import listener_schema, numpy_schema
+from ecoli.shared.utils.schemas import listener_schema, numpy_schema
 
 
 # Register default topology for this process, associating it with process name

@@ -38,7 +38,7 @@ from ecoli.library.data_predicates import monotonically_decreasing, all_nonnegat
 from scipy.stats import chisquare
 
 from ecoli.migrated.partition import PartitionedProcess
-from ecoli.shared.schemas import numpy_schema, listener_schema
+from ecoli.shared.utils.schemas import numpy_schema, listener_schema
 
 
 # Register default topology for this process, associating it with process name
