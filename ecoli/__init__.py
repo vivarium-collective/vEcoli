@@ -14,7 +14,6 @@ import os
 import warnings
 import logging
 import faulthandler
-
 from ecoli.shared.utils.log import setup_logging
 
 # logger
@@ -31,12 +30,9 @@ os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 # TODO: move/replace this?
 faulthandler.enable()
 
-from dataclasses import dataclass
-
 from process_bigraph.processes import TOY_PROCESSES
 from bigraph_schema.units import units
 
-# from wholecell.utils import units
 from ecoli.library.units import Quantity
 from ecoli.emitters.parquet import ParquetEmitter
 from ecoli.library.schema import (
