@@ -1,3 +1,23 @@
+"""
+TODO: The following test installation processes have not yet been translated using the new migration paradigm:
+
+['death_threshold',
+ 'ecoli-chromosome-replication',
+ 'ecoli-chromosome-structure',
+ 'ecoli-equilibrium',
+ 'ecoli-metabolism',
+ 'ecoli-polypeptide-elongation',
+ 'ecoli-polypeptide-initiation',
+ 'ecoli-rna-degradation',
+ 'ecoli-tf-binding',
+ 'ecoli-transcript-elongation',
+ 'ecoli-transcript-initiation',
+ 'exchange_data',
+ 'global_clock',
+ 'media_update']
+ 
+"""
+
 # --- Core Model Processes --- #
 from ecoli.migrated.tf_unbinding import TfUnbinding
 from ecoli.migrated.tf_binding import TfBinding
@@ -47,6 +67,7 @@ from ecoli.migrated.antibiotics.antibiotic_transport_odeint import (
 from ecoli.migrated.antibiotics.cell_wall import CellWall
 from ecoli.migrated.antibiotics.death import DeathFreezeState
 from ecoli.migrated.antibiotics.lysis_initiation import LysisInitiation
+from ecoli.migrated.antibiotics.murein_division import MureinDivision
 # from ecoli.migrated.antibiotics.pbp_binding import PBPBinding
 # from ecoli.migrated.antibiotics.antibiotic_transport_steady_state import (
 #     AntibioticTransportSteadyState,
@@ -55,7 +76,7 @@ from ecoli.migrated.antibiotics.lysis_initiation import LysisInitiation
 # from ecoli.migrated.antibiotics.tetracycline_ribosome_equilibrium import (
 #     TetracyclineRibosomeEquilibrium,
 # )
-# from ecoli.migrated.antibiotics.murein_division import MureinDivision
+
 # from ecoli.migrated.antibiotics.conc_to_counts import ConcToCounts
 
 # -- Environment Processes --- #
@@ -71,6 +92,7 @@ from ecoli.migrated.antibiotics.lysis_initiation import LysisInitiation
 
 # TODO: add the rest here
 __all__ = [
+    'MureinDivision',
     'LysisInitiation',
     'DeathFreezeState',
     'CellWall',
