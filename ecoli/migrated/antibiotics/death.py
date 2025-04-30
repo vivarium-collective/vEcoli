@@ -45,6 +45,7 @@ from vivarium.core.composition import (
 from vivarium.processes.injector import Injector
 from vivarium.plots.simulation_output import plot_simulation_output
 from vivarium.library.units import units
+from vivarium.core.composer import Composer
 
 from ecoli.shared.registry import ecoli_core
 from ecoli.shared.interface import ProcessBase
@@ -181,25 +182,25 @@ class DeathFreezeState(ProcessBase):
 
         # TODO: are these correct?
         self.input_ports: dict[str, Any] = {
-            "internal": "tree"
+            "internal": {}
         }
         # detector ports
         for detector in self.detectors:
             needed_keys = detector.needed_state_keys
-            for port, state in needed_keys.items():
+            for port, states in needed_keys.items():
                 if port not in self.input_ports:
-                    self.input_ports[port] = "tree"
-                for state in state:
+                    self.input_ports[port] = {}
+                for state in states:
                     self.input_ports[port][state] = {"_default": 0 * units.mM}
 
         self.output_ports = {
             "global": {
-                "dead": "integer"
+                "dead": {
+                    "_default": 0
+                }
             },
-            "processes": "tree",
+            "processes": {"_default": {}},
         }
-
-        
 
     def update(self, state, interval):
         """If any detector triggers death, kill the cell
@@ -249,6 +250,8 @@ class DeathFreezeState(ProcessBase):
 
 class ToyDeath(Composer):
     def generate_processes(self, config):
+        from ecoli.shared.registry import ecoli_core
+
         death_parameters = {
             "detectors": [
                 [
@@ -273,7 +276,7 @@ class ToyDeath(Composer):
                 ),
             },
         }
-        death_process = DeathFreezeState(death_parameters)
+        death_process = DeathFreezeState(config=death_parameters, core=ecoli_core)
         injector_parameters = {
             "substrate_rate_map": {
                 "antibiotic": TOY_INJECTION_RATE,

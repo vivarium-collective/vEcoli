@@ -326,3 +326,20 @@ def export_vivarium_unit_schemas(types_dir: str | None = None):
                 with open(schema_fp, 'w') as fp:
                     json.dump(schema, fp, indent=4)
 
+
+def infer_state_from_composer(composer):
+    composition = composer.generate()
+    processes = composition.get('processes')
+    topology = composition.get('topology')
+    
+    state = {}
+    for process_id, process in processes.items():
+        ports = topology.get(process_id)
+        state[process_id] = {
+            "_type": "process",
+            "address": f"local:{process_id}",
+            "config": {},  # get config from process
+            "inputs": ports,
+            "outputs": ports
+        }
+    return state

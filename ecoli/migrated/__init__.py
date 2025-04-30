@@ -1,31 +1,3 @@
-# --- Stubs --- # 
-# from ecoli.migrated.stubs.exchange_stub import Exchange
-
-# -- Environment Processes --- #
-# from ecoli.migrated.environment.lysis import Lysis
-# from ecoli.migrated.environment.local_field import LocalField
-# from ecoli.migrated.environment.field_timeline import FieldTimeline
-# from ecoli.migrated.environment.exchange_data import ExchangeData
-# from ecoli.migrated.environment.media_update import MediaUpdate
-
-# --- Antibiotics Processes --- #
-from ecoli.migrated.antibiotics.antibiotic_transport_odeint import (
-    AntibioticTransportOdeint,
-)
-from ecoli.migrated.antibiotics.cell_wall import CellWall
-# from ecoli.migrated.antibiotics.lysis_initiation import LysisInitiation
-# from ecoli.migrated.antibiotics.pbp_binding import PBPBinding
-# from ecoli.migrated.antibiotics.death import DeathFreezeState
-# from ecoli.migrated.antibiotics.antibiotic_transport_steady_state import (
-#     AntibioticTransportSteadyState,
-# )
-# from ecoli.migrated.antibiotics.permeability import Permeability
-# from ecoli.migrated.antibiotics.tetracycline_ribosome_equilibrium import (
-#     TetracyclineRibosomeEquilibrium,
-# )
-# from ecoli.migrated.antibiotics.murein_division import MureinDivision
-# from ecoli.migrated.antibiotics.conc_to_counts import ConcToCounts
-
 # --- Core Model Processes --- #
 from ecoli.migrated.tf_unbinding import TfUnbinding
 from ecoli.migrated.tf_binding import TfBinding
@@ -68,8 +40,39 @@ from ecoli.migrated.listeners.mass_listener import (
     PostDivisionMassListener,
 )
 
+# --- Antibiotics Processes --- #
+from ecoli.migrated.antibiotics.antibiotic_transport_odeint import (
+    AntibioticTransportOdeint,
+)
+from ecoli.migrated.antibiotics.cell_wall import CellWall
+from ecoli.migrated.antibiotics.death import DeathFreezeState
+from ecoli.migrated.antibiotics.lysis_initiation import LysisInitiation
+# from ecoli.migrated.antibiotics.pbp_binding import PBPBinding
+# from ecoli.migrated.antibiotics.antibiotic_transport_steady_state import (
+#     AntibioticTransportSteadyState,
+# )
+# from ecoli.migrated.antibiotics.permeability import Permeability
+# from ecoli.migrated.antibiotics.tetracycline_ribosome_equilibrium import (
+#     TetracyclineRibosomeEquilibrium,
+# )
+# from ecoli.migrated.antibiotics.murein_division import MureinDivision
+# from ecoli.migrated.antibiotics.conc_to_counts import ConcToCounts
+
+# -- Environment Processes --- #
+# from ecoli.migrated.environment.lysis import Lysis
+# from ecoli.migrated.environment.local_field import LocalField
+# from ecoli.migrated.environment.field_timeline import FieldTimeline
+# from ecoli.migrated.environment.exchange_data import ExchangeData
+# from ecoli.migrated.environment.media_update import MediaUpdate
+
+# --- Stubs --- # 
+# from ecoli.migrated.stubs.exchange_stub import Exchange
+
+
 # TODO: add the rest here
 __all__ = [
+    'LysisInitiation',
+    'DeathFreezeState',
     'CellWall',
     "AntibioticTransportOdeint",
     "Aggregator",
