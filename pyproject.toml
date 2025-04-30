@@ -59,6 +59,7 @@ dependencies = [
     "process-bigraph>=0.0.30",
     "vivarium-interface>=0.0.4",
     "dask[complete]>=2025.4.1",
+    "pysimdjson>=6.0.2",
 ]
 
 [project.scripts]

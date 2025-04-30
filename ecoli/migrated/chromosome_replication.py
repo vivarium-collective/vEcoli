@@ -29,7 +29,6 @@ from ecoli.library.schema import (
 from wholecell.utils import units
 from wholecell.utils.polymerize import buildSequences, polymerize, computeMassIncrease
 
-from ecoli.processes.registries import topology_registry
 from ecoli.migrated.partition import PartitionedProcess
 
 
@@ -55,7 +54,6 @@ class ChromosomeReplication(PartitionedProcess):
     topology = TOPOLOGY
     defaults = {
         "max_time_step": 2.0,
-        "get_dna_critical_mass": lambda doubling_time: units.Unum,
         "criticalInitiationMass": 975 * units.fg,
         "nutrientToDoublingTime": {},
         "replichore_lengths": np.array([]),
@@ -81,7 +79,7 @@ class ChromosomeReplication(PartitionedProcess):
         self.max_time_step = config["max_time_step"]
 
         # Load parameters
-        self.get_dna_critical_mass = config["get_dna_critical_mass"]
+        self.get_dna_critical_mass = lambda doubling_time: units.Unum
         self.criticalInitiationMass = config["criticalInitiationMass"]
         self.nutrientToDoublingTime = config["nutrientToDoublingTime"]
         self.replichore_lengths = config["replichore_lengths"]
@@ -128,7 +126,12 @@ class ChromosomeReplication(PartitionedProcess):
         return {
             # bulk molecules
             "bulk": numpy_schema("bulk"),
-            "listeners": self.listener_schemas,
+            "listeners": {
+                "mass": listener_schema({"cell_mass": 0.0}),
+                "replication_data": listener_schema(
+                    {"critical_initiation_mass": 0.0, "critical_mass_per_oriC": 0.0}
+                )
+            },
             "environment": {
                 "media_id": {"_default": "", "_updater": "set"},
             },
@@ -537,6 +540,3 @@ def test_chromosome_replication():
     process = ChromosomeReplication(test_config)
     assert process is not None
 
-
-if __name__ == "__main__":
-    test_chromosome_replication()

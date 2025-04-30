@@ -2,8 +2,6 @@
 TODO: The following test installation processes have not yet been translated using the new migration paradigm:
 
 ['death_threshold',
- 'ecoli-chromosome-replication',
- 'ecoli-chromosome-structure',
  'ecoli-equilibrium',
  'ecoli-metabolism',
  'ecoli-polypeptide-elongation',
@@ -13,9 +11,8 @@ TODO: The following test installation processes have not yet been translated usi
  'ecoli-transcript-elongation',
  'ecoli-transcript-initiation',
  'exchange_data',
- 'global_clock',
  'media_update']
- 
+
 """
 
 # --- Core Model Processes --- #
@@ -39,7 +36,7 @@ from ecoli.migrated.rna_interference import RnaInterference
 from ecoli.migrated.global_clock import GlobalClock
 from ecoli.migrated.bulk_timeline import BulkTimelineProcess
 # TODO: finish these
-# from ecoli.migrated.chromosome_replication import ChromosomeReplication
+from ecoli.migrated.chromosome_replication import ChromosomeReplication
 # from ecoli.migrated.concentrations_deriver import ConcentrationsDeriver
 # from ecoli.migrated.shape import Shape
 # from ecoli.migrated.metabolism import Metabolism  # <--TODO: do we need this or redux primarily?
@@ -121,7 +118,7 @@ __all__ = [
     "Equilibrium",
     "ProteinDegradation",
     "MetabolismRedux",
-    # "ChromosomeReplication",
+    "ChromosomeReplication",
     "ChromosomeStructure",
     "Allocator",
     "Chemostat",

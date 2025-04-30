@@ -1,22 +1,23 @@
-from process_bigraph import Process
+from ecoli.shared.interface import ProcessBase
 
 
-class GlobalClock(Process):
+class GlobalClock(ProcessBase):
     """
-    Track global time for Steps that do not rely on process-bigraph's built-in
-    time stepping (see :ref:`timesteps`). TODO: is `timesteps` still applicable in process-bigraph?
+    Track global time for Steps that do not rely on vivarium-core's built-in
+    time stepping (see :ref:`timesteps`).
     """
+
+    name = "global_clock"
 
     def inputs(self):
         return {
             "global_time": "float",
             "next_update_time": "tree[float]",
         }
-
+    
     def outputs(self):
         return {
-            "global_time": "float",
-            "next_update_time": "tree[float]",
+            "global_time": "float"
         }
 
     def calculate_timestep(self, state):
@@ -32,7 +33,7 @@ class GlobalClock(Process):
             for next_update_time in state["next_update_time"].values()
         )
 
-    def update(self, state, interval):
+    def next_update(self, state, interval):
         """
         The timestep that we increment global_time by is the same minimum time step
         that we calculated in calculate_timestep. This guarantees that we never

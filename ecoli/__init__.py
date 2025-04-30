@@ -9,11 +9,14 @@ C. import all required type schemas/defs and register them (or read them via jso
 """
 
 
+import copy
 import json
 import os
 import warnings
 import logging
 import faulthandler
+
+import numpy as np
 from ecoli.shared.utils.log import setup_logging
 
 # logger
@@ -32,6 +35,8 @@ faulthandler.enable()
 
 from process_bigraph.processes import TOY_PROCESSES
 from bigraph_schema.units import units
+from bigraph_schema.type_functions import deserialize_array, check_list
+from bigraph_schema.type_system import required_schema_keys
 
 from ecoli.library.units import Quantity
 from ecoli.emitters.parquet import ParquetEmitter
@@ -43,6 +48,7 @@ from ecoli.library.schema import (
     divide_RNAs_by_domain,
     divide_set_none,
     empty_dict_divider,
+    bulk_numpy_updater,
 )
 from ecoli.library.serialize import (
     MethodSerializer,
@@ -61,14 +67,25 @@ from ecoli.library.updaters import (
     inverse_updater_registry,
 )
 from ecoli.shared.registry import ecoli_core
-
+from ecoli.shared.dtypes import bulk_dtype
 
 VERBOSE_REGISTER = eval(os.getenv("VERBOSE_REGISTER", "True"))
 PROCESS_PACKAGES = ["migrated"]  # TODO: add more here
-TYPE_MODULES = ["unum", "unit"]  # TODO: add more here
+TYPE_MODULES = ["unum", "unit", "bulk"]  # TODO: add more here
+
+
+def get_bulk_counts(bulk: np.ndarray) -> np.ndarray:
+    """
+    Args:
+        bulk: Numpy structured array with a `count` field
+    Returns:
+        Contiguous (required by orjson) array of bulk molecule counts
+    """
+    return np.ascontiguousarray(bulk["count"])
 
 
 # import and register types
+possible_schema_keys = required_schema_keys | {"_divide", "_description", "_value"}
 for modname in TYPE_MODULES:
     ecoli_root = os.path.abspath(
         os.path.dirname(__file__)
@@ -76,11 +93,14 @@ for modname in TYPE_MODULES:
     schema_fp = os.path.join(ecoli_root, 'shared', 'types', 'definitions', f'{modname}.json')
     with open(schema_fp, 'r') as f:
         schema = json.load(f)
-        if "_default" in schema:
-            try:
-                schema["_default"] = eval(schema["_default"])
-            except:
-                schema.pop("_default", None)
+        _schema = copy.deepcopy(schema)
+        for key in schema:
+            if key in possible_schema_keys:
+                try:
+                    val = schema[key]
+                    schema[key] = eval(val)
+                except:
+                    schema.pop(key, None)
         ecoli_core.register_type(schema)
 
 # import and register processes

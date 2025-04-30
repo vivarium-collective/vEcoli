@@ -2894,6 +2894,26 @@ wheels = [
 ]
 
 [[package]]
+name = "pysimdjson"
+version = "6.0.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/88/a0/2ed02ea282713e84099a07b96e736062d93ac32d81cae482a9ceee39e9c1/pysimdjson-6.0.2.tar.gz", hash = "sha256:ddbd6fecd42aa01c5c87d3c79b8ede1885b6763337d21745587a5392572c1f45", size = 1213207 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ec/0f/2d54463c3ed685b8f874a7e1f1511c07380467242268ea7d74b7bdbafd70/pysimdjson-6.0.2-cp312-cp312-macosx_10_9_universal2.whl", hash = "sha256:1312105f88a84eb45e15718ff315276e3f325e6463b6f82299ec769e3245a713", size = 379542 },
+    { url = "https://files.pythonhosted.org/packages/7c/d1/e24d10b15b1639541fc2532aee5b2bbad7c747a2fc08a76a8e9f5ae9bcca/pysimdjson-6.0.2-cp312-cp312-macosx_10_9_x86_64.whl", hash = "sha256:3feb31f9f14edf7f696a5129195d5063d8053c3d77b84edd74db09f548a49a0f", size = 217141 },
+    { url = "https://files.pythonhosted.org/packages/fa/d7/dc4e81f18e00555a6cbe101dfe8006f21fab5d056bb8090d06b60a282c59/pysimdjson-6.0.2-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:88d6a37f4cc6a59d8c9301f5517de2fda7702f9307e3eeebf3b661d7f93d29fa", size = 1370913 },
+    { url = "https://files.pythonhosted.org/packages/bb/05/a82de260dcbc32ae1ff5190ce19deb76f9d7d9178b3e04d6da104972e49e/pysimdjson-6.0.2-cp312-cp312-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:dab9620a5666ff56200d5d28adb871cdafef14d4acd6ae0da1c9ea633039aab1", size = 1179986 },
+    { url = "https://files.pythonhosted.org/packages/5e/79/7ef516116f27b65dfb0fe9ac658a1364a8bf1cdbf55129d71a1db822ec15/pysimdjson-6.0.2-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:07c9ce9b84d5e926581ebef48fa9e9e44d2dbde42a9d7931a9479c3a696fe38c", size = 1855680 },
+    { url = "https://files.pythonhosted.org/packages/cb/62/e29aac17a348d84b3b958811593b50e249c17a8553bb54bbd53813bba6cb/pysimdjson-6.0.2-cp312-cp312-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:2f8bf66143bc51c10ed304eeb34a9b4916fdaf5e108db0912f886a724b8f0aa7", size = 1133029 },
+    { url = "https://files.pythonhosted.org/packages/88/70/ec055c13188ec51274c7b1fb0a2c330560e32a357ef6563993eb7351455f/pysimdjson-6.0.2-cp312-cp312-musllinux_1_1_aarch64.whl", hash = "sha256:3d0677a64874dcf9db19982b5339a8f79ef590d0514041390a3611851b918c90", size = 1872958 },
+    { url = "https://files.pythonhosted.org/packages/11/f7/53b0cf8457d4878a418ad7be9e716d6351bcd440cd74395d8301a9f53ea8/pysimdjson-6.0.2-cp312-cp312-musllinux_1_1_i686.whl", hash = "sha256:ac7436bba6eaa04bd8e74dfed2aa539e6753c41fe85e045a33eb1e8dc18af650", size = 1685416 },
+    { url = "https://files.pythonhosted.org/packages/1d/9a/832e27d0966900757d991cdc07375d7b72af6392738ac56de005a298d987/pysimdjson-6.0.2-cp312-cp312-musllinux_1_1_ppc64le.whl", hash = "sha256:7335c83d99aa63917537cd57b59d4eb914d8d961a5bd79508094d0938b431dd1", size = 1722004 },
+    { url = "https://files.pythonhosted.org/packages/dd/6e/d79dc7b7a83f33c35096dfa5b78cc21b37c208e2766ecfcf746f59cf14fa/pysimdjson-6.0.2-cp312-cp312-musllinux_1_1_x86_64.whl", hash = "sha256:146fcf72d2479cd4d788fbc19d02108ad1183460b8e930ec53359b1163075f60", size = 2369835 },
+    { url = "https://files.pythonhosted.org/packages/29/bb/9b867f84a9916ba9f2d73d7ad64ae669c4f1d7e68c3f9310fd6fcfe35e97/pysimdjson-6.0.2-cp312-cp312-win32.whl", hash = "sha256:257de8d41bad74e1c195cf1f69df12b3899aa9c7911583960d680870c7665faf", size = 127161 },
+    { url = "https://files.pythonhosted.org/packages/d2/c5/5ac56fedd7dff700769dfded8bad80b6da9a6ff33bfa993f8a41535c1223/pysimdjson-6.0.2-cp312-cp312-win_amd64.whl", hash = "sha256:c4efb641eefce647c347d5df7175830960cc0f8d2c9a5158c0a1950278493521", size = 175291 },
+]
+
+[[package]]
 name = "pytest"
 version = "8.3.5"
 source = { registry = "https://pypi.org/simple" }
@@ -4082,6 +4102,7 @@ dependencies = [
     { name = "pymunk" },
     { name = "pyqt5" },
     { name = "pysal" },
+    { name = "pysimdjson" },
     { name = "scikit-image" },
     { name = "scikit-learn" },
     { name = "scipy" },
@@ -4174,6 +4195,7 @@ requires-dist = [
     { name = "pymunk" },
     { name = "pyqt5" },
     { name = "pysal" },
+    { name = "pysimdjson", specifier = ">=6.0.2" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "pytest-cov", marker = "extra == 'dev'" },
     { name = "python-dotenv", marker = "extra == 'api'", specifier = ">=1.1.0" },

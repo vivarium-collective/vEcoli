@@ -7,8 +7,9 @@ import numpy as np
 import unum
 from pint import Quantity
 from bigraph_schema import deep_merge
+from bigraph_schema.type_functions import deserialize_array
 
-from ecoli.library.schema import UniqueNumpyUpdater, get_bulk_counts, bulk_numpy_updater, get_unique_fields, UNIQUE_DIVIDERS, divide_bulk
+from ecoli.library.schema import UniqueNumpyUpdater, get_bulk_counts, bulk_numpy_updater, UNIQUE_DIVIDERS, divide_bulk
 
 
 DEFAULT_DICT_TYPE = "tree"
@@ -31,6 +32,16 @@ PORTS_MAPPER = {
     "str": "string",
     "Quantity": "unit"
 }
+
+
+def get_unique_fields(unique: np.ndarray) -> list[np.ndarray]:
+    """
+    Args:
+        unique: Numpy structured array of attributes for one unique molecule
+    Returns:
+        List of contiguous (required by orjson) arrays, one for each attribute
+    """
+    return [np.ascontiguousarray(unique[field]) for field in unique.dtype.names]
 
 
 def get_defaults_schema(d):
@@ -185,31 +196,37 @@ def listener_schema(elements: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
 
 
 def numpy_schema(name: str, emit: bool = True) -> Dict[str, Any]:
-    """TODO: parse schema function keys more carefully.
-    Helper function used in ports schemas for bulk and unique molecules
+    """
+    Helper function used to define defaults that get parsed for inputs and outputs and initial states for bulk and unique molecules
 
     Args:
         name: `bulk` for bulk molecules or one of the keys in :py:data:`UNIQUE_DIVIDERS`
             for unique molecules
+        emit: TODO: implement this
 
     Returns:
         Fully configured and bigraph-schema-compliant ports schema for molecules of type `name`
     """
-    from ecoli.shared.dtypes import bulk_dtype
+    from ecoli.shared.registry import ecoli_core
 
-    schema = {"_default": np.empty((0,), dtype=bulk_dtype), "_type": "list[tuple]"}  # TODO: should this be "bulk" or "oriCs", etc instead (use registered type)?
-    # TODO: fix below.
-    # if name == "bulk":
-    #     schema["_apply"] = bulk_numpy_updater
-    #     # Only pull out counts to be serialized (save space and time)
-    #     schema["_serialize"] = get_bulk_counts
-    #     schema["_divide"] = divide_bulk
-    # else:
-    #     # schema["_updater"] = UniqueNumpyUpdater().updater
-    #     # Convert to list of contiguous Numpy arrays for faster and more
-    #     # efficient serialization (still do not recommend emitting unique)
-    #     schema["_serialize"] = get_unique_fields
-    #     schema["_divide"] = UNIQUE_DIVIDERS[name]
+    registered_types = ecoli_core.types()
+    if name in registered_types:
+        type_schema = registered_types[name]
+        type_schema.pop("_type")
+        return type_schema
+    
+    schema = {
+        "_default": np.empty((0,), dtype=tuple), 
+        "_serialize": get_unique_fields,
+        "_deserialize": deserialize_array,
+        "_divide": UNIQUE_DIVIDERS.get(name),
+        "_description": {
+            "emit": emit
+        }
+    }
+    divider = UNIQUE_DIVIDERS.get(name)
+    if divider is not None:
+        schema["_divide"] = divider
     return schema
 
 

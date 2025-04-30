@@ -1,0 +1,9 @@
+{
+    "_default": "np.empty((0,), dtype=bulk_dtype", 
+    "_type": "bulk",
+    "_serialize": "get_bulk_counts",
+    "_deserialize": "deserialize_array",
+    "_divide": "divide_bulk",
+    "_apply": "bulk_numpy_updater",
+    "_check": "check_list"
+}

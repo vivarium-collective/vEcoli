@@ -146,6 +146,10 @@ class Core(ProcessTypes):
         return self._topology
     
     @property 
+    def topology_registry(self) -> TopologyRegistry:
+        return self.topology
+    
+    @property 
     def get(self) -> DataView:
         """
         Allows for dot notation throughout a get call, ie: Core().view.processes <- gets process names that are registered.

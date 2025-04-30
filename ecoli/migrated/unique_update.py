@@ -1,27 +1,28 @@
 """
-MIGRATED: Unique Update: Placed after all Steps of each execution layer (see :ref:`partitioning`)
-to ensure that unique molecules are completely up-to-date
+MIGRATED: Unique Update
 """
 
+
 from process_bigraph import Step
-from ecoli.library.schema import numpy_schema
+from ecoli.shared.interface import StepBase
+from ecoli.shared.utils.schemas import numpy_schema
 
 
-class UniqueUpdate(Step):
-    config_schema = {
-        "emit_unique": {
-            "_type": "boolean",
-            "_default": False
-        }
+class UniqueUpdate(StepBase):
+    """Placed after all Steps of each execution layer (see :ref:`partitioning`)
+    to ensure that unique molecules are completely up-to-date"""
+
+    name = "unique-update"
+
+    defaults = {
+        "emit_unique": False,
+        "unique_topo": {"_default": {}}
     }
 
-    def __init__(self, config=None, core=None):
-        super().__init__(config, core)
+    def initialize(self, config):
         # Topology for all unique molecule ports (port: path)
-        self.unique_topo = self.config["unique_topo"]
-
-    def outputs(self):
-        return {
+        self.unique_topo = config["unique_topo"]
+        self.output_ports = {
             unique_mol: numpy_schema(unique_mol, emit=self.config["emit_unique"])
             for unique_mol in self.unique_topo
         }

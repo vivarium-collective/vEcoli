@@ -90,11 +90,11 @@ class Shape(Step):
     }
 
     def __init__(self, parameters=None):
-        super().__init__(parameters)
+        # super().__init__(parameters)
         self.outer_to_inner_area = (
             math.pow(self.parameters["cytoplasm_fraction"], 1 / 3) ** 2
         )
-
+        
     def ports_schema(self):
         schema = {
             "cell_global": {

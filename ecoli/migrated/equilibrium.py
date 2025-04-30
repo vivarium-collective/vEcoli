@@ -1,6 +1,6 @@
 """
 ===========
-MIGRATED: Equilibrium
+Equilibrium
 ===========
 
 This process models how ligands are bound to or unbound
@@ -10,16 +10,18 @@ that maintains equilibrium.
 
 import numpy as np
 
-from wholecell.utils import units
-
 from ecoli.library.schema import bulk_name_to_idx, counts
+
 from ecoli.migrated.partition import PartitionedProcess
+from ecoli.shared.registry import ecoli_core
+from ecoli.shared.utils.schemas import listener_schema, numpy_schema
+from wholecell.utils import units
 
 
 # Register default topology for this process, associating it with process name
-# NAME = "ecoli-equilibrium"
-# TOPOLOGY = {"listeners": ("listeners",), "bulk": ("bulk",), "timestep": ("timestep",)}
-# topology_registry.register(NAME, TOPOLOGY)
+NAME = "ecoli-equilibrium"
+TOPOLOGY = {"listeners": ("listeners",), "bulk": ("bulk",), "timestep": ("timestep",)}
+ecoli_core.topology_registry.register(NAME, TOPOLOGY)
 
 
 class Equilibrium(PartitionedProcess):
@@ -27,24 +29,26 @@ class Equilibrium(PartitionedProcess):
 
     molecule_names: list of molecules that are being iterated over size:94
     """
-    config_schema = {
-        "jit": {
-            "_type": "boolean",
-            "_default": False
-        },
-        "n_avogadro": "float",
-        "cell_density": "float",
-        "stoichMatrix": "list",
-        "moleculeNames": "list",
-        "seed": "integer",
-        "complex_ids": "list",
-        "reaction_ids": "list",
+
+    name = NAME
+    topology = TOPOLOGY
+    defaults = {
+        "jit": False,
+        "n_avogadro": 0.0,
+        "cell_density": 0.0,
+        "stoichMatrix": [[]],
+        "fluxesAndMoleculesToSS": lambda counts, volume, avogadro, random, jit: (
+            [],
+            [],
+        ),
+        "moleculeNames": [],
+        "seed": 0,
+        "complex_ids": [],
+        "reaction_ids": [],
     }
 
     # Constructor
-    def __init__(self, config=None, core=None):
-        super().__init__(config, core)
-
+    def initialize(self, config):
         # Simulation options
         # utilized in the fluxes and molecules function
         self.jit = self.config["jit"]
@@ -59,10 +63,7 @@ class Equilibrium(PartitionedProcess):
 
         # fluxesAndMoleculesToSS: solves ODES to get to steady state based off
         # of cell density, volumes and molecule counts
-        self.fluxesAndMoleculesToSS = lambda counts, volume, avogadro, random, jit: (
-            [],
-            [],
-        ),
+        self.fluxesAndMoleculesToSS = self.config["fluxesAndMoleculesToSS"]
 
         self.product_indices = [
             idx for idx in np.where(np.any(self.stoichMatrix > 0, axis=1))[0]
@@ -78,32 +79,44 @@ class Equilibrium(PartitionedProcess):
 
         self.complex_ids = self.config["complex_ids"]
         self.reaction_ids = self.config["reaction_ids"]
-
-    def inputs(self):
+    
+    @property
+    def listener_schemas(self):
         return {
-            "bulk": "bulk",
-            "listeners": "tree",
-            "timestep": "float",
+            "listeners": {
+                "mass": listener_schema({"cell_mass": 0}),
+                "equilibrium_listener": {
+                    **listener_schema(
+                        {
+                            "reaction_rates": (
+                                [0.0] * len(self.reaction_ids),
+                                self.reaction_ids,
+                            )
+                        }
+                    )
+                },
+            },
         }
 
-    def outputs(self):
+    def ports_schema(self):
         return {
-            "bulk": "bulk",
-            "listeners": "tree"
+            "bulk": numpy_schema("bulk"),
+            "listeners": self.listener_schemas,
+            "timestep": {"_default": self.config["time_step"]},
         }
 
-    def calculate_request(self, state):
+    def calculate_request(self, timestep, states):
         # At t=0, convert all strings to indices
         if self.molecule_idx is None:
             self.molecule_idx = bulk_name_to_idx(
-                self.moleculeNames, state["bulk"]["id"]
+                self.moleculeNames, states["bulk"]["id"]
             )
 
         # Get molecule counts
-        moleculeCounts = counts(state["bulk"], self.molecule_idx)
+        moleculeCounts = counts(states["bulk"], self.molecule_idx)
 
         # Get cell mass and volume
-        cellMass = (state["listeners"]["mass"]["cell_mass"] * units.fg).asNumber(
+        cellMass = (states["listeners"]["mass"]["cell_mass"] * units.fg).asNumber(
             units.g
         )
         cellVolume = cellMass / self.cell_density
@@ -121,9 +134,9 @@ class Equilibrium(PartitionedProcess):
         requests = {"bulk": [(self.molecule_idx, self.req.astype(int))]}
         return requests
 
-    def update(self, state, interval):
+    def evolve_state(self, timestep, states):
         # Get molecule counts
-        moleculeCounts = counts(state["bulk"], self.molecule_idx)
+        moleculeCounts = counts(states["bulk"], self.molecule_idx)
 
         # Get counts of molecules allocated to this process
         rxnFluxes = self.rxnFluxes.copy()
@@ -168,7 +181,7 @@ class Equilibrium(PartitionedProcess):
             "listeners": {
                 "equilibrium_listener": {
                     "reaction_rates": deltaMolecules[self.product_indices]
-                    / state["timestep"]
+                    / states["timestep"]
                 }
             },
         }
