@@ -1,20 +1,3 @@
-"""
-TODO: The following test installation processes have not yet been translated using the new migration paradigm:
-
-['death_threshold',
- 'ecoli-equilibrium',
- 'ecoli-metabolism',
- 'ecoli-polypeptide-elongation',
- 'ecoli-polypeptide-initiation',
- 'ecoli-rna-degradation',
- 'ecoli-tf-binding',
- 'ecoli-transcript-elongation',
- 'ecoli-transcript-initiation',
- 'exchange_data',
- 'media_update']
-
-"""
-
 # --- Core Model Processes --- #
 from ecoli.migrated.tf_unbinding import TfUnbinding
 from ecoli.migrated.tf_binding import TfBinding
@@ -29,17 +12,16 @@ from ecoli.migrated.two_component_system import TwoComponentSystem
 from ecoli.migrated.equilibrium import Equilibrium
 from ecoli.migrated.protein_degradation import ProteinDegradation
 from ecoli.migrated.metabolism_redux import MetabolismRedux
+from ecoli.migrated.metabolism import Metabolism
 from ecoli.migrated.chromosome_structure import ChromosomeStructure
 from ecoli.migrated.allocator import Allocator
 from ecoli.migrated.chemostat import Chemostat
 from ecoli.migrated.rna_interference import RnaInterference
 from ecoli.migrated.global_clock import GlobalClock
 from ecoli.migrated.bulk_timeline import BulkTimelineProcess
-# TODO: finish these
 from ecoli.migrated.chromosome_replication import ChromosomeReplication
 # from ecoli.migrated.concentrations_deriver import ConcentrationsDeriver
 # from ecoli.migrated.shape import Shape
-# from ecoli.migrated.metabolism import Metabolism  # <--TODO: do we need this or redux primarily?
 # from ecoli.migrated.metabolism_redux_classic import MetabolismReduxClassic
 
 # --- Listener Processes --- # 
@@ -77,11 +59,12 @@ from ecoli.migrated.antibiotics.murein_division import MureinDivision
 # from ecoli.migrated.antibiotics.conc_to_counts import ConcToCounts
 
 # -- Environment Processes --- #
+from ecoli.migrated.environment.exchange_data import ExchangeData
+from ecoli.migrated.environment.media_update import MediaUpdate
 # from ecoli.migrated.environment.lysis import Lysis
 # from ecoli.migrated.environment.local_field import LocalField
 # from ecoli.migrated.environment.field_timeline import FieldTimeline
-# from ecoli.migrated.environment.exchange_data import ExchangeData
-# from ecoli.migrated.environment.media_update import MediaUpdate
+
 
 # --- Stubs --- # 
 # from ecoli.migrated.stubs.exchange_stub import Exchange
@@ -89,6 +72,9 @@ from ecoli.migrated.antibiotics.murein_division import MureinDivision
 
 # TODO: add the rest here
 __all__ = [
+    'ExchangeData',
+    'MediaUpdate',
+    'Metabolism',
     'MureinDivision',
     'LysisInitiation',
     'DeathFreezeState',

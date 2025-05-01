@@ -73,7 +73,6 @@
     "swap_processes" : {},
     "profile": false,
     "processes": [
-        "death_threshold",
         "post-division-mass-listener",
 
         "bulk-timeline",
@@ -128,7 +127,6 @@
         }
     },
     "flow": {
-        "death_threshold": [["death_threshold"]],
         "post-division-mass-listener": [],
         "media_update": [["post-division-mass-listener"]],
         "exchange_data": [["media_update"]],

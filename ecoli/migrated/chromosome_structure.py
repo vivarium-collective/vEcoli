@@ -27,6 +27,7 @@ from ecoli.shared.interface import StepBase
 from ecoli.shared.registry import ecoli_core
 from ecoli.shared.utils.schemas import listener_schema, numpy_schema
 from wholecell.utils.polymerize import buildSequences
+from ecoli.processes.registries import topology_registry
 
 # Register default topology for this process, associating it with process name
 NAME = "ecoli-chromosome-structure"
@@ -60,7 +61,7 @@ TOPOLOGY = {
     "timestep": ("timestep",),
     "next_update_time": ("next_update_time", "chromosome_structure"),
 }
-ecoli_core.topology_registry.register(NAME, TOPOLOGY)
+topology_registry.register(NAME, TOPOLOGY)
 
 
 class ChromosomeStructure(StepBase):

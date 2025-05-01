@@ -15,13 +15,14 @@ from ecoli.library.schema import bulk_name_to_idx, counts
 from ecoli.migrated.partition import PartitionedProcess
 from ecoli.shared.registry import ecoli_core
 from ecoli.shared.utils.schemas import listener_schema, numpy_schema
+from ecoli.processes.registries import topology_registry
 from wholecell.utils import units
 
 
 # Register default topology for this process, associating it with process name
 NAME = "ecoli-equilibrium"
 TOPOLOGY = {"listeners": ("listeners",), "bulk": ("bulk",), "timestep": ("timestep",)}
-ecoli_core.topology_registry.register(NAME, TOPOLOGY)
+topology_registry.register(NAME, TOPOLOGY)
 
 
 class Equilibrium(PartitionedProcess):

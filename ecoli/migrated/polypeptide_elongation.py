@@ -20,23 +20,27 @@ from scipy.integrate import solve_ivp
 from unum import Unum
 
 # wcEcoli imports
+from ecoli.shared.registry import ecoli_core
 from wholecell.utils.polymerize import buildSequences, polymerize, computeMassIncrease
 from wholecell.utils.random import stochasticRound
 from wholecell.utils import units
 
 # vivarium imports
+from vivarium.core.composition import simulate_process
 from vivarium.library.dict_utils import deep_merge
 from vivarium.library.units import units as vivunits
 from vivarium.plots.simulation_output import plot_variables
 
 # vivarium-ecoli imports
 from ecoli.library.schema import (
+    listener_schema,
+    numpy_schema,
     counts,
     attrs,
-    bulk_name_to_idx
+    bulk_name_to_idx,
 )
 from ecoli.migrated.partition import PartitionedProcess
-from ecoli.shared.utils.schemas import listener_schema, numpy_schema
+from ecoli.processes.registries import topology_registry
 
 
 MICROMOLAR_UNITS = units.umol / units.L
@@ -47,19 +51,19 @@ REMOVED_FROM_CHARGING = {"L-SELENOCYSTEINE[c]"}
 
 
 # Register default topology for this process, associating it with process name
-# NAME = "ecoli-polypeptide-elongation"
-# TOPOLOGY = {
-#     "environment": ("environment",),
-#     "boundary": ("boundary",),
-#     "listeners": ("listeners",),
-#     "active_ribosome": ("unique", "active_ribosome"),
-#     "bulk": ("bulk",),
-#     "polypeptide_elongation": ("process_state", "polypeptide_elongation"),
-#     # Non-partitioned counts
-#     "bulk_total": ("bulk",),
-#     "timestep": ("timestep",),
-# }
-# topology_registry.register(NAME, TOPOLOGY)
+NAME = "ecoli-polypeptide-elongation"
+TOPOLOGY = {
+    "environment": ("environment",),
+    "boundary": ("boundary",),
+    "listeners": ("listeners",),
+    "active_ribosome": ("unique", "active_ribosome"),
+    "bulk": ("bulk",),
+    "polypeptide_elongation": ("process_state", "polypeptide_elongation"),
+    # Non-partitioned counts
+    "bulk_total": ("bulk",),
+    "timestep": ("timestep",),
+}
+topology_registry.register(NAME, TOPOLOGY)
 
 DEFAULT_AA_NAMES = [
     "L-ALPHA-ALANINE[c]",
@@ -93,6 +97,8 @@ class PolypeptideElongation(PartitionedProcess):
         proteinIds: array length n of protein names
     """
 
+    name = NAME
+    topology = TOPOLOGY
     defaults = {
         "time_step": 1,
         "max_time_step": 2.0,
@@ -168,56 +174,56 @@ class PolypeptideElongation(PartitionedProcess):
         "k_SpoT_deg": 0.23,
         "KI_SpoT": 20.0,
         "seed": 0,
-        "emit_unique": False
+        "emit_unique": False,
     }
 
-    def __init__(self, config=None):
-        super().__init__(config)
+    def __init__(self, parameters=None):
+        super().__init__(parameters)
 
-        self.max_time_step = self.config["max_time_step"]
+        self.max_time_step = self.parameters["max_time_step"]
 
         # Simulation options
-        self.aa_supply_in_charging = self.config["aa_supply_in_charging"]
-        self.adjust_timestep_for_charging = self.config[
+        self.aa_supply_in_charging = self.parameters["aa_supply_in_charging"]
+        self.adjust_timestep_for_charging = self.parameters[
             "adjust_timestep_for_charging"
         ]
-        self.mechanistic_translation_supply = self.config[
+        self.mechanistic_translation_supply = self.parameters[
             "mechanistic_translation_supply"
         ]
-        self.mechanistic_aa_transport = self.config["mechanistic_aa_transport"]
-        self.ppgpp_regulation = self.config["ppgpp_regulation"]
-        self.disable_ppgpp_elongation_inhibition = self.config[
+        self.mechanistic_aa_transport = self.parameters["mechanistic_aa_transport"]
+        self.ppgpp_regulation = self.parameters["ppgpp_regulation"]
+        self.disable_ppgpp_elongation_inhibition = self.parameters[
             "disable_ppgpp_elongation_inhibition"
         ]
-        self.variable_elongation = self.config["variable_elongation"]
+        self.variable_elongation = self.parameters["variable_elongation"]
         self.variable_polymerize = self.ppgpp_regulation or self.variable_elongation
-        translation_supply = self.config["translation_supply"]
-        trna_charging = self.config["trna_charging"]
+        translation_supply = self.parameters["translation_supply"]
+        trna_charging = self.parameters["trna_charging"]
 
         # Load parameters
-        self.n_avogadro = self.config["n_avogadro"]
-        self.proteinIds = self.config["proteinIds"]
-        self.protein_lengths = self.config["proteinLengths"]
-        self.proteinSequences = self.config["proteinSequences"]
-        self.aaWeightsIncorporated = self.config["aaWeightsIncorporated"]
-        self.endWeight = self.config["endWeight"]
+        self.n_avogadro = self.parameters["n_avogadro"]
+        self.proteinIds = self.parameters["proteinIds"]
+        self.protein_lengths = self.parameters["proteinLengths"]
+        self.proteinSequences = self.parameters["proteinSequences"]
+        self.aaWeightsIncorporated = self.parameters["aaWeightsIncorporated"]
+        self.endWeight = self.parameters["endWeight"]
         self.make_elongation_rates = (
             lambda random, rate, timestep, variable: np.array([])
         )
-        self.next_aa_pad = self.config["next_aa_pad"]
+        self.next_aa_pad = self.parameters["next_aa_pad"]
 
-        self.ribosome30S = self.config["ribosome30S"]
-        self.ribosome50S = self.config["ribosome50S"]
-        self.amino_acids = self.config["amino_acids"]
-        self.aa_exchange_names = self.config["aa_exchange_names"]
+        self.ribosome30S = self.parameters["ribosome30S"]
+        self.ribosome50S = self.parameters["ribosome50S"]
+        self.amino_acids = self.parameters["amino_acids"]
+        self.aa_exchange_names = self.parameters["aa_exchange_names"]
         self.aa_environment_names = [aa[:-3] for aa in self.aa_exchange_names]
-        self.aa_enzymes = self.config["aa_enzymes"]
+        self.aa_enzymes = self.parameters["aa_enzymes"]
 
-        self.ribosomeElongationRate = self.config["ribosomeElongationRate"]
+        self.ribosomeElongationRate = self.parameters["ribosomeElongationRate"]
 
         # Amino acid supply calculations
-        self.translation_aa_supply = self.config["translation_aa_supply"]
-        self.import_threshold = self.config["import_threshold"]
+        self.translation_aa_supply = self.parameters["translation_aa_supply"]
+        self.import_threshold = self.parameters["import_threshold"]
 
         # Used for figure in publication
         self.trpAIndex = np.where(self.proteinIds == "TRYPSYN-APROTEIN[c]")[0][0]
@@ -225,21 +231,21 @@ class PolypeptideElongation(PartitionedProcess):
         self.elngRateFactor = 1.0
 
         # Data structures for charging
-        self.aa_from_trna = self.config["aa_from_trna"]
+        self.aa_from_trna = self.parameters["aa_from_trna"]
 
         # Set modeling method
         # TODO: Test that these models all work properly
         if trna_charging:
-            self.elongation_model = SteadyStateElongationModel(self.config, self)
+            self.elongation_model = SteadyStateElongationModel(self.parameters, self)
         elif translation_supply:
             self.elongation_model = TranslationSupplyElongationModel(
-                self.config, self
+                self.parameters, self
             )
         else:
-            self.elongation_model = BaseElongationModel(self.config, self)
+            self.elongation_model = BaseElongationModel(self.parameters, self)
 
         # Growth associated maintenance energy requirements for elongations
-        self.gtpPerElongation = self.config["gtpPerElongation"]
+        self.gtpPerElongation = self.parameters["gtpPerElongation"]
         # Need to account for ATP hydrolysis for charging that has been
         # removed from measured GAM (ATP -> AMP is 2 hydrolysis reactions)
         # if charging reactions are not explicitly modeled
@@ -247,39 +253,39 @@ class PolypeptideElongation(PartitionedProcess):
             self.gtpPerElongation += 2
 
         # basic molecule names
-        self.proton = self.config["proton"]
-        self.water = self.config["water"]
-        self.rela = self.config["rela"]
-        self.spot = self.config["spot"]
-        self.ppgpp = self.config["ppgpp"]
-        self.aa_importers = self.config["aa_importers"]
-        self.aa_exporters = self.config["aa_exporters"]
+        self.proton = self.parameters["proton"]
+        self.water = self.parameters["water"]
+        self.rela = self.parameters["rela"]
+        self.spot = self.parameters["spot"]
+        self.ppgpp = self.parameters["ppgpp"]
+        self.aa_importers = self.parameters["aa_importers"]
+        self.aa_exporters = self.parameters["aa_exporters"]
         # Numpy index for bulk molecule
         self.proton_idx = None
 
         # Names of molecules associated with tRNA charging
-        self.ppgpp_reaction_metabolites = self.config["ppgpp_reaction_metabolites"]
-        self.uncharged_trna_names = self.config["uncharged_trna_names"]
-        self.charged_trna_names = self.config["charged_trna_names"]
-        self.charging_molecule_names = self.config["charging_molecule_names"]
-        self.synthetase_names = self.config["synthetase_names"]
+        self.ppgpp_reaction_metabolites = self.parameters["ppgpp_reaction_metabolites"]
+        self.uncharged_trna_names = self.parameters["uncharged_trna_names"]
+        self.charged_trna_names = self.parameters["charged_trna_names"]
+        self.charging_molecule_names = self.parameters["charging_molecule_names"]
+        self.synthetase_names = self.parameters["synthetase_names"]
 
-        self.seed = self.config["seed"]
+        self.seed = self.parameters["seed"]
         self.random_state = np.random.RandomState(seed=self.seed)
 
         self.zero_aa_exchange_rates = (
             MICROMOLAR_UNITS / units.s * np.zeros(len(self.amino_acids))
         )
 
-    def inputs(self):
+    def ports_schema(self):
         return {
             "environment": {
-                "media_id": "string",
-                "exchange": "tree[integer]",  # TODO: is this correct for the original?: {"*": {"_default": 0}},
+                "media_id": {"_default": "", "_updater": "set"},
+                "exchange": {"*": {"_default": 0}},
             },
             "boundary": {
                 "external": {
-                    aa: "integer" for aa in sorted(self.aa_environment_names)
+                    aa: {"_default": 0} for aa in sorted(self.aa_environment_names)
                 }
             },
             "listeners": {
@@ -405,7 +411,9 @@ class PolypeptideElongation(PartitionedProcess):
             },
             "bulk": numpy_schema("bulk"),
             "bulk_total": numpy_schema("bulk"),
-            "active_ribosome": numpy_schema("active_ribosome"),
+            "active_ribosome": numpy_schema(
+                "active_ribosome", emit=self.parameters["emit_unique"]
+            ),
             "polypeptide_elongation": {
                 "aa_count_diff": {
                     "_default": {},
@@ -426,168 +434,10 @@ class PolypeptideElongation(PartitionedProcess):
                     "_divider": "zero",
                 },
             },
-            "timestep": self.timestep_schema,
+            "timestep": {"_default": self.parameters["time_step"]},
         }
 
-    def outputs(self):
-        return {
-            "environment": {
-                "media_id": "string",
-                "exchange": "tree[integer]",  # TODO: is this correct for the original?: {"*": {"_default": 0}},
-            },
-            "boundary": {
-                "external": {
-                    aa: "integer" for aa in sorted(self.aa_environment_names)
-                }
-            },
-            "listeners": {
-                "mass": listener_schema({"cell_mass": 0.0, "dry_mass": 0.0}),
-                "growth_limits": listener_schema(
-                    {
-                        "fraction_trna_charged": (
-                            [0.0] * len(self.uncharged_trna_names),
-                            self.uncharged_trna_names,
-                        ),
-                        "aa_allocated": ([0] * len(self.amino_acids), self.amino_acids),
-                        "aa_pool_size": ([0] * len(self.amino_acids), self.amino_acids),
-                        "aa_request_size": (
-                            [0.0] * len(self.amino_acids),
-                            self.amino_acids,
-                        ),
-                        "active_ribosome_allocated": 0,
-                        "net_charged": (
-                            [0] * len(self.uncharged_trna_names),
-                            self.uncharged_trna_names,
-                        ),
-                        "aas_used": ([0] * len(self.amino_acids), self.amino_acids),
-                        "aa_count_diff": (
-                            [0.0] * len(self.amino_acids),
-                            self.amino_acids,
-                        ),
-                        # Below only if trna_charging enbaled
-                        "original_aa_supply": (
-                            [0.0] * len(self.amino_acids),
-                            self.amino_acids,
-                        ),
-                        "aa_in_media": (
-                            [False] * len(self.amino_acids),
-                            self.amino_acids,
-                        ),
-                        "synthetase_conc": (
-                            [0.0] * len(self.amino_acids),
-                            self.amino_acids,
-                        ),
-                        "uncharged_trna_conc": (
-                            [0.0] * len(self.amino_acids),
-                            self.amino_acids,
-                        ),
-                        "charged_trna_conc": (
-                            [0.0] * len(self.amino_acids),
-                            self.amino_acids,
-                        ),
-                        "aa_conc": ([0.0] * len(self.amino_acids), self.amino_acids),
-                        "ribosome_conc": 0.0,
-                        "fraction_aa_to_elongate": (
-                            [0.0] * len(self.amino_acids),
-                            self.amino_acids,
-                        ),
-                        "aa_supply": ([0.0] * len(self.amino_acids), self.amino_acids),
-                        "aa_synthesis": (
-                            [0.0] * len(self.amino_acids),
-                            self.amino_acids,
-                        ),
-                        "aa_import": ([0.0] * len(self.amino_acids), self.amino_acids),
-                        "aa_export": ([0.0] * len(self.amino_acids), self.amino_acids),
-                        "aa_importers": (
-                            [0] * len(self.aa_importers),
-                            self.aa_importers,
-                        ),
-                        "aa_exporters": (
-                            [0] * len(self.aa_exporters),
-                            self.aa_exporters,
-                        ),
-                        "aa_supply_enzymes_fwd": (
-                            [0.0] * len(self.amino_acids),
-                            self.amino_acids,
-                        ),
-                        "aa_supply_enzymes_rev": (
-                            [0.0] * len(self.amino_acids),
-                            self.amino_acids,
-                        ),
-                        "aa_supply_aa_conc": (
-                            [0.0] * len(self.amino_acids),
-                            self.amino_acids,
-                        ),
-                        "aa_supply_fraction_fwd": (
-                            [0.0] * len(self.amino_acids),
-                            self.amino_acids,
-                        ),
-                        "aa_supply_fraction_rev": (
-                            [0.0] * len(self.amino_acids),
-                            self.amino_acids,
-                        ),
-                        "ppgpp_conc": 0.0,
-                        "rela_conc": 0.0,
-                        "spot_conc": 0.0,
-                        "rela_syn": ([0.0] * len(self.amino_acids), self.amino_acids),
-                        "spot_syn": 0.0,
-                        "spot_deg": 0.0,
-                        "spot_deg_inhibited": (
-                            [0.0] * len(self.amino_acids),
-                            self.amino_acids,
-                        ),
-                        "trna_charged": ([0] * len(self.amino_acids), self.amino_acids),
-                    }
-                ),
-                "ribosome_data": listener_schema(
-                    {
-                        "translation_supply": (
-                            [0.0] * len(self.amino_acids),
-                            self.amino_acids,
-                        ),
-                        "effective_elongation_rate": 0.0,
-                        "aa_count_in_sequence": (
-                            [0] * len(self.amino_acids),
-                            self.amino_acids,
-                        ),
-                        "aa_counts": ([0.0] * len(self.amino_acids), self.amino_acids),
-                        "actual_elongations": 0,
-                        "actual_elongation_hist": [0] * 22,
-                        "elongations_non_terminating_hist": [0] * 22,
-                        "did_terminate": 0,
-                        "termination_loss": 0,
-                        "num_trpA_terminated": 0,
-                        "process_elongation_rate": 0.0,
-                    }
-                ),
-            },
-            "bulk": numpy_schema("bulk"),
-            "bulk_total": numpy_schema("bulk"),
-            "active_ribosome": numpy_schema("active_ribosome"),
-            "polypeptide_elongation": {
-                "aa_count_diff": {
-                    "_default": {},
-                    "_emit": True,
-                    "_updater": "set",
-                    "_divider": "empty_dict",
-                },
-                "gtp_to_hydrolyze": {
-                    "_default": 0.0,
-                    "_emit": True,
-                    "_updater": "set",
-                    "_divider": "zero",
-                },
-                "aa_exchange_rates": {
-                    "_default": [0.0],
-                    "_emit": True,
-                    "_updater": "set",
-                    "_divider": "zero",
-                },
-            },
-            "timestep": self.timestep_schema,
-        }
-
-    def calculate_request(self, state):
+    def calculate_request(self, timestep, states):
         """
         Set ribosome elongation rate based on simulation medium environment and elongation rate factor
         which is used to create single-cell variability in growth rate
@@ -598,7 +448,7 @@ class PolypeptideElongation(PartitionedProcess):
         """
 
         if self.proton_idx is None:
-            bulk_ids = state["bulk"]["id"]
+            bulk_ids = states["bulk"]["id"]
             self.proton_idx = bulk_name_to_idx(self.proton, bulk_ids)
             self.water_idx = bulk_name_to_idx(self.water, bulk_ids)
             self.rela_idx = bulk_name_to_idx(self.rela, bulk_ids)
@@ -624,10 +474,10 @@ class PolypeptideElongation(PartitionedProcess):
             self.aa_exporter_idx = bulk_name_to_idx(self.aa_exporters, bulk_ids)
 
         # MODEL SPECIFIC: get ribosome elongation rate
-        self.ribosomeElongationRate = self.elongation_model.elongation_rate(state)
+        self.ribosomeElongationRate = self.elongation_model.elongation_rate(states)
 
         # If there are no active ribosomes, return immediately
-        if state["active_ribosome"]["_entryState"].sum() == 0:
+        if states["active_ribosome"]["_entryState"].sum() == 0:
             return {"listeners": {"ribosome_data": {}, "growth_limits": {}}}
 
         # Build sequences to request appropriate amount of amino acids to
@@ -635,12 +485,12 @@ class PolypeptideElongation(PartitionedProcess):
         (
             proteinIndexes,
             peptideLengths,
-        ) = attrs(state["active_ribosome"], ["protein_index", "peptide_length"])
+        ) = attrs(states["active_ribosome"], ["protein_index", "peptide_length"])
 
         self.elongation_rates = self.make_elongation_rates(
             self.random_state,
             self.ribosomeElongationRate,
-            state["timestep"],
+            states["timestep"],
             self.variable_elongation,
         )
 
@@ -652,19 +502,19 @@ class PolypeptideElongation(PartitionedProcess):
         aasInSequences = np.bincount(sequences[sequenceHasAA], minlength=21)
 
         # Calculate AA supply for expected doubling of protein
-        dryMass = state["listeners"]["mass"]["dry_mass"] * units.fg
-        current_media_id = state["environment"]["media_id"]
+        dryMass = states["listeners"]["mass"]["dry_mass"] * units.fg
+        current_media_id = states["environment"]["media_id"]
         translation_supply_rate = (
             self.translation_aa_supply[current_media_id] * self.elngRateFactor
         )
         mol_aas_supplied = (
-            translation_supply_rate * dryMass * state["timestep"] * units.s
+            translation_supply_rate * dryMass * states["timestep"] * units.s
         )
         self.aa_supply = units.strip_empty_units(mol_aas_supplied * self.n_avogadro)
 
         # MODEL SPECIFIC: Calculate AA request
         fraction_charged, aa_counts_for_translation, requests = (
-            self.elongation_model.request(state, aasInSequences)
+            self.elongation_model.request(states, aasInSequences)
         )
 
         # Write to listeners
@@ -678,13 +528,13 @@ class PolypeptideElongation(PartitionedProcess):
             fraction_charged, self.aa_from_trna
         )
         growth_limits_listener["aa_pool_size"] = counts(
-            state["bulk_total"], self.amino_acid_idx
+            states["bulk_total"], self.amino_acid_idx
         )
         growth_limits_listener["aa_request_size"] = aa_counts_for_translation
 
         return requests
 
-    def update(self, state, interval):
+    def evolve_state(self, timestep, states):
         """
         Set ribosome elongation rate based on simulation medium environment and elongation rate factor
         which is used to create single-cell variability in growth rate
@@ -707,12 +557,12 @@ class PolypeptideElongation(PartitionedProcess):
         update["polypeptide_elongation"]["aa_count_diff"] = {}
 
         # Get number of active ribosomes
-        n_active_ribosomes = state["active_ribosome"]["_entryState"].sum()
+        n_active_ribosomes = states["active_ribosome"]["_entryState"].sum()
         update["listeners"]["growth_limits"]["active_ribosome_allocated"] = (
             n_active_ribosomes
         )
         update["listeners"]["growth_limits"]["aa_allocated"] = counts(
-            state["bulk"], self.amino_acid_idx
+            states["bulk"], self.amino_acid_idx
         )
 
         # If there are no active ribosomes, return immediately
@@ -721,11 +571,11 @@ class PolypeptideElongation(PartitionedProcess):
 
         # Polypeptide elongation requires counts to be updated in real-time
         # so make a writeable copy of bulk counts to do so
-        state["bulk"] = counts(state["bulk"], range(len(state["bulk"])))
+        states["bulk"] = counts(states["bulk"], range(len(states["bulk"])))
 
         # Build amino acids sequences for each ribosome to polymerize
         protein_indexes, peptide_lengths, positions_on_mRNA = attrs(
-            state["active_ribosome"],
+            states["active_ribosome"],
             ["protein_index", "peptide_length", "pos_on_mRNA"],
         )
 
@@ -742,8 +592,8 @@ class PolypeptideElongation(PartitionedProcess):
 
         # Calculate elongation resource capacity
         aaCountInSequence = np.bincount(sequences[(sequences != polymerize.PAD_VALUE)])
-        total_aa_counts = counts(state["bulk"], self.amino_acid_idx)
-        charged_trna_counts = counts(state["bulk"], self.charged_trna_idx)
+        total_aa_counts = counts(states["bulk"], self.amino_acid_idx)
+        charged_trna_counts = counts(states["bulk"], self.charged_trna_idx)
 
         # MODEL SPECIFIC: Get amino acid counts
         aa_counts_for_translation = self.elongation_model.final_amino_acids(
@@ -800,7 +650,7 @@ class PolypeptideElongation(PartitionedProcess):
             protein_indexes[didTerminate], minlength=self.proteinSequences.shape[0]
         )
 
-        (protein_mass,) = attrs(state["active_ribosome"], ["massDiff_protein"])
+        (protein_mass,) = attrs(states["active_ribosome"], ["massDiff_protein"])
         update["active_ribosome"].update(
             {
                 "delete": np.where(didTerminate)[0],
@@ -813,19 +663,19 @@ class PolypeptideElongation(PartitionedProcess):
         )
 
         update["bulk"].append((self.monomer_idx, terminatedProteins))
-        state["bulk"][self.monomer_idx] += terminatedProteins
+        states["bulk"][self.monomer_idx] += terminatedProteins
 
         nTerminated = didTerminate.sum()
         nInitialized = didInitialize.sum()
 
         update["bulk"].append((self.ribosome30S_idx, nTerminated))
         update["bulk"].append((self.ribosome50S_idx, nTerminated))
-        state["bulk"][self.ribosome30S_idx] += nTerminated
-        state["bulk"][self.ribosome50S_idx] += nTerminated
+        states["bulk"][self.ribosome30S_idx] += nTerminated
+        states["bulk"][self.ribosome50S_idx] += nTerminated
 
         # MODEL SPECIFIC: evolve
         net_charged, aa_count_diff, evolve_update = self.elongation_model.evolve(
-            state,
+            states,
             total_aa_counts,
             aas_used,
             next_amino_acid_count,
@@ -870,7 +720,7 @@ class PolypeptideElongation(PartitionedProcess):
             self.trpAIndex
         ]
         ribosome_data_listener["process_elongation_rate"] = (
-            self.ribosomeElongationRate / state["timestep"]
+            self.ribosomeElongationRate / states["timestep"]
         )
 
         return update
@@ -975,7 +825,7 @@ class TranslationSupplyElongationModel(BaseElongationModel):
 
 class SteadyStateElongationModel(TranslationSupplyElongationModel):
     """
-    Steady State Charging Model: Requests amino acids based on the
+    Steady states Charging Model: Requests amino acids based on the
     Michaelis-Menten competitive inhibition model.
     """
 
@@ -1164,7 +1014,7 @@ class SteadyStateElongationModel(TranslationSupplyElongationModel):
             aa_in_media,
         )
 
-        # Calculate steady state tRNA levels and resulting elongation rate
+        # Calculate steady states tRNA levels and resulting elongation rate
         self.charging_params["max_elong_rate"] = self.elongation_rate(states)
         (
             fraction_charged,
@@ -1185,7 +1035,7 @@ class SteadyStateElongationModel(TranslationSupplyElongationModel):
             time_limit=states["timestep"],
         )
 
-        # Use the supply calculated from each sub timestep while solving the charging steady state
+        # Use the supply calculated from each sub timestep while solving the charging steady states
         if self.process.aa_supply_in_charging:
             conversion = (
                 1 / self.counts_to_molar.asNumber(MICROMOLAR_UNITS) / states["timestep"]
@@ -1639,7 +1489,7 @@ def ppgpp_metabolite_changes(
         limits: counts of molecules that are available to prevent
             negative total counts as a result of delta_metabolites.
             If None, no limits are placed on molecule changes.
-        random_state: random state for the process
+        random_state: random states for the process
     Returns:
         7-element tuple containing
 
@@ -1805,7 +1655,7 @@ def calculate_trna_charging(
     use_disabled_aas: bool = False,
 ) -> tuple[Unum, float, Unum, Unum, Unum]:
     """
-    Calculates the steady state value of tRNA based on charging and
+    Calculates the steady states value of tRNA based on charging and
     incorporation through polypeptide elongation. The fraction of
     charged/uncharged is also used to determine how quickly the
     ribosome is elongating. All concentrations are given in units of
@@ -1826,7 +1676,7 @@ def calculate_trna_charging(
         supply: function to get the rate of amino acid supply (synthesis
             and import) based on amino acid concentrations. If None, amino
             acid concentrations remain constant during charging
-        time_limit: time limit to reach steady state
+        time_limit: time limit to reach steady states
         limit_v_rib: if True, v_rib is limited to the number of amino acids
             that are available
         use_disabled_aas: if False, amino acids in
@@ -2088,13 +1938,13 @@ def get_charging_supply_function(
         mechanistic_supply: True if using mechanistic_translation_supply option
         mechanistic_aa_transport: True if using mechanistic_aa_transport option
         amino_acid_synthesis: function to provide rates of synthesis for amino
-            acids based on the internal state
+            acids based on the internal states
         amino_acid_import: function to provide import rates for amino
-            acids based on the internal and external state
+            acids based on the internal and external states
         amino_acid_export: function to provide export rates for amino
-            acids based on the internal state
+            acids based on the internal states
         aa_supply_scaling: function to scale the amino acid supply based
-            on the internal state
+            on the internal states
         counts_to_molar: conversion factor for counts to molar
             (:py:data:`~ecoli.processes.polypeptide_elongation.MICROMOLAR_UNITS`)
         aa_supply: rate of amino acid supply expected
@@ -2106,7 +1956,7 @@ def get_charging_supply_function(
         aa_in_media: True for each amino acid that is present in the media
     Returns:
         Function that provides the amount of supply (synthesis, import, export)
-        for each amino acid based on the internal state of the cell
+        for each amino acid based on the internal states of the cell
     """
 
     # Create functions that are only dependent on amino acid concentrations for more stable

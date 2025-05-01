@@ -23,12 +23,12 @@ import warnings
 from bigraph_schema import deep_merge
 from process_bigraph import Step, Process
 
-from ecoli.shared.interface import StepBase, ProcessBase, collapse_defaults
+from ecoli.shared.interface import MigrateProcess, collapse_defaults
 from ecoli.shared.registry import ecoli_core
 from ecoli.shared.utils.schemas import get_defaults_schema, listener_schema, numpy_schema
 
 
-class PartitionedProcess(ProcessBase):
+class PartitionedProcess(MigrateProcess):
     """Partitioned Process Base Class
 
     This class uses its ancestor to parse config schema and overrides inputs and outputs to auto parse.
@@ -38,8 +38,8 @@ class PartitionedProcess(ProcessBase):
 
     @property listener_schemas()
     def ports_schema()
-    def calculate_request(state, interval)
-    def evolve_state(state, interval)
+    def calculate_request(timestep, states)
+    def evolve_state(timestep, states)
     """
 
     def initialize(self, config):
@@ -51,7 +51,7 @@ class PartitionedProcess(ProcessBase):
         # register topology
         assert self.name
         assert self.topology
-        ecoli_core.topology_registry.register(self.name, self.topology)
+        topology_registry.register(self.name, self.topology)
         ports = {
             "bulk": numpy_schema("bulk"),
             "listeners": listener_schema({})
@@ -60,45 +60,30 @@ class PartitionedProcess(ProcessBase):
         self.output_ports = ports
         
     @abc.abstractmethod
-    def calculate_request(self, state, interval):
+    def calculate_request(self, timestep, states):
         return {}
 
     @abc.abstractmethod
-    def evolve_state(self, state, interval):
+    def evolve_state(self, timestep, states):
         return {}
     
-    @property
-    @abc.abstractmethod
-    def listener_schemas(self):
-        pass
-    
-    def inputs(self):
-        return {
-            "bulk": "bulk",
-            "listeners": 
-            "timestep": "float",
-            "environment": {
-                "media_id": "string",
-            }
-        }
-    
-    def update(self, state, interval):
+    def next_update(self, timestep, states):
         """
         """
         if self.request_only:
-            return self.calculate_request(state, interval)
+            return self.calculate_request(timestep, states)
         if self.evolve_only:
-            return self.evolve_state(state, interval)
+            return self.evolve_state(timestep, states)
 
-        requests = self.calculate_request(state, interval)
+        requests = self.calculate_request(timestep, states)
         bulk_requests = requests.pop("bulk", [])
         if bulk_requests:
-            bulk_copy = state["bulk"].copy()
+            bulk_copy = states["bulk"].copy()
             for bulk_idx, request in bulk_requests:
                 bulk_copy[bulk_idx] = request
-            state["bulk"] = bulk_copy
-        state = deep_merge(state, requests)
-        update = self.evolve_state(state, interval)
+            states["bulk"] = bulk_copy
+        states = deep_merge(states, requests)
+        update = self.evolve_state(timestep, states)
         if "listeners" in requests:
             update["listeners"] = deep_merge(update["listeners"], requests["listeners"])
         return update
@@ -136,7 +121,7 @@ class Requester(Step):
 
         Vivarium cycles through all :py:class:~vivarium.core.process.Step`
         instances every time a :py:class:`~vivarium.core.process.Process`
-        instance updates the simulation state. When that happens, Vivarium
+        instance updates the simulation states. When that happens, Vivarium
         will only call the :py:meth:`~.Requester.next_update` method of this
         Requester if ``update_condition`` returns True.
 
@@ -160,7 +145,7 @@ class Requester(Step):
         return False
     
     def initial_state(self):
-        state = {
+        states = {
             "process": (),
             "next_update_time": self.config["timestep"],
             "request": {
@@ -168,11 +153,11 @@ class Requester(Step):
             }
         }
         if self.current_process:
-            state.update(self.current_process.initial_state())
-        return state
+            states.update(self.current_process.initial_state())
+        return states
     
     def inputs(self):
-        """Requester inputs needs to match the state passed into PartitionedProcess.calculate_request plus process timestep and next_update_time"""
+        """Requester inputs needs to match the states passed into PartitionedProcess.calculate_request plus process timestep and next_update_time"""
         schema = {
             "process": "tuple[process]",
             "next_update_time": "float",
@@ -192,12 +177,12 @@ class Requester(Step):
             schema.update(self.current_process.outputs())
         return schema
 
-    def update(self, state):
-        process = state["process"][0]
-        request = process.calculate_request(state, self.config["time_step"])
+    def update(self, states):
+        process = states["process"][0]
+        request = process.calculate_request(states, self.config["time_step"])
         process.request_set = True
 
-        for port in list(state["request"].keys()):
+        for port in list(states["request"].keys()):
             if port not in self.cached_bulk_ports:
                 self.cached_bulk_ports.append(port)
 
@@ -276,24 +261,24 @@ class Evolver(Step):
         return schema
         
     def initial_state(self):
-        state = {
+        states = {
             "allocate": {
                 "bulk": []
             },
             "process": tuple(),
         }
         if self.current_process:
-            state.update(self.current_process.initial_state())
-        return state
+            states.update(self.current_process.initial_state())
+        return states
     
-    def update(self, state, interval):
+    def update(self, timestep, states):
         try:
-            allocations = state.pop("allocate")
+            allocations = states.pop("allocate")
         except KeyError:
             raise KeyError("No allocations could be found")
         
-        state = deep_merge(state, allocations)
-        process = state["process"][0]
+        states = deep_merge(states, allocations)
+        process = states["process"][0]
 
         # If the Requester has not run yet, skip the Evolver's update to
         # let the Requester run in the next time step. This problem
@@ -307,8 +292,8 @@ class Evolver(Step):
         # crash, so having a slightly off timestep is preferable.
         if not process.request_set:
             return {}
-        update = process.evolve_state(state, interval)
+        update = process.evolve_state(timestep, states)
         update["process"] = (process,)
-        update["next_update_time"] = state["global_time"] + state["timestep"]
+        update["next_update_time"] = states["global_time"] + states["timestep"]
 
         return update

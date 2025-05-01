@@ -1,5 +1,4 @@
 """
-TODO: This module employs yet another style of parsing types for config_schema: 'baked-in' config schema parsing in super init...will this work best?
 ======================
 MIGRATED: Polypeptide Initiation
 ======================
@@ -14,20 +13,24 @@ efficiency, and the counts of each type of transcript.
 
 import numpy as np
 
-from wholecell.utils import units
-from wholecell.utils.fitting import normalize
-
+from vivarium.core.composition import simulate_process
 from ecoli.library.schema import (
+    numpy_schema,
     attrs,
     counts,
     bulk_name_to_idx,
+    listener_schema,
 )
-from ecoli.migrated.partition import PartitionedProcess
-from ecoli.shared.utils.schemas import numpy_schema, listener_schema
 
+from wholecell.utils import units
+from wholecell.utils.fitting import normalize
+
+from ecoli.processes.registries import topology_registry
+from ecoli.shared.registry import ecoli_core
+from ecoli.migrated.partition import PartitionedProcess
 
 # Register default topology for this process, associating it with process name
-# NAME = "ecoli-polypeptide-initiation"
+NAME = "ecoli-polypeptide-initiation"
 TOPOLOGY = {
     "environment": ("environment",),
     "listeners": ("listeners",),
@@ -36,12 +39,13 @@ TOPOLOGY = {
     "bulk": ("bulk",),
     "timestep": ("timestep",),
 }
-# topology_registry.register(NAME, TOPOLOGY)
-
+topology_registry.register(NAME, TOPOLOGY)
 
 class PolypeptideInitiation(PartitionedProcess):
     """Polypeptide Initiation PartitionedProcess"""
 
+    name = NAME
+    topology = TOPOLOGY
     defaults = {
         "protein_lengths": [],
         "translation_efficiencies": [],
@@ -64,41 +68,41 @@ class PolypeptideInitiation(PartitionedProcess):
         "time_step": 1,
     }
 
-    def __init__(self, config=None):
-        super().__init__(config)
+    def __init__(self, parameters=None):
+        super().__init__(parameters)
 
         # Load parameters
-        self.protein_lengths = self.config["protein_lengths"]
-        self.translation_efficiencies = self.config["translation_efficiencies"]
-        self.active_ribosome_fraction = self.config["active_ribosome_fraction"]
-        self.ribosome_elongation_rates_dict = self.config["elongation_rates"]
-        self.variable_elongation = self.config["variable_elongation"]
+        self.protein_lengths = self.parameters["protein_lengths"]
+        self.translation_efficiencies = self.parameters["translation_efficiencies"]
+        self.active_ribosome_fraction = self.parameters["active_ribosome_fraction"]
+        self.ribosome_elongation_rates_dict = self.parameters["elongation_rates"]
+        self.variable_elongation = self.parameters["variable_elongation"]
         self.make_elongation_rates = lambda x: []
 
-        self.rna_id_to_cistron_indexes = self.config["rna_id_to_cistron_indexes"]
-        self.cistron_start_end_pos_in_tu = self.config[
+        self.rna_id_to_cistron_indexes = self.parameters["rna_id_to_cistron_indexes"]
+        self.cistron_start_end_pos_in_tu = self.parameters[
             "cistron_start_end_pos_in_tu"
         ]
-        self.tu_ids = self.config["tu_ids"]
+        self.tu_ids = self.parameters["tu_ids"]
         self.n_TUs = len(self.tu_ids)
-        self.active_ribosome_footprint_size = self.config[
+        self.active_ribosome_footprint_size = self.parameters[
             "active_ribosome_footprint_size"
         ]
 
         # Get mapping from cistrons to protein monomers and TUs
-        self.cistron_to_monomer_mapping = self.config["cistron_to_monomer_mapping"]
-        self.cistron_tu_mapping_matrix = self.config["cistron_tu_mapping_matrix"]
-        self.monomer_index_to_cistron_index = self.config[
+        self.cistron_to_monomer_mapping = self.parameters["cistron_to_monomer_mapping"]
+        self.cistron_tu_mapping_matrix = self.parameters["cistron_tu_mapping_matrix"]
+        self.monomer_index_to_cistron_index = self.parameters[
             "monomer_index_to_cistron_index"
         ]
-        self.monomer_index_to_tu_indexes = self.config[
+        self.monomer_index_to_tu_indexes = self.parameters[
             "monomer_index_to_tu_indexes"
         ]
 
-        self.ribosome30S = self.config["ribosome30S"]
-        self.ribosome50S = self.config["ribosome50S"]
+        self.ribosome30S = self.parameters["ribosome30S"]
+        self.ribosome50S = self.parameters["ribosome50S"]
 
-        self.seed = self.config["seed"]
+        self.seed = self.parameters["seed"]
         self.random_state = np.random.RandomState(seed=self.seed)
 
         self.empty_update = {
@@ -110,16 +114,14 @@ class PolypeptideInitiation(PartitionedProcess):
             }
         }
 
-        self.monomer_ids = self.config["monomer_ids"]
+        self.monomer_ids = self.parameters["monomer_ids"]
 
         # Helper indices for Numpy indexing
         self.ribosome30S_idx = None
 
-    def inputs(self):
+    def ports_schema(self):
         return {
-            "environment": {
-                "media_id": {"_default": "", "_type": "string"}
-            },
+            "environment": {"media_id": {"_default": "", "_updater": "set"}},
             "listeners": {
                 "ribosome_data": listener_schema(
                     {
@@ -149,72 +151,34 @@ class PolypeptideInitiation(PartitionedProcess):
                     }
                 ),
             },
-            "active_ribosome": numpy_schema("active_ribosome"),
-            "RNA": numpy_schema("RNAs"),
+            "active_ribosome": numpy_schema(
+                "active_ribosome", emit=self.parameters["emit_unique"]
+            ),
+            "RNA": numpy_schema("RNAs", emit=self.parameters["emit_unique"]),
             "bulk": numpy_schema("bulk"),
-            "timestep": self.timestep_schema,
+            "timestep": {"_default": self.parameters["time_step"]},
         }
 
-    def outputs(self):
-        return {
-            "environment": {
-                "media_id": {"_default": "", "_type": "string"}
-            },
-            "listeners": {
-                "ribosome_data": listener_schema(
-                    {
-                        "did_initialize": 0,
-                        "target_prob_translation_per_transcript": (
-                            [0.0] * len(self.monomer_ids),
-                            self.monomer_ids,
-                        ),
-                        "actual_prob_translation_per_transcript": (
-                            [0.0] * len(self.monomer_ids),
-                            self.monomer_ids,
-                        ),
-                        "mRNA_is_overcrowded": (
-                            [False] * len(self.monomer_ids),
-                            self.monomer_ids,
-                        ),
-                        "ribosome_init_event_per_monomer": (
-                            [0] * len(self.monomer_ids),
-                            self.monomer_ids,
-                        ),
-                        "effective_elongation_rate": 0.0,
-                        "max_p": 0.0,
-                        "max_p_per_protein": (
-                            np.zeros(len(self.monomer_ids), np.float64),
-                            self.monomer_ids,
-                        ),
-                    }
-                ),
-            },
-            "active_ribosome": numpy_schema("active_ribosome"),
-            "RNA": numpy_schema("RNAs"),
-            "bulk": numpy_schema("bulk"),
-            "timestep": self.timestep_schema,
-        }
-
-    def calculate_request(self, state):
+    def calculate_request(self, timestep, states):
         if self.ribosome30S_idx is None:
-            bulk_ids = state["bulk"]["id"]
+            bulk_ids = states["bulk"]["id"]
             self.ribosome30S_idx = bulk_name_to_idx(self.ribosome30S, bulk_ids)
             self.ribosome50S_idx = bulk_name_to_idx(self.ribosome50S, bulk_ids)
 
-        current_media_id = state["environment"]["media_id"]
+        current_media_id = states["environment"]["media_id"]
 
         # requests = {'subunits': states['subunits']}
         requests = {
             "bulk": [
-                (self.ribosome30S_idx, counts(state["bulk"], self.ribosome30S_idx)),
-                (self.ribosome50S_idx, counts(state["bulk"], self.ribosome50S_idx)),
+                (self.ribosome30S_idx, counts(states["bulk"], self.ribosome30S_idx)),
+                (self.ribosome50S_idx, counts(states["bulk"], self.ribosome50S_idx)),
             ]
         }
 
         self.fracActiveRibosome = self.active_ribosome_fraction[current_media_id]
 
         # Read ribosome elongation rate from last timestep
-        self.ribosomeElongationRate = state["listeners"]["ribosome_data"][
+        self.ribosomeElongationRate = states["listeners"]["ribosome_data"][
             "effective_elongation_rate"
         ]
         # If the ribosome elongation rate is zero (which is always the case for
@@ -235,13 +199,13 @@ class PolypeptideInitiation(PartitionedProcess):
         self.elongation_rates = np.fmax(self.elongation_rates, 1)
         return requests
 
-    def update(self, state, interval):
+    def evolve_state(self, timestep, states):
         # Calculate number of ribosomes that could potentially be initialized
         # based on counts of free 30S and 50S subunits
         inactive_ribosome_count = np.min(
             [
-                counts(state["bulk"], self.ribosome30S_idx),
-                counts(state["bulk"], self.ribosome50S_idx),
+                counts(states["bulk"], self.ribosome30S_idx),
+                counts(states["bulk"], self.ribosome50S_idx),
             ]
         )
 
@@ -254,7 +218,7 @@ class PolypeptideInitiation(PartitionedProcess):
             is_full_transcript,
             unique_index_RNAs,
         ) = attrs(
-            state["RNA"],
+            states["RNA"],
             [
                 "TU_index",
                 "transcript_length",
@@ -306,7 +270,7 @@ class PolypeptideInitiation(PartitionedProcess):
             self.protein_lengths,
             self.elongation_rates,
             target_protein_init_prob,
-            state["timestep"],
+            states["timestep"],
         )
 
         n_ribosomes_to_activate = np.int64(activation_prob * inactive_ribosome_count)
@@ -323,7 +287,7 @@ class PolypeptideInitiation(PartitionedProcess):
             self.ribosomeElongationRate
             / self.active_ribosome_footprint_size
             * (units.s)
-            * state["timestep"]
+            * states["timestep"]
             / n_ribosomes_to_activate
         ).asNumber()
         max_p_per_protein = max_p * cistron_counts[self.cistron_to_monomer_mapping]
@@ -361,7 +325,7 @@ class PolypeptideInitiation(PartitionedProcess):
                         self.ribosomeElongationRate
                         / self.active_ribosome_footprint_size
                         * (units.s)
-                        * state["timestep"]
+                        * states["timestep"]
                         / max_init_prob
                         * associated_cistron_counts
                     ).asNumber()
@@ -373,7 +337,7 @@ class PolypeptideInitiation(PartitionedProcess):
                     self.ribosomeElongationRate
                     / self.active_ribosome_footprint_size
                     * (units.s)
-                    * state["timestep"]
+                    * states["timestep"]
                     / n_ribosomes_to_activate
                 ).asNumber()
                 max_p_per_protein = (
@@ -607,7 +571,7 @@ def test_polypeptide_initiation():
 
     settings = {"total_time": 10, "initial_state": state}
 
-    data = polypeptide_initiation.update(state, 1.0)
+    data = simulate_process(polypeptide_initiation, settings)
 
     print(data)
 
