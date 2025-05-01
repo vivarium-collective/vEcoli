@@ -252,7 +252,8 @@ def get_schema_type(value: Any) -> str:
     if isinstance(value, np.ndarray):
         shape = str(value.shape)
         _type = PORTS_MAPPER.get(str(value.dtype), 'any')
-        return SchemaType(f"array[{_type}|{shape}]").id
+        formatted_shape = str(shape).replace(",", "|")
+        return SchemaType(f"array[({formatted_shape}),{_type}]").id
     else:
         return SchemaType(PORTS_MAPPER.get(type_name, 'any')).id
 

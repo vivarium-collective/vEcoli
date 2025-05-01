@@ -34,6 +34,7 @@ os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 faulthandler.enable()
 
 from process_bigraph.processes import TOY_PROCESSES
+from process_bigraph import pp
 from bigraph_schema.units import units
 from bigraph_schema.type_functions import deserialize_array, check_list
 from bigraph_schema.type_system import required_schema_keys
@@ -69,6 +70,12 @@ from ecoli.library.updaters import (
 from ecoli.shared.registry import ecoli_core
 from ecoli.shared.dtypes import bulk_dtype
 
+
+ROOT = os.path.dirname(
+    os.path.dirname(__file__)
+)
+DEFAULT_TOPOLOGY_PATH = os.path.join(ROOT, 'data', 'model', 'single_topology.json')
+
 VERBOSE_REGISTER = eval(os.getenv("VERBOSE_REGISTER", "True"))
 PROCESS_PACKAGES = ["migrated"]  # TODO: add more here
 TYPE_MODULES = ["unum", "unit", "bulk"]  # TODO: add more here
@@ -93,14 +100,14 @@ for modname in TYPE_MODULES:
     schema_fp = os.path.join(ecoli_root, 'shared', 'types', 'definitions', f'{modname}.json')
     with open(schema_fp, 'r') as f:
         schema = json.load(f)
-        _schema = copy.deepcopy(schema)
         for key in schema:
             if key in possible_schema_keys:
                 try:
                     val = schema[key]
                     schema[key] = eval(val)
                 except:
-                    schema.pop(key, None)
+                    # schema.pop(key, None)
+                    pass
         ecoli_core.register_type(schema)
 
 # import and register processes
