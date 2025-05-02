@@ -1,4 +1,4 @@
-from vivarium.core.process import Process
+from ecoli.shared.interface import MigrateProcess as Process
 from vivarium.library.units import units
 
 
@@ -17,8 +17,8 @@ class Exchange(Process):
         "mmol_to_counts": 547467.342 * units.L / units.mmol,
     }
 
-    def __init__(self, parameters=None):
-        super().__init__(parameters)
+    def __init__(self, parameters=None, core=None):
+        super().__init__(parameters, core)
         self.uptake_rate = self.parameters["uptake_rate"]
         self.secrete_rate = self.parameters["secrete_rate"]
 

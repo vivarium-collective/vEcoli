@@ -1,0 +1,58 @@
+{
+  "inherit_from": ["spatial.json"],
+  "agent_id": "0",
+  "spatial_environment_config": {
+    "reaction_diffusion": {
+      "molecules": [
+        "GLC",
+        "EG10040-MONOMER",
+        "beta-lactam",
+        "hydrolyzed-beta-lactam"
+      ],
+      "n_bins": [10, 10],
+      "bounds": [
+        "!units[10 micrometer]",
+        "!units[10 micrometer]"
+      ],
+      "depth": "!units[1.0 micrometer]",
+      "reactions": {
+        "antibiotic_hydrolysis": {
+          "stoichiometry": {
+            "beta-lactam": -1,
+            "hydrolyzed-beta-lactam": 1
+          },
+          "catalyzed by": "EG10040-MONOMER"
+        }
+      },
+      "kinetic_parameters": {
+        "antibiotic_hydrolysis": {
+          "EG10040-MONOMER": {
+            "kcat_f": 10.0,
+            "beta-lactam": 0.01
+          }
+        }
+      }
+    }
+  },
+  "add_processes": ["lysis"],
+  "topology": {
+    "lysis": {
+      "trigger": ["burst"],
+      "internal": ["bulk"],
+      "agents": ["..","..","agents"],
+      "fields": ["..","..","fields"],
+      "location": ["boundary","location"],
+      "dimensions": ["..","..","dimensions"]
+    }
+  },
+  "process_configs": {
+    "lysis": {
+      "secreted_molecules": {
+        "EG10040-MONOMER[p]": "EG10040-MONOMER",
+        "beta-lactam[p]": "beta-lactam",
+        "hydrolyzed-beta-lactam[p]": "hydrolyzed-beta-lactam"
+      },
+      "agent_id": "0"
+    }
+  }
+}

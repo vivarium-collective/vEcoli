@@ -68,8 +68,8 @@ class PolypeptideInitiation(PartitionedProcess):
         "time_step": 1,
     }
 
-    def __init__(self, parameters=None):
-        super().__init__(parameters)
+    def __init__(self, parameters=None, core=None):
+        super().__init__(parameters, core)
 
         # Load parameters
         self.protein_lengths = self.parameters["protein_lengths"]

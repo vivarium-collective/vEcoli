@@ -1,15 +1,14 @@
 """
 =========================
-MIGRATED: Replication Data Listener
+Replication Data Listener
 =========================
 """
 
 import numpy as np
-from ecoli.library.schema import attrs
+from ecoli.library.schema import numpy_schema, listener_schema, attrs
+from ecoli.shared.interface import MigrateStep as Step
 
-from ecoli.shared.registry import ecoli_core
-from ecoli.shared.interface import ListenerBase
-from ecoli.shared.utils.schemas import get_defaults_schema, listener_schema, numpy_schema, collapse_defaults
+from ecoli.processes.registries import topology_registry
 
 
 NAME = "replication_data_listener"
@@ -21,10 +20,10 @@ TOPOLOGY = {
     "global_time": ("global_time",),
     "timestep": ("timestep",),
 }
-ecoli_core.topology.register(NAME, TOPOLOGY)
+topology_registry.register(NAME, TOPOLOGY)
 
 
-class ReplicationData(ListenerBase):
+class ReplicationData(Step):
     """
     Listener for replication data.
     """
@@ -32,18 +31,10 @@ class ReplicationData(ListenerBase):
     name = NAME
     topology = TOPOLOGY
 
-    # defaults = {"time_step": 1, "emit_unique": False}
+    defaults = {"time_step": 1, "emit_unique": False}
 
-    def initialize(self, config):
-        self.input_ports = {
-            "oriCs": numpy_schema("oriCs"),
-            "active_replisomes": numpy_schema("active_replisomes"),
-            "DnaA_boxes": numpy_schema("DnaA_boxes"),
-            "global_time": {"_default": 0.0},
-            "timestep": {"_default": config["time_step"]}
-        }
-
-        self.output_ports = {
+    def ports_schema(self):
+        return {
             "listeners": {
                 "replication_data": listener_schema(
                     {
@@ -55,18 +46,27 @@ class ReplicationData(ListenerBase):
                         "total_DnaA_boxes": [],
                     }
                 )
-            }   
+            },
+            "oriCs": numpy_schema("oriCs", emit=self.parameters["emit_unique"]),
+            "active_replisomes": numpy_schema(
+                "active_replisomes", emit=self.parameters["emit_unique"]
+            ),
+            "DnaA_boxes": numpy_schema(
+                "DnaA_boxes", emit=self.parameters["emit_unique"]
+            ),
+            "global_time": {"_default": 0.0},
+            "timestep": {"_default": self.parameters["time_step"]},
         }
-    
+
     def update_condition(self, timestep, states):
         return (states["global_time"] % states["timestep"]) == 0
 
-    def update(self, state):
+    def next_update(self, timestep, states):
         fork_coordinates, fork_domains, fork_unique_index = attrs(
-            state["active_replisomes"], ["coordinates", "domain_index", "unique_index"]
+            states["active_replisomes"], ["coordinates", "domain_index", "unique_index"]
         )
 
-        (DnaA_box_bound,) = attrs(state["DnaA_boxes"], ["DnaA_bound"])
+        (DnaA_box_bound,) = attrs(states["DnaA_boxes"], ["DnaA_bound"])
 
         update = {
             "listeners": {
@@ -74,7 +74,7 @@ class ReplicationData(ListenerBase):
                     "fork_coordinates": fork_coordinates,
                     "fork_domains": fork_domains,
                     "fork_unique_index": fork_unique_index,
-                    "number_of_oric": state["oriCs"]["_entryState"].sum(),
+                    "number_of_oric": states["oriCs"]["_entryState"].sum(),
                     "total_DnaA_boxes": len(DnaA_box_bound),
                     "free_DnaA_boxes": np.count_nonzero(np.logical_not(DnaA_box_bound)),
                 }

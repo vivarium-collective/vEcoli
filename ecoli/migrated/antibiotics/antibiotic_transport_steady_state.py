@@ -4,7 +4,7 @@ import numpy as np
 from scipy.constants import N_A
 from scipy.integrate import solve_ivp
 from scipy.optimize import root
-from vivarium.core.process import Process
+from ecoli.shared.interface import MigrateProcess as Process
 from vivarium.library.units import units
 
 from ecoli.library.parameters import param_store
@@ -414,8 +414,8 @@ class AntibioticTransportSteadyState(Process):
         "diffusion_only": False,
     }
 
-    def __init__(self, parameters=None):
-        super().__init__(parameters)
+    def __init__(self, parameters=None, core=None):
+        super().__init__(parameters, core)
         self.antibiotics = list(self.parameters["initial_reaction_parameters"].keys())
 
     def initial_state(self, config=None):

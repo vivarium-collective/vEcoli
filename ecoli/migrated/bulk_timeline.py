@@ -1,4 +1,4 @@
-# from vivarium.core.process import Process
+# from ecoli.shared.interface import MigrateProcess as Process
 from process_bigraph import Process
 
 from ecoli.library.schema import bulk_name_to_idx, numpy_schema, counts

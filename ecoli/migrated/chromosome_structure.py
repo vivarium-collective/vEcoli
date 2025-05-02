@@ -1,6 +1,6 @@
 """
 ====================
-MIGRATED: Chromosome Structure
+Chromosome Structure
 ====================
 
 - Resolve collisions between molecules and replication forks on the chromosome.
@@ -11,23 +11,22 @@ MIGRATED: Chromosome Structure
 import numpy as np
 import numpy.typing as npt
 import warnings
-
+from ecoli.shared.interface import MigrateStep as Step
 from vivarium.core.composer import Composer
 from vivarium.core.engine import Engine
 
-from ecoli.migrated.global_clock import GlobalClock
-from ecoli.migrated.unique_update import UniqueUpdate
+from ecoli.processes.global_clock import GlobalClock
+from ecoli.processes.unique_update import UniqueUpdate
+from ecoli.processes.registries import topology_registry
 from ecoli.library.schema import (
+    listener_schema,
+    numpy_schema,
     attrs,
     bulk_name_to_idx,
     get_free_indices,
 )
 from ecoli.library.json_state import get_state_from_file
-from ecoli.shared.interface import StepBase
-from ecoli.shared.registry import ecoli_core
-from ecoli.shared.utils.schemas import listener_schema, numpy_schema
 from wholecell.utils.polymerize import buildSequences
-from ecoli.processes.registries import topology_registry
 
 # Register default topology for this process, associating it with process name
 NAME = "ecoli-chromosome-structure"
@@ -64,8 +63,8 @@ TOPOLOGY = {
 topology_registry.register(NAME, TOPOLOGY)
 
 
-class ChromosomeStructure(StepBase):
-    """Chromosome Structure Step"""
+class ChromosomeStructure(Step):
+    """Chromosome Structure Process"""
 
     name = NAME
     topology = TOPOLOGY
@@ -103,95 +102,55 @@ class ChromosomeStructure(StepBase):
         "time_step": 1.0,
     }
 
-    def initialize(self, config):
-        self.rna_sequences = config["rna_sequences"]
-        self.protein_sequences = config["protein_sequences"]
-        self.n_TUs = config["n_TUs"]
-        self.n_TFs = config["n_TFs"]
-        self.rna_ids = config["rna_ids"]
-        self.n_amino_acids = config["n_amino_acids"]
-        self.n_fragment_bases = config["n_fragment_bases"]
-        replichore_lengths = config["replichore_lengths"]
+    # Constructor
+    def __init__(self, parameters=None, core=None):
+        super().__init__(parameters, core)
+        self.rna_sequences = self.parameters["rna_sequences"]
+        self.protein_sequences = self.parameters["protein_sequences"]
+        self.n_TUs = self.parameters["n_TUs"]
+        self.n_TFs = self.parameters["n_TFs"]
+        self.rna_ids = self.parameters["rna_ids"]
+        self.n_amino_acids = self.parameters["n_amino_acids"]
+        self.n_fragment_bases = self.parameters["n_fragment_bases"]
+        replichore_lengths = self.parameters["replichore_lengths"]
         self.min_coordinates = -replichore_lengths[1]
         self.max_coordinates = replichore_lengths[0]
-        self.relaxed_DNA_base_pairs_per_turn = config[
+        self.relaxed_DNA_base_pairs_per_turn = self.parameters[
             "relaxed_DNA_base_pairs_per_turn"
         ]
-        self.terC_index = config["terC_index"]
+        self.terC_index = self.parameters["terC_index"]
 
-        self.n_mature_rnas = config["n_mature_rnas"]
-        self.mature_rna_ids = config["mature_rna_ids"]
-        self.mature_rna_end_positions = config["mature_rna_end_positions"]
-        self.mature_rna_nt_counts = config["mature_rna_nt_counts"]
-        self.unprocessed_rna_index_mapping = config[
+        self.n_mature_rnas = self.parameters["n_mature_rnas"]
+        self.mature_rna_ids = self.parameters["mature_rna_ids"]
+        self.mature_rna_end_positions = self.parameters["mature_rna_end_positions"]
+        self.mature_rna_nt_counts = self.parameters["mature_rna_nt_counts"]
+        self.unprocessed_rna_index_mapping = self.parameters[
             "unprocessed_rna_index_mapping"
         ]
 
         # Load sim options
-        self.calculate_superhelical_densities = config[
+        self.calculate_superhelical_densities = self.parameters[
             "calculate_superhelical_densities"
         ]
 
         # Get placeholder value for chromosome domains without children
-        self.no_child_place_holder = config["no_child_place_holder"]
+        self.no_child_place_holder = self.parameters["no_child_place_holder"]
 
-        self.inactive_RNAPs = config["inactive_RNAPs"]
-        self.fragmentBases = config["fragmentBases"]
-        self.ppi = config["ppi"]
-        self.active_tfs = config["active_tfs"]
-        self.ribosome_30S_subunit = config["ribosome_30S_subunit"]
-        self.ribosome_50S_subunit = config["ribosome_50S_subunit"]
-        self.amino_acids = config["amino_acids"]
-        self.water = config["water"]
+        self.inactive_RNAPs = self.parameters["inactive_RNAPs"]
+        self.fragmentBases = self.parameters["fragmentBases"]
+        self.ppi = self.parameters["ppi"]
+        self.active_tfs = self.parameters["active_tfs"]
+        self.ribosome_30S_subunit = self.parameters["ribosome_30S_subunit"]
+        self.ribosome_50S_subunit = self.parameters["ribosome_50S_subunit"]
+        self.amino_acids = self.parameters["amino_acids"]
+        self.water = self.parameters["water"]
 
         self.inactive_RNAPs_idx = None
 
-        self.emit_unique = config.get("emit_unique", True)
+        self.emit_unique = self.parameters.get("emit_unique", True)
 
-        bidirectional_ports = {
-            "bulk": numpy_schema("bulk"),
-            # Unique molecules
-            "active_replisomes": numpy_schema(
-                "active_replisomes", emit=config["emit_unique"]
-            ),
-            
-            "chromosome_domains": numpy_schema(
-                "chromosome_domains", emit=config["emit_unique"]
-            ),
-            "active_RNAPs": numpy_schema(
-                "active_RNAPs", emit=config["emit_unique"]
-            ),
-            "RNAs": numpy_schema("RNAs", emit=config["emit_unique"]),
-            "active_ribosome": numpy_schema(
-                "active_ribosome", emit=config["emit_unique"]
-            ),
-            "promoters": numpy_schema("promoters", emit=config["emit_unique"]),
-            "DnaA_boxes": numpy_schema(
-                "DnaA_boxes", emit=config["emit_unique"]
-            ),
-            "genes": numpy_schema("genes", emit=config["emit_unique"])  
-        }
-
-        self.input_ports = {
-            **bidirectional_ports,
-            "global_time": {"_default": 0.0},
-            "timestep": {"_default": config["time_step"]},
-        }
-
-        self.output_ports = {
-            **bidirectional_ports,
-            "chromosomal_segments": numpy_schema(
-                "chromosomal_segments", emit=config["emit_unique"]
-            ),
-            "full_chromosomes": numpy_schema(
-                "full_chromosomes", emit=config["emit_unique"]
-            ),
-            "oriCs": numpy_schema("oriCs", emit=config["emit_unique"]),
-            "next_update_time": {
-                "_default": config["time_step"],
-                "_updater": "set",
-                "_divider": "set",
-            },
+    def ports_schema(self):
+        ports = {
             "listeners": {
                 "rnap_data": listener_schema(
                     {
@@ -209,61 +168,97 @@ class ChromosomeStructure(StepBase):
                         "empty_fork_collision_coordinates": [],
                     }
                 )
-            }
+            },
+            "bulk": numpy_schema("bulk"),
+            # Unique molecules
+            "active_replisomes": numpy_schema(
+                "active_replisomes", emit=self.parameters["emit_unique"]
+            ),
+            "oriCs": numpy_schema("oriCs", emit=self.parameters["emit_unique"]),
+            "chromosome_domains": numpy_schema(
+                "chromosome_domains", emit=self.parameters["emit_unique"]
+            ),
+            "active_RNAPs": numpy_schema(
+                "active_RNAPs", emit=self.parameters["emit_unique"]
+            ),
+            "RNAs": numpy_schema("RNAs", emit=self.parameters["emit_unique"]),
+            "active_ribosome": numpy_schema(
+                "active_ribosome", emit=self.parameters["emit_unique"]
+            ),
+            "full_chromosomes": numpy_schema(
+                "full_chromosomes", emit=self.parameters["emit_unique"]
+            ),
+            "promoters": numpy_schema("promoters", emit=self.parameters["emit_unique"]),
+            "DnaA_boxes": numpy_schema(
+                "DnaA_boxes", emit=self.parameters["emit_unique"]
+            ),
+            "chromosomal_segments": numpy_schema(
+                "chromosomal_segments", emit=self.parameters["emit_unique"]
+            ),
+            "genes": numpy_schema("genes", emit=self.parameters["emit_unique"]),
+            "global_time": {"_default": 0.0},
+            "timestep": {"_default": self.parameters["time_step"]},
+            "next_update_time": {
+                "_default": self.parameters["time_step"],
+                "_updater": "set",
+                "_divider": "set",
+            },
         }
 
-    def update_condition(self, timestep, state):
+        return ports
+
+    def update_condition(self, timestep, states):
         """
         See :py:meth:`~ecoli.processes.partition.Requester.update_condition`.
         """
-        if state["next_update_time"] <= state["global_time"]:
-            if state["next_update_time"] < state["global_time"]:
+        if states["next_update_time"] <= states["global_time"]:
+            if states["next_update_time"] < states["global_time"]:
                 warnings.warn(
                     f"{self.name} updated at t="
-                    f"{state['global_time']} instead of t="
-                    f"{state['next_update_time']}. Decrease the "
+                    f"{states['global_time']} instead of t="
+                    f"{states['next_update_time']}. Decrease the "
                     "timestep for the global clock process for more "
                     "accurate timekeeping."
                 )
             return True
         return False
 
-    def update(self, state):
+    def next_update(self, timestep, states):
         # At t=0, convert all strings to indices
         if self.inactive_RNAPs_idx is None:
             self.fragmentBasesIdx = bulk_name_to_idx(
-                self.fragmentBases, state["bulk"]["id"]
+                self.fragmentBases, states["bulk"]["id"]
             )
             self.active_tfs_idx = bulk_name_to_idx(
-                self.active_tfs, state["bulk"]["id"]
+                self.active_tfs, states["bulk"]["id"]
             )
             self.ribosome_30S_subunit_idx = bulk_name_to_idx(
-                self.ribosome_30S_subunit, state["bulk"]["id"]
+                self.ribosome_30S_subunit, states["bulk"]["id"]
             )
             self.ribosome_50S_subunit_idx = bulk_name_to_idx(
-                self.ribosome_50S_subunit, state["bulk"]["id"]
+                self.ribosome_50S_subunit, states["bulk"]["id"]
             )
             self.amino_acids_idx = bulk_name_to_idx(
-                self.amino_acids, state["bulk"]["id"]
+                self.amino_acids, states["bulk"]["id"]
             )
-            self.water_idx = bulk_name_to_idx(self.water, state["bulk"]["id"])
-            self.ppi_idx = bulk_name_to_idx(self.ppi, state["bulk"]["id"])
+            self.water_idx = bulk_name_to_idx(self.water, states["bulk"]["id"])
+            self.ppi_idx = bulk_name_to_idx(self.ppi, states["bulk"]["id"])
             self.inactive_RNAPs_idx = bulk_name_to_idx(
-                self.inactive_RNAPs, state["bulk"]["id"]
+                self.inactive_RNAPs, states["bulk"]["id"]
             )
             self.mature_rna_idx = bulk_name_to_idx(
-                self.mature_rna_ids, state["bulk"]["id"]
+                self.mature_rna_ids, states["bulk"]["id"]
             )
 
         # Read unique molecule attributes
         (replisome_domain_indexes, replisome_coordinates, replisome_unique_indexes) = (
             attrs(
-                state["active_replisomes"],
+                states["active_replisomes"],
                 ["domain_index", "coordinates", "unique_index"],
             )
         )
         (all_chromosome_domain_indexes, child_domains) = attrs(
-            state["chromosome_domains"], ["domain_index", "child_domains"]
+            states["chromosome_domains"], ["domain_index", "child_domains"]
         )
         (
             RNAP_domain_indexes,
@@ -271,20 +266,20 @@ class ChromosomeStructure(StepBase):
             RNAP_is_forward,
             RNAP_unique_indexes,
         ) = attrs(
-            state["active_RNAPs"],
+            states["active_RNAPs"],
             ["domain_index", "coordinates", "is_forward", "unique_index"],
         )
-        (origin_domain_indexes,) = attrs(state["oriCs"], ["domain_index"])
-        (mother_domain_indexes,) = attrs(state["full_chromosomes"], ["domain_index"])
+        (origin_domain_indexes,) = attrs(states["oriCs"], ["domain_index"])
+        (mother_domain_indexes,) = attrs(states["full_chromosomes"], ["domain_index"])
         (RNA_TU_indexes, transcript_lengths, RNA_RNAP_indexes, RNA_unique_indexes) = (
             attrs(
-                state["RNAs"],
+                states["RNAs"],
                 ["TU_index", "transcript_length", "RNAP_index", "unique_index"],
             )
         )
         (ribosome_protein_indexes, ribosome_peptide_lengths, ribosome_mRNA_indexes) = (
             attrs(
-                state["active_ribosome"],
+                states["active_ribosome"],
                 ["protein_index", "peptide_length", "mRNA_index"],
             )
         )
@@ -294,13 +289,13 @@ class ChromosomeStructure(StepBase):
             promoter_coordinates,
             promoter_bound_TFs,
         ) = attrs(
-            state["promoters"], ["TU_index", "domain_index", "coordinates", "bound_TF"]
+            states["promoters"], ["TU_index", "domain_index", "coordinates", "bound_TF"]
         )
         (gene_cistron_indexes, gene_domain_indexes, gene_coordinates) = attrs(
-            state["genes"], ["cistron_index", "domain_index", "coordinates"]
+            states["genes"], ["cistron_index", "domain_index", "coordinates"]
         )
         (DnaA_box_domain_indexes, DnaA_box_coordinates, DnaA_box_bound) = attrs(
-            state["DnaA_boxes"], ["domain_index", "coordinates", "DnaA_bound"]
+            states["DnaA_boxes"], ["domain_index", "coordinates", "DnaA_bound"]
         )
 
         # Build dictionary of replisome coordinates with domain indexes as keys
@@ -420,7 +415,7 @@ class ChromosomeStructure(StepBase):
                 segment_domain_indexes,
                 linking_numbers,
             ) = attrs(
-                state["chromosomal_segments"],
+                states["chromosomal_segments"],
                 [
                     "boundary_molecule_indexes",
                     "boundary_coordinates",
@@ -951,7 +946,7 @@ class ChromosomeStructure(StepBase):
             }
             update["DnaA_boxes"].update(dict_dna)
 
-        update["next_update_time"] = state["global_time"] + state["timestep"]
+        update["next_update_time"] = states["global_time"] + states["timestep"]
         return update
 
     def _compute_new_segment_attributes(
@@ -1321,56 +1316,6 @@ def get_last_known_replisome_data(
         )
 
     return replisome_coordinates, replisome_molecule_indexes
-
-
-class TestComposer(Composer):
-        unique_topology = TOPOLOGY.copy()
-        for non_unique in [
-            "bulk",
-            "listeners",
-            "global_time",
-            "timestep",
-            "next_update_time",
-        ]:
-            unique_topology.pop(non_unique)
-
-        def generate_processes(self, config):
-            return {
-                "chromosome_structure": ChromosomeStructure(
-                    {
-                        "inactive_RNAPs": "APORNAP-CPLX[c]",
-                        "ppi": "PPI[c]",
-                        "active_tfs": ["CPLX-125[c]"],
-                        "ribosome_30S_subunit": "CPLX0-3953[c]",
-                        "ribosome_50S_subunit": "CPLX0-3962[c]",
-                        "amino_acids": ["L-ALPHA-ALANINE[c]"],
-                        "water": "WATER[c]",
-                        "mature_rna_ids": ["alaT-tRNA[c]"],
-                        "fragmentBases": ["polymerized_ATP[c]"],
-                        "replichore_lengths": [100000, 100000],
-                        "calculate_superhelical_densities": True,
-                    },
-                    core=ecoli_core
-                ),
-                "unique_update": UniqueUpdate({"unique_topo": self.unique_topology}, core=ecoli_core),
-                "global_clock": GlobalClock(core=ecoli_core),
-            }
-
-        def generate_topology(self, config):
-            return {
-                "chromosome_structure": TOPOLOGY,
-                "unique_update": self.unique_topology,
-                "global_clock": {
-                    "global_time": ("global_time",),
-                    "next_update_time": ("next_update_time",),
-                },
-            }
-
-        def generate_flow(self, config):
-            return {
-                "chromosome_structure": [],
-                "unique_update": [("chromosome_structure",)],
-            }
 
 
 def test_superhelical_removal_sim():

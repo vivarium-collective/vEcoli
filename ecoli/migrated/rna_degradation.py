@@ -104,8 +104,8 @@ class RnaDegradation(PartitionedProcess):
         "emit_unique": False,
     }
 
-    def __init__(self, parameters=None):
-        super().__init__(parameters)
+    def __init__(self, parameters=None, core=None):
+        super().__init__(parameters, core)
         self.rna_ids = self.parameters["rna_ids"]
         self.mature_rna_ids = self.parameters["mature_rna_ids"]
         self.n_transcribed_rnas = len(self.rna_ids)

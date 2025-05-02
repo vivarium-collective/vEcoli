@@ -185,8 +185,8 @@ class TranscriptInitiation(PartitionedProcess):
     }
 
     # Constructor
-    def __init__(self, parameters=None):
-        super().__init__(parameters)
+    def __init__(self, parameters=None, core=None):
+        super().__init__(parameters, core)
 
         # Load parameters
         self.fracActiveRnapDict = self.parameters["fracActiveRnapDict"]

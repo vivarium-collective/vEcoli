@@ -5,11 +5,10 @@ MIGRATED: DNA Supercoiling Listener
 """
 
 import numpy as np
-from ecoli.library.schema import attrs
+from ecoli.library.schema import numpy_schema, listener_schema, attrs
+from ecoli.shared.interface import MigrateStep as Step
 
-from ecoli.shared.interface import ListenerBase
-from ecoli.shared.registry import ecoli_core
-from ecoli.shared.utils.schemas import listener_schema, numpy_schema
+from ecoli.processes.registries import topology_registry
 
 
 NAME = "dna_supercoiling_listener"
@@ -19,10 +18,10 @@ TOPOLOGY = {
     "global_time": ("global_time",),
     "timestep": ("timestep",),
 }
-ecoli_core.topology.register(NAME, TOPOLOGY)
+topology_registry.register(NAME, TOPOLOGY)
 
 
-class DnaSupercoiling(ListenerBase):
+class DnaSupercoiling(Step):
     """
     Listener for DNA supercoiling data.
     """
@@ -31,22 +30,19 @@ class DnaSupercoiling(ListenerBase):
     topology = TOPOLOGY
 
     defaults = {
-        **ListenerBase.defaults,
-        "relaxed_DNA_base_pairs_per_turn": 0
+        "relaxed_DNA_base_pairs_per_turn": 0,
+        "emit_unique": False,
+        "time_step": 1,
     }
 
-    def initialize(self, config):
-        self.relaxed_DNA_base_pairs_per_turn = config[
+    def __init__(self, parameters=None, core=None):
+        super().__init__(parameters, core)
+        self.relaxed_DNA_base_pairs_per_turn = self.parameters[
             "relaxed_DNA_base_pairs_per_turn"
         ]
 
-        # the following dics should be taken directly from ports schema
-        self.input_ports = {
-            "chromosomal_segments": numpy_schema("chromosomal_segments"),
-            "global_time": {"_default": 0.0},
-            "timestep": {"_default": 1}
-        }
-        self.output_ports = {
+    def ports_schema(self):
+        return {
             "listeners": {
                 "dna_supercoiling": listener_schema(
                     {
@@ -56,15 +52,20 @@ class DnaSupercoiling(ListenerBase):
                         "segment_superhelical_densities": [],
                     }
                 )
-            }
+            },
+            "chromosomal_segments": numpy_schema(
+                "chromosomal_segments", emit=self.parameters["emit_unique"]
+            ),
+            "global_time": {"_default": 0.0},
+            "timestep": {"_default": self.parameters["time_step"]},
         }
 
     def update_condition(self, timestep, states):
         return (states["global_time"] % states["timestep"]) == 0
 
-    def update(self, state):
+    def next_update(self, timestep, states):
         boundary_coordinates, domain_indexes, linking_numbers = attrs(
-            state["chromosomal_segments"],
+            states["chromosomal_segments"],
             ["boundary_coordinates", "domain_index", "linking_number"],
         )
 

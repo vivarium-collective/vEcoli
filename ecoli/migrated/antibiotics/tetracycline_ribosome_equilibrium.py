@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.constants import N_A
 from scipy.optimize import root_scalar
-from vivarium.core.process import Step
+from ecoli.shared.interface import MigrateStep as Step
 from vivarium.library.units import units
 
 from ecoli.library.schema import numpy_schema, bulk_name_to_idx, counts
@@ -40,8 +40,8 @@ class TetracyclineRibosomeEquilibrium(Step):
         "emit_unique": False,
     }
 
-    def __init__(self, parameters=None):
-        super().__init__(parameters)
+    def __init__(self, parameters=None, core=None):
+        super().__init__(parameters, core)
         self.random_state = np.random.RandomState(seed=self.parameters["seed"])
         # Helper indices for Numpy indexing
         self.trna_idx = None

@@ -3,7 +3,7 @@ import os
 import numpy as np
 from vivarium.core.composer import Composite
 from vivarium.core.engine import Engine
-from vivarium.core.process import Step
+from ecoli.shared.interface import MigrateStep as Step
 from vivarium.library.units import units, remove_units
 from vivarium.plots.simulation_output import plot_variables
 
@@ -94,8 +94,8 @@ class PBPBinding(Step):
         "seed": 0,
     }
 
-    def __init__(self, parameters=None):
-        super().__init__(parameters)
+    def __init__(self, parameters=None, core=None):
+        super().__init__(parameters, core)
 
         self.murein = self.parameters["murein_name"]
         self.beta_lactam = self.parameters["beta_lactam"]

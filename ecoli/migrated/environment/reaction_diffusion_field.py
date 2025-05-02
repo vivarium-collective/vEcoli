@@ -11,7 +11,7 @@ from pint import Quantity
 from scipy import constants
 from scipy.ndimage import convolve
 
-from vivarium.core.process import Process, assoc_path
+from ecoli.shared.interface import MigrateProcess as Process, assoc_path
 from vivarium.core.composition import PROCESS_OUT_DIR
 from vivarium.core.engine import Engine
 from vivarium.library.units import units
@@ -66,8 +66,8 @@ class ReactionDiffusion(Process):
         "gradient": None,
     }
 
-    def __init__(self, parameters=None):
-        super().__init__(parameters)
+    def __init__(self, parameters=None, core=None):
+        super().__init__(parameters, core)
 
         # initial state
         self.molecule_ids = self.parameters["molecules"]

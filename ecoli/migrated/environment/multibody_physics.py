@@ -16,7 +16,7 @@ import matplotlib.patches as patches
 
 # vivarium imports
 from vivarium.library.units import units, remove_units
-from vivarium.core.process import Process
+from ecoli.shared.interface import MigrateProcess as Process
 from vivarium.core.composition import (
     process_in_experiment,
     simulate_experiment,
@@ -126,8 +126,8 @@ class Multibody(Process):
         "seed": 0,
     }
 
-    def __init__(self, parameters=None):
-        super().__init__(parameters)
+    def __init__(self, parameters=None, core=None):
+        super().__init__(parameters, core)
 
         # multibody parameters
         jitter_force = self.parameters["jitter_force"]

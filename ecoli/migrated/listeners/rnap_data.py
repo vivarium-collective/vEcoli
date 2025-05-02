@@ -1,17 +1,16 @@
 """
 ====================
-MIGRATED: RNAP Data Listener
+RNAP Data Listener
 ====================
 """
 
 import numpy as np
 import warnings
+from ecoli.library.schema import numpy_schema, listener_schema, attrs
+from ecoli.shared.interface import MigrateStep as Step
 
-from ecoli.library.schema import attrs
+from ecoli.processes.registries import topology_registry
 from ecoli.processes.transcript_elongation import get_mapping_arrays
-from ecoli.shared.registry import ecoli_core
-from ecoli.shared.interface import ListenerBase
-from ecoli.shared.utils.schemas import listener_schema, numpy_schema
 
 
 NAME = "rnap_data_listener"
@@ -24,10 +23,10 @@ TOPOLOGY = {
     "timestep": ("timestep",),
     "next_update_time": ("next_update_time", NAME),
 }
-ecoli_core.topology.register(NAME, TOPOLOGY)
+topology_registry.register(NAME, TOPOLOGY)
 
 
-class RnapData(ListenerBase):
+class RnapData(Step):
     """
     Listener for RNAP data.
     """
@@ -36,19 +35,22 @@ class RnapData(ListenerBase):
     topology = TOPOLOGY
 
     defaults = {
-        **ListenerBase.defaults,
         "stable_RNA_indexes": [],
         "cistron_ids": [],
-        "cistron_tu_mapping_matrix": []
+        "cistron_tu_mapping_matrix": [],
+        "time_step": 1,
+        "emit_unique": False,
     }
 
-    def initialize(self, config):
-        self.stable_RNA_indexes = config["stable_RNA_indexes"]
-        self.cistron_ids = config["cistron_ids"]
-        self.cistron_tu_mapping_matrix = config["cistron_tu_mapping_matrix"]
+    def __init__(self, parameters=None, core=None):
+        super().__init__(parameters, core)
+        self.stable_RNA_indexes = self.parameters["stable_RNA_indexes"]
+        self.cistron_ids = self.parameters["cistron_ids"]
+        self.cistron_tu_mapping_matrix = self.parameters["cistron_tu_mapping_matrix"]
 
+    def ports_schema(self):
         n_TUs = self.cistron_tu_mapping_matrix.shape[1]
-        bidirectional_ports = {
+        ports = {
             "listeners": {
                 "rnap_data": listener_schema(
                     {
@@ -65,24 +67,22 @@ class RnapData(ListenerBase):
                     }
                 )
             },
-            "next_update_time": {
-                "_default": config["time_step"]
-            },
-        }
-
-        self.input_ports = {
-            "next_update_time": bidirectional_ports["next_update_time"],
             "active_RNAPs": numpy_schema(
-                "active_RNAPs"
+                "active_RNAPs", emit=self.parameters["emit_unique"]
             ),
-            "RNAs": numpy_schema("RNAs"),
+            "RNAs": numpy_schema("RNAs", emit=self.parameters["emit_unique"]),
             "active_ribosomes": numpy_schema(
-                "active_ribosome"
+                "active_ribosome", emit=self.parameters["emit_unique"]
             ),
             "global_time": {"_default": 0.0},
-            "timestep": {"_default": config["time_step"]},
+            "timestep": {"_default": self.parameters["time_step"]},
+            "next_update_time": {
+                "_default": self.parameters["time_step"],
+                "_updater": "set",
+                "_divider": "set",
+            },
         }
-        self.output_ports = bidirectional_ports
+        return ports
 
     def update_condition(self, timestep, states):
         """
@@ -100,14 +100,14 @@ class RnapData(ListenerBase):
             return True
         return False
 
-    def update(self, state):
+    def next_update(self, timestep, states):
         # Read coordinates of all active RNAPs
         coordinates, domain_indexes, RNAP_unique_indexes = attrs(
-            state["active_RNAPs"], ["coordinates", "domain_index", "unique_index"]
+            states["active_RNAPs"], ["coordinates", "domain_index", "unique_index"]
         )
 
         (RNA_RNAP_index, is_full_transcript, RNA_unique_indexes, TU_indexes) = attrs(
-            state["RNAs"],
+            states["RNAs"],
             ["RNAP_index", "is_full_transcript", "unique_index", "TU_index"],
         )
 
@@ -116,7 +116,7 @@ class RnapData(ListenerBase):
         partial_RNA_RNAP_indexes = RNA_RNAP_index[is_partial_transcript]
         partial_RNA_unique_indexes = RNA_unique_indexes[is_partial_transcript]
 
-        (ribosome_RNA_index,) = attrs(state["active_ribosomes"], ["mRNA_index"])
+        (ribosome_RNA_index,) = attrs(states["active_ribosomes"], ["mRNA_index"])
 
         RNA_index_counts = dict(zip(*np.unique(ribosome_RNA_index, return_counts=True)))
 
@@ -141,10 +141,10 @@ class RnapData(ListenerBase):
                     ),
                     # Calculate hypothetical RNA initiation events per cistron
                     "rna_init_event_per_cistron": self.cistron_tu_mapping_matrix.dot(
-                        state["listeners"]["rnap_data"]["rna_init_event"]
+                        states["listeners"]["rnap_data"]["rna_init_event"]
                     ),
                 }
             },
-            "next_update_time": state["global_time"] + state["timestep"],
+            "next_update_time": states["global_time"] + states["timestep"],
         }
         return update

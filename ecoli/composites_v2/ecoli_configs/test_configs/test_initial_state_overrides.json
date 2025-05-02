@@ -1,0 +1,6 @@
+{
+    "inherit_from" : ["default.json"],
+    "experiment_id" : "test_initial_state_overrides",
+
+    "initial_state_overrides": ["overrides/reduced_murein"]
+}

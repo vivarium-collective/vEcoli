@@ -4,7 +4,7 @@ from ecoli.library.json_state import get_state_from_file
 from ecoli.processes.bulk_timeline import BulkTimelineProcess
 from vivarium.core.emitter import timeseries_from_data
 from vivarium.core.engine import Engine
-from vivarium.core.process import Step
+from ecoli.shared.interface import MigrateStep as Step
 from vivarium.library.units import units
 from vivarium.plots.simulation_output import plot_variables
 
@@ -46,8 +46,8 @@ class Permeability(Step):
         "diffusing_molecules": [],
     }
 
-    def __init__(self, parameters=None):
-        super().__init__(parameters)
+    def __init__(self, parameters=None, core=None):
+        super().__init__(parameters, core)
         self.porin_ids = self.parameters["porin_ids"]
         self.diffusing_molecules = self.parameters["diffusing_molecules"]
         # Helper indices for Numpy arrays

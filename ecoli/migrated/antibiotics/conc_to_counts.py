@@ -4,7 +4,7 @@ Conc To Counts
 
 import numpy as np
 from vivarium.library.units import units
-from vivarium.core.process import Step
+from ecoli.shared.interface import MigrateStep as Step
 from vivarium.core.engine import Engine
 from vivarium.plots.simulation_output import plot_variables
 from vivarium.processes.timeline import TimelineProcess
@@ -28,8 +28,8 @@ class ConcToCounts(Step):
         },
     }
 
-    def __init__(self, parameters=None):
-        super().__init__(parameters)
+    def __init__(self, parameters=None, core=None):
+        super().__init__(parameters, core)
         self.molecule_idx = None
 
     def ports_schema(self):

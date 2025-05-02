@@ -74,8 +74,8 @@ class TfBinding(MigrateStep):
     }
 
     # Constructor
-    def __init__(self, parameters=None):
-        super().__init__(parameters)
+    def __init__(self, parameters=None, core=None):
+        super().__init__(parameters, core)
 
         # Get IDs of transcription factors
         self.tf_ids = self.parameters["tf_ids"]

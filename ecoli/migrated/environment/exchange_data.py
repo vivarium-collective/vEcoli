@@ -29,8 +29,8 @@ class ExchangeData(Step):
         "time_step": 1,
     }
 
-    def __init__(self, parameters=None):
-        super().__init__(parameters)
+    def __init__(self, parameters=None, core=None):
+        super().__init__(parameters, core)
         self.external_state = self.parameters["external_state"]
         self.environment_molecules = self.parameters["environment_molecules"]
 

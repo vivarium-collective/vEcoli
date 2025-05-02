@@ -1,14 +1,13 @@
 from scipy.constants import N_A
 
-from ecoli.shared.interface import StepBase
+from ecoli.shared.interface import MigrateStep as Step
 from vivarium.library.units import units, Quantity
-from ecoli.library.schema import bulk_name_to_idx, counts
-from ecoli.shared.utils.schemas import numpy_schema
+from ecoli.library.schema import bulk_name_to_idx, numpy_schema, counts
 
 AVOGADRO = N_A / units.mol
 
 
-class ConcentrationsDeriver(StepBase):
+class ConcentrationsDeriver(Step):
     defaults: dict[str, list[str]] = {
         # Bulk molecule names supplied separately so
         # they can be pulled out the Numpy array
@@ -17,56 +16,45 @@ class ConcentrationsDeriver(StepBase):
     }
     name = "concentrations_deriver"
 
-    def __init__(self, config=None, core=None):
-        super().__init__(config)
-        self.bulk_var = self.config["bulk_variables"]
-        self.var = self.config["variables"]
+    def __init__(self, parameters):
+        super().__init__(parameters, core)
+        self.bulk_var = self.parameters["bulk_variables"]
+        self.var = self.parameters["variables"]
         # Helper indices for Numpy indexing
         self.bulk_var_idx = None
 
-    def inputs(self):
+    def ports_schema(self):
         schema = {
             "bulk": numpy_schema("bulk"),
             "counts": {
-                variable: "integer"
-                for variable in self.config["variables"]
+                variable: {
+                    "_default": 0,  # In counts
+                }
+                for variable in self.parameters["variables"]
             },
             "concentrations": {
                 variable: {
                     "_default": 0 * units.mM,
-                    "_type": "unum"
+                    "_updater": "set",
                 }
-                for variable in self.config["variables"]
+                for variable in self.parameters["variables"]
             },
             "volume": {
                 "_default": 0 * units.fL,
-                "_type": "unum"
             },
         }
         return schema
-    
-    def outputs(self):
-        schema = {
-            "concentrations": {
-                variable: {
-                    "_default": 0 * units.mM,
-                    "_type": "unum"
-                }
-                for variable in self.config["variables"]
-            }
-        }
-        return schema
 
-    def update(self, state):
+    def next_update(self, timestep, states):
         if self.bulk_var_idx is None:
-            self.bulk_var_idx = bulk_name_to_idx(self.bulk_var, state["bulk"]["id"])
-        volume = state["volume"]
+            self.bulk_var_idx = bulk_name_to_idx(self.bulk_var, states["bulk"]["id"])
+        volume = states["volume"]
         assert isinstance(volume, Quantity)
         var_concs = {
             var: (count * units.count / AVOGADRO / volume).to(units.millimolar)
-            for var, count in state["counts"].items()
+            for var, count in states["counts"].items()
         }
-        bulk_counts = counts(state["bulk"], self.bulk_var_idx)
+        bulk_counts = counts(states["bulk"], self.bulk_var_idx)
         bulk_concs = (bulk_counts * units.count / AVOGADRO / volume).to(
             units.millimolar
         )

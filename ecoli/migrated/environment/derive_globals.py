@@ -4,7 +4,7 @@ import math
 from scipy import constants
 import numpy as np
 
-from vivarium.core.process import Step
+from ecoli.shared.interface import MigrateStep as Step
 from vivarium.library.units import units
 
 

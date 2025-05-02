@@ -124,8 +124,8 @@ class TranscriptElongation(PartitionedProcess):
         "time_step": 1,
     }
 
-    def __init__(self, parameters=None):
-        super().__init__(parameters)
+    def __init__(self, parameters=None, core=None):
+        super().__init__(parameters, core)
 
         self.max_time_step = self.parameters["max_time_step"]
 

@@ -1,0 +1,60 @@
+{
+    "spatial_environment" : true,
+    "spatial_environment_config": {
+        "multibody": {
+            "bounds": [
+                "!units[50 micrometer]",
+                "!units[50 micrometer]"
+            ]
+        },
+        "reaction_diffusion": {
+            "molecules": ["GLC"],
+            "n_bins": [10, 10],
+            "bounds": [
+                "!units[50 micrometer]",
+                "!units[50 micrometer]"
+            ],
+            "depth": "!units[3000.0 micrometer]",
+            "diffusion": "!units[1e-2 micrometer ** 2 / second]",
+            "gradient": {
+                "type": "uniform",
+                "molecules": {
+                    "GLC": "!units[1.0 millimolar]"
+                }
+            },
+            "exchanges_path": ["environment", "exchange"],
+            "external_path": ["boundary", "external"],
+            "location_path": ["boundary", "location"]
+        },
+        "field_timeline": {
+            "bins": [10, 10],
+            "timeline": []
+        },
+        "field_timeline_topology": {
+            "global": ["global"]
+        }
+    },
+    "add_processes": [
+      "ecoli-shape"
+    ],
+    "topology": {
+      "ecoli-shape": {
+        "cell_global": ["boundary"],
+        "cytoplasm_global": ["cytoplasm", "global"],
+        "periplasm_global": ["periplasm", "global"],
+        "listener_cell_mass": ["listeners", "mass", "cell_mass"],
+        "listener_cell_volume": ["listeners", "mass", "volume"]
+      }
+    },
+    "process_configs": {
+      "ecoli-shape": {}
+    },
+    "flow": {
+      "ecoli-shape": [["ecoli-mass-listener"]]
+    },
+    "engine_process_reports": [
+        ["boundary"],
+        ["environment", "exchange"],
+        ["listeners"]
+    ]
+}

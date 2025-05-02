@@ -1,6 +1,6 @@
 import numpy as np
 
-from vivarium.core.process import Step
+from ecoli.shared.interface import MigrateStep as Step
 from vivarium.library.units import units
 
 from ecoli.library.lattice_utils import (
@@ -19,8 +19,8 @@ class LocalField(Step):
         "bounds": [1, 1] * units.um,
     }
 
-    def __init__(self, parameters=None):
-        super().__init__(parameters)
+    def __init__(self, parameters=None, core=None):
+        super().__init__(parameters, core)
         self.bin_volume = self.parameters["bin_volume"]
 
     def initial_state(self, config=None):

@@ -9,7 +9,7 @@ import random
 import numpy as np
 from scipy import constants
 
-from vivarium.core.process import Step, Process
+from ecoli.shared.interface import MigrateStep as Step, Process
 from vivarium.core.composer import Composer
 from vivarium.core.engine import Engine
 from vivarium.library.units import units
@@ -33,8 +33,8 @@ class Lysis(Step):
         "bin_volume": 1e-6 * units.L,
     }
 
-    def __init__(self, parameters=None):
-        super().__init__(parameters)
+    def __init__(self, parameters=None, core=None):
+        super().__init__(parameters, core)
         self.agent_id = self.parameters["agent_id"]
         self.bin_volume = self.parameters["bin_volume"]
 
@@ -130,8 +130,8 @@ class ToyTransportBurst(Process):
         "burst_mass": 2000 * units.fg,
     }
 
-    def __init__(self, parameters=None):
-        super().__init__(parameters)
+    def __init__(self, parameters=None, core=None):
+        super().__init__(parameters, core)
         self.molecules = list(self.parameters["uptake_rate"].keys())
 
         # Helper indices for Numpy arrays

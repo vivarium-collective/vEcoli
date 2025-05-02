@@ -25,8 +25,8 @@ class MediaUpdate(Step):
     topology = TOPOLOGY
     defaults = {"saved_media": {}, "time_step": 1, "media_id": "minimal"}
 
-    def __init__(self, parameters=None):
-        super().__init__(parameters)
+    def __init__(self, parameters=None, core=None):
+        super().__init__(parameters, core)
         self.saved_media = {}
         for media_id, env_concs in self.parameters["saved_media"].items():
             self.saved_media[media_id] = {}

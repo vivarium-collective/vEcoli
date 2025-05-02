@@ -3,13 +3,12 @@
 MIGRATED: Cell Division
 =============
 """
-from types import FunctionType
-from typing import Any, Dict, Callable
+
+from typing import Any, Dict
 
 import binascii
 import numpy as np
-# from vivarium.core.process import Step
-from process_bigraph import Step
+from ecoli.shared.interface import MigrateStep as Step
 
 from ecoli.library.sim_data import RAND_MAX
 from ecoli.library.schema import attrs
@@ -24,59 +23,37 @@ def daughter_phylogeny_id(mother_id):
 
 class MarkDPeriod(Step):
     """Set division flag after D period has elapsed"""
+
     name = "mark_d_period"
 
     def ports_schema(self):
         return {
             "full_chromosome": {},
-            "global_time": "float",
+            "global_time": {"_default": 0.0},
             "divide": {
                 "_default": False,
                 "_updater": "set",
                 "_divider": {"divider": "set_value", "config": {"value": False}},
             },
         }
-    
-    def inputs(self):
-        return {
-            "global_time": "float",
-            "full_chromosome": "metadata_array_type"
-        }
-    
-    def outputs(self): 
-        return {
-            "full_chromosome": "tree",
-            "divide": "boolean"
-        }
 
-    def initial_state(self):
-        return {
-            "full_chromosome": {},
-            "divide": False
-        }
-
-    def update(self, state):
+    def next_update(self, timestep, states):
         division_time, has_triggered_division = attrs(
-            states=state["full_chromosome"],
-            attributes=["division_time", "has_triggered_division"]
+            states["full_chromosome"], ["division_time", "has_triggered_division"]
         )
-
-        # TODO: what to do here?
         if len(division_time) < 2:
             return {}
         # Set division time to be the minimum division time for a chromosome
         # that has not yet triggered cell division
         divide_at_time = division_time[~has_triggered_division].min()
-        if state["global_time"] >= divide_at_time:
+        if states["global_time"] >= divide_at_time:
             divide_at_time_index = np.where(division_time == divide_at_time)[0][0]
             has_triggered_division = has_triggered_division.copy()
             has_triggered_division[divide_at_time_index] = True
             # Set flag for ensuing division Step to trigger division
             return {
                 "full_chromosome": {
-                    "set": {
-                        "has_triggered_division": has_triggered_division
-                    }
+                    "set": {"has_triggered_division": has_triggered_division}
                 },
                 "divide": True,
             }
@@ -94,76 +71,67 @@ class Division(Step):
     """
 
     name = NAME
-    config_schema = {
-        "agent_id": "string",
-        "seed": "integer",
-        "division_threshold": "maybe[string]",  # <-- Union[str, None] = None by default
-        "dry_mass_inc_dict": "tree"
+    defaults: Dict[str, Any] = {
+        "daughter_ids_function": daughter_phylogeny_id,
+        "threshold": None,
+        "seed": 0,
     }
 
-    def __init__(self, config=None, core=None):
-        super().__init__(config, core)
+    def __init__(self, parameters=None, core=None):
+        super().__init__(parameters, core)
 
-        self.daughter_ids_function: Callable[[str], list[str]] = daughter_phylogeny_id
-
-        self.seed = self.config.get("seed", 0)
         # must provide a composer to generate new daughters
-        self.agent_id = self.config["agent_id"]
-        # self.composer = self.parameters["composer"]
-        # self.composer_config = self.parameters["composer_config"]
-        self.random_state = np.random.RandomState(seed=self.seed)
+        self.agent_id = self.parameters["agent_id"]
+        self.composer = self.parameters["composer"]
+        self.composer_config = self.parameters["composer_config"]
+        self.random_state = np.random.RandomState(seed=self.parameters["seed"])
 
         self.division_mass_multiplier = 1
-        if self.config["division_threshold"] == "massDistribution":
+        if self.parameters["division_threshold"] == "massDistribution":
             division_random_seed = (
-                binascii.crc32(b"CellDivision", self.seed) & 0xFFFFFFFF
+                binascii.crc32(b"CellDivision", self.parameters["seed"]) & 0xFFFFFFFF
             )
             division_random_state = np.random.RandomState(seed=division_random_seed)
             self.division_mass_multiplier = division_random_state.normal(
                 loc=1.0, scale=0.1
             )
-        self.dry_mass_inc_dict = self.config["dry_mass_inc_dict"]
+        self.dry_mass_inc_dict = self.parameters["dry_mass_inc_dict"]
 
-    def inputs(self):
-        return {
-            "agents": "tree"
-        }
-
-    def outputs(self):
+    def ports_schema(self):
         return {
             "division_variable": {},
             "full_chromosome": {},
-            "agents": {"*": {}},  # TODO: what to do here?
+            "agents": {"*": {}},
             "media_id": {},
             "division_threshold": {
-                "_default": self.config["division_threshold"],
-                # "_updater": "set",
-                # "_divider": {
-                #     "divider": "set_value",
-                #     "config": {"value": self.parameters["division_threshold"]},
-                # },
+                "_default": self.parameters["division_threshold"],
+                "_updater": "set",
+                "_divider": {
+                    "divider": "set_value",
+                    "config": {"value": self.parameters["division_threshold"]},
+                },
             },
         }
 
-    def update(self, state):
+    def next_update(self, timestep, states):
         # Figure out division threshold at first timestep if
         # using massDistribution setting
-        if state["division_threshold"] == "massDistribution":
-            current_media_id = state["media_id"]
+        if states["division_threshold"] == "massDistribution":
+            current_media_id = states["media_id"]
             return {
                 "division_threshold": (
-                    state["division_variable"]
+                    states["division_variable"]
                     + self.dry_mass_inc_dict[current_media_id].asNumber(units.fg)
                     * self.division_mass_multiplier
                 )
             }
 
-        division_variable = state["division_variable"]
+        division_variable = states["division_variable"]
 
-        if (division_variable >= state["division_threshold"]) and (
-            state["full_chromosome"]["_entryState"].sum() >= 2
+        if (division_variable >= states["division_threshold"]) and (
+            states["full_chromosome"]["_entryState"].sum() >= 2
         ):
-            daughter_ids = self.daughter_ids_function(self.agent_id)
+            daughter_ids = self.parameters["daughter_ids_function"](self.agent_id)
             daughter_updates = []
             for daughter_id in daughter_ids:
                 config = dict(self.composer_config)
