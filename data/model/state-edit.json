@@ -2877,7 +2877,7 @@
         }
     },
     "unique_update_2": {
-        "address": "local:unique_update_2",
+        "address": "local:unique-update",
         "inputs": {
             "active_RNAPs": [
                 "unique",
@@ -2972,7 +2972,7 @@
         }
     },
     "unique_update_3": {
-        "address": "local:unique_update_3",
+        "address": "local:unique-update",
         "inputs": {
             "active_RNAPs": [
                 "unique",
@@ -3067,7 +3067,7 @@
         }
     },
     "unique_update_4": {
-        "address": "local:unique_update_4",
+        "address": "local:unique-update",
         "inputs": {
             "active_RNAPs": [
                 "unique",
@@ -3162,7 +3162,7 @@
         }
     },
     "unique_update_5": {
-        "address": "local:unique_update_5",
+        "address": "local:unique-update",
         "inputs": {
             "active_RNAPs": [
                 "unique",
@@ -3257,7 +3257,7 @@
         }
     },
     "unique_update_6": {
-        "address": "local:unique_update_6",
+        "address": "local:unique-update",
         "inputs": {
             "active_RNAPs": [
                 "unique",
@@ -3352,7 +3352,7 @@
         }
     },
     "unique_update_7": {
-        "address": "local:unique_update_7",
+        "address": "local:unique-update",
         "inputs": {
             "active_RNAPs": [
                 "unique",
@@ -3447,7 +3447,7 @@
         }
     },
     "unique_update_8": {
-        "address": "local:unique_update_8",
+        "address": "local:unique-update",
         "inputs": {
             "active_RNAPs": [
                 "unique",
@@ -3542,7 +3542,7 @@
         }
     },
     "unique_update_9": {
-        "address": "local:unique_update_9",
+        "address": "local:unique-update",
         "inputs": {
             "active_RNAPs": [
                 "unique",
@@ -3637,7 +3637,7 @@
         }
     },
     "unique_update_10": {
-        "address": "local:unique_update_10",
+        "address": "local:unique-update",
         "inputs": {
             "active_RNAPs": [
                 "unique",
@@ -3732,7 +3732,7 @@
         }
     },
     "unique_update_11": {
-        "address": "local:unique_update_11",
+        "address": "local:unique-update",
         "inputs": {
             "active_RNAPs": [
                 "unique",
