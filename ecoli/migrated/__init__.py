@@ -15,11 +15,11 @@ from ecoli.migrated.metabolism_redux import MetabolismRedux
 from ecoli.migrated.metabolism import Metabolism
 from ecoli.migrated.chromosome_structure import ChromosomeStructure
 from ecoli.migrated.allocator import Allocator
-from ecoli.migrated.chemostat import Chemostat
 from ecoli.migrated.rna_interference import RnaInterference
 from ecoli.migrated.global_clock import GlobalClock
 from ecoli.migrated.bulk_timeline import BulkTimelineProcess
 from ecoli.migrated.chromosome_replication import ChromosomeReplication
+# from ecoli.migrated.chemostat import Chemostat
 # from ecoli.migrated.concentrations_deriver import ConcentrationsDeriver
 # from ecoli.migrated.shape import Shape
 # from ecoli.migrated.metabolism_redux_classic import MetabolismReduxClassic
@@ -107,7 +107,6 @@ __all__ = [
     "ChromosomeReplication",
     "ChromosomeStructure",
     "Allocator",
-    "Chemostat",
     "RnaInterference",
     "GlobalClock",
     "BulkTimelineProcess"

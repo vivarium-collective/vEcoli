@@ -54,9 +54,12 @@ def extract_process_states(export: bool = False):
             "outputs": process_ports
         }
 
-        # attempt config extract if instance is available
+        # attempt config and exact address extract if instance is available
         if process_id in processes:
             instance = processes[process_id]
+            if 'name' in dir(instance):
+                process_spec["address"] = f"local:{instance.name}"
+
             process_config = copy.deepcopy(instance.defaults)
             process_config = format_config(
                 process_config, 
@@ -67,9 +70,37 @@ def extract_process_states(export: bool = False):
         state[process_id] = process_spec
     
     if export:
-        export_state(data_dir, state)
+        export_state(data_dir, state, 'state.json')
     return state
 
+
+def fix_special_addresses():
+    import copy
+    from vivarium import Vivarium 
+    from dataclasses import dataclass
+    import enum
+    from pprint import pp
+    from ecoli.shared.registry import ecoli_core
+    from ecoli import DEFAULT_STATE_PATH, load
+    import json 
+    
+    state = copy.deepcopy(load(DEFAULT_STATE_PATH))
+    processes = ecoli_core.process_registry.registry
+
+    for process_id, spec in state.items():
+        handler = filter(
+            lambda addr: addr in process_id,
+            ["allocator", "requester", "evolver"]
+        )
+        try:
+            address = f"local:{next(handler)}"
+            spec['address'] = address 
+        except StopIteration:
+            continue 
+
+    with open(DEFAULT_STATE_PATH.replace("state.json", "state-edit.json"), 'w') as f:
+        json.dump(state, f, indent=4)
+        
 
 def export_state(dirpath: str, state, filename: str | None = None):
     state_fp = os.path.join(dirpath, filename or 'single_state.json')

@@ -21,14 +21,14 @@ import copy
 import warnings
 
 from bigraph_schema import deep_merge
-from process_bigraph import Step, Process
 
-from ecoli.shared.interface import MigrateProcess, collapse_defaults
+from ecoli.shared.interface import MigrateProcess as Process, MigrateStep as Step, collapse_defaults
 from ecoli.shared.registry import ecoli_core
 from ecoli.shared.utils.schemas import get_defaults_schema, listener_schema, numpy_schema
+from ecoli.processes.registries import topology_registry
 
 
-class PartitionedProcess(MigrateProcess):
+class PartitionedProcess(Process):
     """Partitioned Process Base Class
 
     This class uses its ancestor to parse config schema and overrides inputs and outputs to auto parse.
@@ -42,10 +42,11 @@ class PartitionedProcess(MigrateProcess):
     def evolve_state(timestep, states)
     """
 
-    def initialize(self, config):
+    def __init__(self, parameters=None):
+        super().__init__(parameters)
         # set partition mode
-        self.evolve_only = config.get("evolve_only", False)
-        self.request_only = config.get("request_only", False)
+        self.evolve_only = self.parameters.get("evolve_only", False)
+        self.request_only = self.parameters.get("request_only", False)
         self.request_set = False
 
         # register topology
@@ -96,32 +97,23 @@ class Requester(Step):
     Evolver that uses the same PartitionedProcess.
     """
 
-    config_schema = {"process": "tuple", "timestep": "float"}
     name = "requester"
-    current_process: PartitionedProcess | None = None
+    defaults = {"process": None}
 
-    def initialize(self, config):
-        assert isinstance(config["process"], PartitionedProcess)
-        if config["process"].parallel:
+    def __init__(self, parameters=None):
+        assert isinstance(parameters["process"], PartitionedProcess)
+        if parameters["process"].parallel:
             raise RuntimeError("PartitionedProcess objects cannot be parallelized.")
-        self.name = f'{config["process"].name}_requester'
-        self.config["name"] = self.name
-        process = self.config.get("process")
-        self.current_process = process
+        parameters["name"] = f'{self.parameters["process"].name}_{self.name}'
+        super().__init__(parameters)
 
-        if self.current_process:
-            self.config["timestep"] = self.current_process.config["timestep"]
-
-        self.cached_bulk_ports = ["bulk"]
-
-    def update_condition(self, states):
-        # TODO: determine if we can change method signature
+    def update_condition(self, timestep, states):
         """
         Implements variable timestepping for partitioned processes
 
         Vivarium cycles through all :py:class:~vivarium.core.process.Step`
         instances every time a :py:class:`~vivarium.core.process.Process`
-        instance updates the simulation states. When that happens, Vivarium
+        instance updates the simulation state. When that happens, Vivarium
         will only call the :py:meth:`~.Requester.next_update` method of this
         Requester if ``update_condition`` returns True.
 
@@ -135,7 +127,7 @@ class Requester(Step):
         if states["next_update_time"] <= states["global_time"]:
             if states["next_update_time"] < states["global_time"]:
                 warnings.warn(
-                    f"{self.config["name"]} updated at t="
+                    f"{self.parameters["name"]} updated at t="
                     f"{states['global_time']} instead of t="
                     f"{states['next_update_time']}. Decrease the "
                     "timestep of the global_clock process for more "
@@ -143,51 +135,39 @@ class Requester(Step):
                 )
             return True
         return False
-    
-    def initial_state(self):
-        states = {
-            "process": (),
-            "next_update_time": self.config["timestep"],
-            "request": {
-                "bulk": []
+
+    def ports_schema(self):
+        process = self.parameters.get("process")
+        ports = process.get_schema()
+        ports["request"] = {
+            "bulk": {
+                "_updater": "set",
+                "_divider": "null",
+                "_emit": False,
             }
         }
-        if self.current_process:
-            states.update(self.current_process.initial_state())
-        return states
-    
-    def inputs(self):
-        """Requester inputs needs to match the states passed into PartitionedProcess.calculate_request plus process timestep and next_update_time"""
-        schema = {
-            "process": "tuple[process]",
-            "next_update_time": "float",
-            "request": "tree[float]"
+        ports["process"] = {
+            "_default": tuple(),
+            "_updater": "set",
+            "_divider": "null",
+            "_emit": False,
         }
-        if self.current_process:
-            schema.update(self.current_process.inputs())
-        return schema
-    
-    def outputs(self):
-        schema = {
-            "request": "tree[float]",
-            "listeners": "tree[float]",
-            "process": "tuple[process]"
+        ports["global_time"] = {"_default": 0.0}
+        ports["timestep"] = {"_default": process.parameters["time_step"]}
+        ports["next_update_time"] = {
+            "_default": process.parameters["timestep"],
+            "_updater": "set",
+            "_divider": "set",
         }
-        if self.current_process:
-            schema.update(self.current_process.outputs())
-        return schema
+        self.cached_bulk_ports = list(ports["request"].keys())
+        return ports
 
-    def update(self, states):
+    def next_update(self, timestep, states):
         process = states["process"][0]
-        request = process.calculate_request(states, self.config["time_step"])
+        request = process.calculate_request(self.parameters["time_step"], states)
         process.request_set = True
 
-        for port in list(states["request"].keys()):
-            if port not in self.cached_bulk_ports:
-                self.cached_bulk_ports.append(port)
-
         request["request"] = {}
-
         # Send bulk requests through request port
         for bulk_port in self.cached_bulk_ports:
             bulk_request = request.pop(bulk_port, None)
@@ -211,19 +191,13 @@ class Evolver(Step):
     Requester that uses the same PartitionedProcess.
     """
 
-    config_schema = {"process": "tuple"}
     name = "evolver"
-    current_process: PartitionedProcess | None = None
+    defaults = {"process": None}
 
-    def initialize(self, config):
-        assert isinstance(config["process"], PartitionedProcess)
-        self.name = f'{config["process"].name}_evolver'
-        self.config["name"] = self.name
-
-        process = self.config.get("process")
-        self.output_ports = process.get_schema()
-        
-        self.current_process = process
+    def __init__(self, parameters=None):
+        assert isinstance(parameters["process"], PartitionedProcess)
+        parameters["name"] = f'{parameters["process"].name}_{self.name}'
+        super().__init__(parameters)
 
     def update_condition(self, timestep, states):
         """
@@ -232,7 +206,7 @@ class Evolver(Step):
         if states["next_update_time"] <= states["global_time"]:
             if states["next_update_time"] < states["global_time"]:
                 warnings.warn(
-                    f"{self.name} updated at t="
+                    f"{self.parameters["name"]} updated at t="
                     f"{states['global_time']} instead of t="
                     f"{states['next_update_time']}. Decrease the "
                     "timestep for the global clock process for more "
@@ -240,43 +214,34 @@ class Evolver(Step):
                 )
             return True
         return False
-    
-    def inputs(self):
-        schema = {
-            "process": "tuple[process]",
-            "allocate": "tree[float]"
-        }
 
-        if self.current_process:
-            schema.update(self.current_process.inputs())
-        return schema
-    
-    def outputs(self):
-        schema = {
-            "process": "tuple[process]",
-            "next_update_time": "float"
+    def ports_schema(self):
+        process = self.parameters.get("process")
+        ports = process.get_schema()
+        ports["allocate"] = {
+            "bulk": {
+                "_updater": "set",
+                "_divider": "null",
+                "_emit": False,
+            }
         }
-        if self.current_process:
-            schema.update(self.current_process.outputs())
-        return schema
-        
-    def initial_state(self):
-        states = {
-            "allocate": {
-                "bulk": []
-            },
-            "process": tuple(),
+        ports["process"] = {
+            "_default": tuple(),
+            "_updater": "set",
+            "_divider": "null",
+            "_emit": False,
         }
-        if self.current_process:
-            states.update(self.current_process.initial_state())
-        return states
-    
-    def update(self, timestep, states):
-        try:
-            allocations = states.pop("allocate")
-        except KeyError:
-            raise KeyError("No allocations could be found")
-        
+        ports["global_time"] = {"_default": 0.0}
+        ports["timestep"] = {"_default": process.parameters["timestep"]}
+        ports["next_update_time"] = {
+            "_default": process.parameters["timestep"],
+            "_updater": "set",
+            "_divider": "set",
+        }
+        return ports
+
+    def next_update(self, timestep, states):
+        allocations = states.pop("allocate")
         states = deep_merge(states, allocations)
         process = states["process"][0]
 
@@ -292,8 +257,8 @@ class Evolver(Step):
         # crash, so having a slightly off timestep is preferable.
         if not process.request_set:
             return {}
+
         update = process.evolve_state(timestep, states)
         update["process"] = (process,)
         update["next_update_time"] = states["global_time"] + states["timestep"]
-
         return update

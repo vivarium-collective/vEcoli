@@ -16,6 +16,7 @@ from bigraph_schema import Registry as BgsRegistry
 
 from ecoli.shared.data_model import BaseClass
 from ecoli.shared.types.register import register, register_type
+from ecoli.shared.utils.log import setup_logging
 
 
 __all__ = ["ecoli_core", "topology_registry"]
@@ -30,6 +31,7 @@ PROCESS_SUBPACKAGES = [
     'spatiality',
     'stubs'
 ]
+logger: logging.Logger = setup_logging(__name__)
             
             
 def get_migration_module_mapping():
@@ -168,7 +170,7 @@ class Core(ProcessTypes):
     def register_type(self, schema):
         return register(schema, self)
     
-    def register_process_package(self, package_name: str, verbose=False):
+    def register_process_package(self, package_name: str, verbose: bool = False):
         """Assumes there to be an __all__ definition in the referenced package"""
         package = import_module(f"ecoli.{package_name}")
         for process in package.__all__:
@@ -177,10 +179,9 @@ class Core(ProcessTypes):
                 # process_id = proc.__module__.split('.')[-1]
                 process_id = proc.name
                 self.add.process(process_id, proc)
-                if verbose:
-                    print(f'{process_id} registered to processes')
             except Exception as e:
-                print(e) if verbose else None
+                if verbose:
+                    logger.warning(f"Process {process} could not be registered because:\n{e}")
 
 
 # ------------------- # 

@@ -74,13 +74,22 @@ from ecoli.shared.dtypes import bulk_dtype
 ROOT = os.path.dirname(
     os.path.dirname(__file__)
 )
-DEFAULT_TOPOLOGY_PATH = os.path.join(ROOT, 'data', 'model', 'single_topology.json')
+MODEL_DATA_DIR = os.path.join(ROOT, 'data', 'model')
+DEFAULT_TOPOLOGY_PATH = os.path.join(MODEL_DATA_DIR, 'topology.json')
+DEFAULT_STATE_PATH = os.path.join(MODEL_DATA_DIR, 'state.json')
 
 VERBOSE_REGISTER = eval(os.getenv("VERBOSE_REGISTER", "True"))
 PROCESS_PACKAGES = ["migrated"]  # TODO: add more here
 TYPE_MODULES = ["unum", "unit", "bulk"]  # TODO: add more here
 
 
+def load(fp: str):
+    import json
+    with open(fp, 'r') as f:
+        data = json.load(f)
+    return data 
+
+        
 def get_bulk_counts(bulk: np.ndarray) -> np.ndarray:
     """
     Args:
@@ -112,7 +121,7 @@ for modname in TYPE_MODULES:
 
 # import and register processes
 for pkg in PROCESS_PACKAGES:
-    ecoli_core.register_process_package(pkg)
+    ecoli_core.register_process_package(pkg, VERBOSE_REGISTER)
 
 # register toy processes
 for name, process in TOY_PROCESSES.items():
