@@ -34,6 +34,12 @@ PORTS_MAPPER = {
 }
 
 
+def not_a_process(value):
+    """Returns ``True`` if not a :py:class:`vivarium.core.process.Process` instance."""
+    # return not (isinstance(value, Store) and value.topology)
+    pass
+
+
 def get_unique_fields(unique: np.ndarray) -> list[np.ndarray]:
     """
     Args:

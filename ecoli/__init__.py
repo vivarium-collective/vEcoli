@@ -76,7 +76,7 @@ ROOT = os.path.dirname(
 )
 MODEL_DATA_DIR = os.path.join(ROOT, 'data', 'model')
 DEFAULT_TOPOLOGY_PATH = os.path.join(MODEL_DATA_DIR, 'topology.json')
-DEFAULT_STATE_PATH = os.path.join(MODEL_DATA_DIR, 'state.json')
+DEFAULT_STATE_PATH = os.path.join(MODEL_DATA_DIR, 'state-edit.json')
 
 VERBOSE_REGISTER = eval(os.getenv("VERBOSE_REGISTER", "True"))
 PROCESS_PACKAGES = ["migrated"]  # TODO: add more here

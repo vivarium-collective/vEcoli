@@ -10,20 +10,12 @@ from functools import wraps
 import json
 from warnings import warn
 
-from process_bigraph import Step, Process
+from vivarium.core.process import Process as VivariumProcess, Step as VivariumStep
+from process_bigraph import Process as PbgProcess, Step as PbgStep
 
 from ecoli.shared.data_model import Topology
 from ecoli.shared.registry import ecoli_core
 from ecoli.shared.utils.schemas import get_config_schema, collapse_defaults, get_defaults_schema
-
-
-
-from abc import abstractmethod
-import copy
-from vivarium.core.process import Process as VivariumProcess, Step as VivariumStep
-from process_bigraph import Process as PbgProcess, Step as PbgStep
-from vivarium.core.types import State
-from ecoli.shared.utils.schemas import collapse_defaults, get_config_schema, get_defaults_schema
 
 
 class MetaABCAndType(abc.ABCMeta, type):
@@ -56,11 +48,15 @@ class MigrateStep(PbgStep, VivariumStep, metaclass=MetaABCAndType):
         
 
     def __init__(self, parameters=None, core=None) -> None:
-        VivariumProcess.__init__(self, parameters=parameters)
-        super().__init__(config=parameters, core=core or ecoli_core)
+        if core is None:
+            core = ecoli_core
+        super(VivariumStep, self).__init__(parameters=parameters)
+        PbgStep.__init__(self, config=self.parameters, core=core)
+        # VivariumProcess.__init__(self, parameters=parameters)
+        
         self._port_data = self.ports_schema()
-        self._input_port_data = self._set_ports("inputs")
-        self._output_port_data = self._set_ports("outputs")
+        self._input_port_data = self._set_ports("input")
+        self._output_port_data = self._set_ports("output")
 
     def __init_subclass__(cls, **kwargs): 
         cls.config_schema = {
@@ -70,7 +66,7 @@ class MigrateStep(PbgStep, VivariumStep, metaclass=MetaABCAndType):
     
     def _set_ports(self, port_type: str):
         """Separates inputs from outputs and defines defaults"""
-        port_names = getattr(self, f"{port_type}_ports")
+        port_names = getattr(self, f"{port_type}_ports", [])
         ports = copy.deepcopy(self._port_data)
         if len(port_names):
             ports = {
@@ -121,11 +117,14 @@ class MigrateProcess(PbgProcess, VivariumProcess, metaclass=MetaABCAndType):
     }
 
     def __init__(self, parameters=None, core=None) -> None:
-        VivariumProcess.__init__(self, parameters=parameters)
-        super().__init__(config=parameters, core=core or ecoli_core)
+        if core is None:
+            core = ecoli_core
+        super().__init__(config=self.parameters, core=core)
+        # VivariumProcess.__init__(self, parameters=parameters)
+        
         self._port_data = self.ports_schema()
-        self._input_port_data = self._set_ports("inputs")
-        self._output_port_data = self._set_ports("outputs")
+        self._input_port_data = self._set_ports("input")
+        self._output_port_data = self._set_ports("output")
 
     def __init_subclass__(cls, **kwargs): 
         cls.config_schema = {
@@ -135,7 +134,7 @@ class MigrateProcess(PbgProcess, VivariumProcess, metaclass=MetaABCAndType):
     
     def _set_ports(self, port_type: str):
         """Separates inputs from outputs and defines defaults"""
-        port_names = getattr(self, f"{port_type}_ports")
+        port_names = getattr(self, f"{port_type}_ports", [])
         ports = copy.deepcopy(self._port_data)
         if len(port_names):
             ports = {
@@ -233,7 +232,7 @@ class EdgeBase(abc.ABC):
 
 # --- steps --- # 
 
-class StepBase(EdgeBase, Step):
+class StepBase(EdgeBase, PbgStep):
     defaults = {}
     config_schema = {}
     _input_ports = {}
@@ -320,7 +319,7 @@ class ListenerBase(StepBase, abc.ABC):
 
 
 
-class ProcessBase(EdgeBase, Process):
+class ProcessBase(EdgeBase, PbgProcess):
     defaults = {}
     _input_ports = {}
     _output_ports = {}
