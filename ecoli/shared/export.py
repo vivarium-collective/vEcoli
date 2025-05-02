@@ -1,3 +1,9 @@
+"""
+This module's logic should ONLY be used when/if the DEFAULT model changes. Run once.
+
+as of 5/1/25: already run.
+"""
+
 import simdjson as json
 import copy
 import os 
