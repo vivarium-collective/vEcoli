@@ -1,8 +1,4 @@
 """
---------------------
-MIGRATED: Cell Wall
---------------------
-
 A coarse-grained model of the cell wall, aimed at predicting
 cracking (which leads irreversibly to lysis) under conditions limiting
 production of crosslinked murein.
@@ -51,13 +47,12 @@ Parameters:
     Amount of peptidoglycan in cell walls of gram-negative bacteria.
     Journal of Bacteriology, 173(23), 7684-7691.
 """
-
-import numpy as np
 import warnings
 
-from vivarium.library.units import remove_units
-from bigraph_schema.units import units
+from vivarium.library.units import units, remove_units
+import numpy as np
 
+from ecoli.shared.interface import MigrateProcess as Process
 from ecoli.library.cell_wall.column_sampler import (
     geom_sampler,
     sample_column,
@@ -67,12 +62,10 @@ from ecoli.library.cell_wall.lattice import (
     calculate_lattice_size,
     get_length_distributions,
 )
-from ecoli.library.schema import bulk_name_to_idx, counts
+from ecoli.library.schema import numpy_schema, bulk_name_to_idx, counts
 from ecoli.library.parameters import param_store
+from ecoli.processes.registries import topology_registry
 from ecoli.processes.shape import length_from_volume, surface_area_from_length
-from ecoli.shared.interface import ProcessBase
-from ecoli.shared.registry import ecoli_core
-from ecoli.shared.utils.schemas import collapse_defaults, get_defaults_schema, numpy_schema
 
 
 
@@ -85,14 +78,14 @@ TOPOLOGY = {
     "wall_state": ("wall_state",),
     "listeners": ("listeners",),
 }
-ecoli_core.topology.register(NAME, TOPOLOGY)
+topology_registry.register(NAME, TOPOLOGY)
 
 
 def divide_lattice(lattice):
     return np.array_split(lattice, 2, axis=1)
 
 
-class CellWall(ProcessBase):
+class CellWall(Process):
     name = NAME
     topology = TOPOLOGY
     defaults = {
@@ -122,97 +115,112 @@ class CellWall(ProcessBase):
         "time_step": 10,
     }
 
-    def initialize(self, config):
-        self.murein = config["murein"]
-        self.pbp1a = config["PBP"]["PBP1A"]
-        self.pbp1b_alpha = config["PBP"]["PBP1B_alpha"]
-        self.pbp1b_gamma = config["PBP"]["PBP1B_gamma"]
-        self.strand_term_p = config["strand_term_p"]
+    def __init__(self, parameters=None, core=None):
+        super().__init__(parameters)
 
-        self.cell_radius = config["cell_radius"]
-        self.critical_radius = config["critical_radius"]
+        self.murein = self.parameters["murein"]
+        self.pbp1a = self.parameters["PBP"]["PBP1A"]
+        self.pbp1b_alpha = self.parameters["PBP"]["PBP1B_alpha"]
+        self.pbp1b_gamma = self.parameters["PBP"]["PBP1B_gamma"]
+        self.strand_term_p = self.parameters["strand_term_p"]
+
+        self.cell_radius = self.parameters["cell_radius"]
+        self.critical_radius = self.parameters["critical_radius"]
         self.critical_area = np.pi * self.critical_radius**2
         self.circumference = 2 * np.pi * self.cell_radius
 
-        self.disaccharide_height = config["disaccharide_height"]
-        self.disaccharide_width = config["disaccharide_width"]
-        self.inter_strand_distance = config["inter_strand_distance"]
-        self.max_expansion = config["max_expansion"]
+        self.disaccharide_height = self.parameters["disaccharide_height"]
+        self.disaccharide_width = self.parameters["disaccharide_width"]
+        self.inter_strand_distance = self.parameters["inter_strand_distance"]
+        self.max_expansion = self.parameters["max_expansion"]
         self.peptidoglycan_unit_area = (
             self.inter_strand_distance + self.disaccharide_width
         ) * self.disaccharide_height
 
         # Create pseudorandom number generator
-        self.rng = np.random.default_rng(config["seed"])
+        self.rng = np.random.default_rng(self.parameters["seed"])
 
         # Helper indices for Numpy arrays
-        self.pbp_ids = list(config["PBP"].values())
+        self.pbp_ids = list(self.parameters["PBP"].values())
         self.pbp_idx = None
 
-        bidirectional_ports = {
+    def ports_schema(self):
+        schema = {
             "murein_state": {
                 # Divider sets to zero because the correct value is initialized
                 # from the bulk store the first timestep after division.
                 "incorporated_murein": {
                     "_default": 0,
+                    "_emit": True,
+                    "_updater": "set",
                     "_divider": "zero",
                 },
                 "unincorporated_murein": {
                     "_default": 0,
+                    "_emit": True,
                     "_divider": "binomial_ecoli",
-                }
+                },
+                "shadow_murein": {
+                    "_default": 0,
+                    "_emit": True,
+                    "_divider": "binomial_ecoli",
+                },
             },
+            "bulk": numpy_schema("bulk"),
+            "shape": {"volume": {"_default": 0 * units.fL, "_emit": True}},
             "wall_state": {
                 "lattice": {
                     "_default": None,
-                    "_type": "list[list[float]]",
+                    "_updater": "set",
+                    "_emit": False,
                     "_divider": divide_lattice,
                 },
-                "cracked": {
-                    "_default": False,
-                    # TODO: does this need a divider?
-                    # "_divider": {"divider": "set_value", "config": {"value": False}},
-                },
-            }
-        }
-        self.input_ports = {
-            "bulk": numpy_schema("bulk"),
-            "shape": {"volume": {"_default": 0 * units.fL, "_emit": True}},
-            "murein_state": bidirectional_ports['murein_state'],
-            "wall_state": bidirectional_ports['wall_state'],
-            "pbp_state": {
-                "active_fraction_PBP1A": {"_default": 0.0},
-                "active_fraction_PBP1B": {"_default": 0.0},
-            }
-        }
-        self.output_ports = {
-            "wall_state": {
-                **bidirectional_ports['wall_state'],
                 "lattice_rows": {
                     "_default": 0,
+                    "_updater": "set",
+                    "_emit": True,
                     "_divider": "zero",
                 },
                 "lattice_cols": {
                     "_default": 0,
+                    "_updater": "set",
+                    "_emit": True,
                     "_divider": "zero",
                 },
                 "extension_factor": {
                     "_default": 1,
+                    "_updater": "set",
+                    "_emit": True,
                     "_divider": {"divider": "set_value", "config": {"value": 1}},
+                },
+                "cracked": {
+                    "_default": False,
+                    "_updater": "set",
+                    "_emit": True,
+                    "_divider": {"divider": "set_value", "config": {"value": False}},
                 },
                 "attempted_shrinkage": {
                     "_default": False,
+                    "_updater": "set",
+                    "_emit": True,
                     "_divider": {"divider": "set_value", "config": {"value": False}},
                 },
             },
-            "murein_state": bidirectional_ports['murein_state'],
+            "pbp_state": {
+                "active_fraction_PBP1A": {"_default": 0.0, "_updater": "set"},
+                "active_fraction_PBP1B": {"_default": 0.0, "_updater": "set"},
+            },
             "listeners": {
                 "porosity": {
                     "_default": 0,
+                    "_updater": "set",
+                    "_emit": True,
                     "_divider": {"divider": "set_value", "config": {"value": 0}},
                 },
                 "hole_size_distribution": {
                     "_default": np.array([], int),
+                    "_updater": "set",
+                    "_emit": True,
                     "_divider": {
                         "divider": "set_value",
                         "config": {"value": np.array([], int)},
@@ -220,47 +228,42 @@ class CellWall(ProcessBase):
                 },
                 "strand_length_distribution": {
                     "_default": [],
+                    "_updater": "set",
+                    "_emit": True,
                     "_divider": {"divider": "set_value", "config": {"value": []}},
                 },
-            }
+            },
         }
-    
-    def inputs(self):
-        return get_defaults_schema(self.input_ports)
-    
-    def outputs(self):
-        return get_defaults_schema(self.output_ports)
-    
-    def initial_state(self):
-        return collapse_defaults(self.input_ports)
 
-    def update(self, state, interval):
+        return schema
+
+    def next_update(self, timestep, states):
         if self.pbp_idx is None:
-            self.pbp_idx = bulk_name_to_idx(self.pbp_ids, state["bulk"]["id"])
+            self.pbp_idx = bulk_name_to_idx(self.pbp_ids, states["bulk"]["id"])
         update = {}
 
-        # Unpack state
-        volume = state["shape"]["volume"]
-        extension_factor = state["wall_state"]["extension_factor"]
-        unincorporated_monomers = state["murein_state"]["unincorporated_murein"]
-        incorporated_monomers = state["murein_state"]["incorporated_murein"]
-        PBPs = dict(zip(self.pbp_ids, counts(state["bulk"], self.pbp_idx)))
-        active_fraction_PBP1a = state["pbp_state"]["active_fraction_PBP1A"]
-        active_fraction_PBP1b = state["pbp_state"]["active_fraction_PBP1B"]
+        # Unpack states
+        volume = states["shape"]["volume"]
+        extension_factor = states["wall_state"]["extension_factor"]
+        unincorporated_monomers = states["murein_state"]["unincorporated_murein"]
+        incorporated_monomers = states["murein_state"]["incorporated_murein"]
+        PBPs = dict(zip(self.pbp_ids, counts(states["bulk"], self.pbp_idx)))
+        active_fraction_PBP1a = states["pbp_state"]["active_fraction_PBP1A"]
+        active_fraction_PBP1b = states["pbp_state"]["active_fraction_PBP1B"]
 
         # Get lattice
-        lattice = state["wall_state"]["lattice"]
+        lattice = states["wall_state"]["lattice"]
 
         # When not run in an EngineProcess, this process sets the incorporated
         # murein count before MureinDivision and PBPBinding run after division
-        if state["murein_state"]["incorporated_murein"] == 0:
+        if states["murein_state"]["incorporated_murein"] == 0:
             incorporated_monomers = np.sum(lattice)
 
         if not isinstance(lattice, np.ndarray):
             lattice = np.array(lattice)
 
         # Do not run process if the cell is already cracked
-        if state["wall_state"]["cracked"]:
+        if states["wall_state"]["cracked"]:
             return update
 
         # Get number of synthesis sites

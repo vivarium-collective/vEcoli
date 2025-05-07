@@ -1,25 +1,18 @@
-"""
-MIGRATED: Lysis Initiation
-"""
-
-
 import numpy as np
 
+from ecoli.shared.interface import MigrateProcess as Process
 from ecoli.library.parameters import param_store
-from ecoli.shared.interface import ProcessBase
-from ecoli.shared.registry import ecoli_core
-from ecoli.shared.utils.schemas import get_defaults_schema
-
+from ecoli.processes.registries import topology_registry
 
 NAME = "ecoli-lysis-initiation"
 TOPOLOGY = {
     "cracked": ("wall_state", "cracked"),
     "lysis_trigger": ("lysis_trigger",),
 }
-ecoli_core.topology.register(NAME, TOPOLOGY)
+topology_registry.register(NAME, TOPOLOGY)
 
 
-class LysisInitiation(ProcessBase):
+class LysisInitiation(Process):
     name = NAME
 
     defaults = {
@@ -28,27 +21,23 @@ class LysisInitiation(ProcessBase):
         "time_step": 2,
     }
 
-    def initialize(self, config):
-        mean_lysis_time = config["mean_lysis_time"]
-        rng = np.random.default_rng(config["seed"])
+    def __init__(self, parameters=None):
+        super().__init__(parameters)
+
+        mean_lysis_time = self.parameters["mean_lysis_time"]
+        rng = np.random.default_rng(self.parameters["seed"])
         self.remaining_time = rng.exponential(mean_lysis_time)
 
-        self.input_ports = {
+    def ports_schema(self):
+        return {
             "cracked": {"_default": False, "_emit": True},
             "lysis_trigger": {"_default": False, "_emit": True},
         }
-        self.output_ports = self.input_ports['lysis_trigger']
-    
-    def inputs(self):
-        return get_defaults_schema(self.input_ports)
-    
-    def outputs(self):
-        return get_defaults_schema(self.output_ports)
 
-    def update(self, interval, state):
-        if state["cracked"] and not state["lysis_trigger"]:
-            self.remaining_time -= interval
+    def next_update(self, timestep, states):
+        if states["cracked"] and not states["lysis_trigger"]:
+            self.remaining_time -= timestep
             if self.remaining_time <= 0:
                 return {"lysis_trigger": True}
 
-        return {}  # TODO: will this work?
+        return {}

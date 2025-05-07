@@ -42,8 +42,8 @@ class PartitionedProcess(Process):
     def evolve_state(timestep, states)
     """
 
-    def __init__(self, parameters=None, core=None):
-        super().__init__(parameters, core)
+    def __init__(self, parameters=None):
+        super().__init__(parameters=parameters)
         # set partition mode
         self.evolve_only = self.parameters.get("evolve_only", False)
         self.request_only = self.parameters.get("request_only", False)

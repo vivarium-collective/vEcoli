@@ -11,9 +11,9 @@ These variables are required to plug into a `Lattice Environment`
 import math
 
 from scipy.constants import N_A
-from process_bigraph import Step
 from vivarium.library.units import units, Quantity
 
+from ecoli.shared.interface import MigrateStep as Step
 
 PI = math.pi
 AVOGADRO = N_A / units.mol
@@ -81,55 +81,125 @@ class Shape(Step):
               microns
     """
 
-    config_schema = {
-        "width": {
-            "_default": 1.0,
-            "_type": "float"
-        },
-        "periplasm_fraction": {
-            "_default": 0.2,
-            "_type": "float"
-        },
-        "cytoplasm_fraction": {
-            "_default": 0.8,
-            "_type": "float"
-        },
-        "initial_cell_volume": {
-            "_default": 1.2,
-            "_type": "float"
-        },
-        "initial_mass": {"_default": 1339, "_type": "integer"},
+    name = "ecoli-shape"
+    defaults = {
+        "width": 1.0 * units.um,
+        "periplasm_fraction": 0.2,
+        "cytoplasm_fraction": 0.8,
+        "initial_cell_volume": 1.2 * units.fL,
+        "initial_mass": 1339 * units.fg,
     }
 
-    def __init__(self, config=None, core=None):
-        super().__init__(config, core)
+    def __init__(self, parameters=None):
+        # super().__init__(parameters)
         self.outer_to_inner_area = (
-            math.pow(self.config["cytoplasm_fraction"], 1 / 3) ** 2
+            math.pow(self.parameters["cytoplasm_fraction"], 1 / 3) ** 2
         )
+        
+    def ports_schema(self):
+        schema = {
+            "cell_global": {
+                "volume": {
+                    "_default": 0 * units.fL,
+                    "_updater": "set",
+                    "_emit": True,
+                    "_divider": "split",
+                },
+                "width": {
+                    "_default": 0 * units.um,
+                    "_updater": "set",
+                    "_emit": True,
+                    "_divider": "set",
+                },
+                "length": {
+                    "_default": 0 * units.um,
+                    "_updater": "set",
+                    "_emit": True,
+                    "_divider": "split",
+                },
+                "outer_surface_area": {
+                    "_default": 0 * units.um**2,
+                    "_updater": "set",
+                    "_emit": True,
+                    "_divider": "split",
+                },
+                "inner_surface_area": {
+                    "_default": 0 * units.um**2,
+                    "_updater": "set",
+                    "_emit": True,
+                    "_divider": "split",
+                },
+                "mmol_to_counts": {
+                    "_default": 0 / units.millimolar,
+                    "_emit": True,
+                    "_divider": "split",
+                    "_updater": "set",
+                },
+                "mass": {
+                    "_default": 0 * units.fg,
+                    "_updater": "set",
+                    "_emit": True,
+                    "_divider": "split",
+                },
+            },
+            "listener_cell_mass": {
+                "_default": self.parameters["initial_mass"].magnitude,  # fg
+            },
+            "listener_cell_volume": {
+                "_default": self.parameters["initial_cell_volume"].magnitude,  # fL
+            },
+            "periplasm_global": {
+                "volume": {
+                    "_default": self.parameters["initial_cell_volume"]
+                    * self.parameters["periplasm_fraction"],  # fL
+                    "_emit": True,
+                    "_divider": "split",
+                    "_updater": "set",
+                },
+                "mmol_to_counts": {
+                    "_default": 0 / units.millimolar,
+                    "_emit": True,
+                    "_divider": "split",
+                    "_updater": "set",
+                },
+            },
+            "cytoplasm_global": {
+                "volume": {
+                    "_default": self.parameters["initial_cell_volume"]
+                    * self.parameters["cytoplasm_fraction"],  # fL
+                    "_emit": True,
+                    "_divider": "split",
+                    "_updater": "set",
+                },
+                "mmol_to_counts": {
+                    "_default": 0 / units.millimolar,
+                    "_emit": True,
+                    "_divider": "split",
+                    "_updater": "set",
+                },
+            },
+        }
+        return schema
 
-    def initial_state(self):
-        cell_volume = Quantity(
-            value=self.config["initial_cell_volume"],
-            units=units.fL
-        )
-        width = Quantity(self.config["width"], units=units.um)
+    def initial_state(self, config=None):
+        cell_volume = self.parameters["initial_cell_volume"]
+        assert isinstance(cell_volume, Quantity)
+        width = self.parameters["width"]
+        assert isinstance(width, Quantity)
         length = length_from_volume(cell_volume, width)
         outer_surface_area = surface_area_from_length(length, width)
         inner_surface_area = self.outer_to_inner_area * outer_surface_area
 
         assert (
-            self.config["periplasm_fraction"]
-            + self.config["cytoplasm_fraction"]
+            self.parameters["periplasm_fraction"]
+            + self.parameters["cytoplasm_fraction"]
             == 1
         )
-        periplasm_volume = cell_volume * self.config["periplasm_fraction"]
-        cytoplasm_volume = cell_volume * self.config["cytoplasm_fraction"]
+        periplasm_volume = cell_volume * self.parameters["periplasm_fraction"]
+        cytoplasm_volume = cell_volume * self.parameters["cytoplasm_fraction"]
 
-        mass = Quantity(value=self.config["initial_mass"], units=units.fg)
-        cell_mmol_to_counts = mmol_to_counts_from_volume(cell_volume)
-        periplasm_mmol_to_counts = mmol_to_counts_from_volume(periplasm_volume)
-        cytoplasm_mmol_to_counts = mmol_to_counts_from_volume(cytoplasm_volume)
-
+        mass = self.parameters["initial_mass"]
+        assert isinstance(mass, Quantity)
         return {
             "cell_global": {
                 "volume": cell_volume,
@@ -137,169 +207,60 @@ class Shape(Step):
                 "length": length,
                 "outer_surface_area": outer_surface_area,
                 "inner_surface_area": inner_surface_area,
-                "mmol_to_counts": cell_mmol_to_counts.m if isinstance(cell_mmol_to_counts, Quantity) else cell_mmol_to_counts,
+                "mmol_to_counts": mmol_to_counts_from_volume(cell_volume),
                 "mass": mass,
             },
             "listener_cell_mass": mass.magnitude,
             "listener_cell_volume": cell_volume.magnitude,
             "periplasm_global": {
                 "volume": periplasm_volume,
-                "mmol_to_counts": periplasm_mmol_to_counts.m if isinstance(periplasm_mmol_to_counts, Quantity) else periplasm_mmol_to_counts,
+                "mmol_to_counts": mmol_to_counts_from_volume(periplasm_volume),
             },
             "cytoplasm_global": {
                 "volume": cytoplasm_volume,
-                "mmol_to_counts": cytoplasm_mmol_to_counts.m if isinstance(cytoplasm_mmol_to_counts, Quantity) else cytoplasm_mmol_to_counts,
+                "mmol_to_counts": mmol_to_counts_from_volume(cytoplasm_volume),
             },
         }
 
-    def inputs(self):
-        return {
-            "cell_global": "tree",
-            "periplasm_global": "tree",
-            "cytoplasm_global": "tree",
-            "listener_cell_volume": "float"
-        }
-
-    def outputs(self):
-        return {
-            "cell_global": "tree",
-            "listener_cell_mass": "float",
-            "listener_cell_volume": "float",
-            "periplasm_global": "tree",
-            "cytoplasm_global": "tree"
-        }
-
-    def update(self, state):
+    def next_update(self, timestep, states):
         for port in ("cell_global", "periplasm_global", "cytoplasm_global"):
-            for variable, value in state[port].items():
-                if not isinstance(value, Quantity):
-                    state[port][variable] = Quantity(value)
-                # assert isinstance(
-                #     value, Quantity
-                # ), f"{variable}={value} is not a Quantity"
+            for variable, value in states[port].items():
+                assert isinstance(
+                    value, Quantity
+                ), f"{variable}={value} is not a Quantity"
 
-        width = state["cell_global"]["width"]
-        cell_volume = state["listener_cell_volume"] * units.fL
+        width = states["cell_global"]["width"]
+        cell_volume = states["listener_cell_volume"] * units.fL
 
         assert (
-            self.config["periplasm_fraction"]
-            + self.config["cytoplasm_fraction"]
+            self.parameters["periplasm_fraction"]
+            + self.parameters["cytoplasm_fraction"]
             == 1
         )
-        periplasm_volume = cell_volume * self.config["periplasm_fraction"]
-        cytoplasm_volume = cell_volume * self.config["cytoplasm_fraction"]
+        periplasm_volume = cell_volume * self.parameters["periplasm_fraction"]
+        cytoplasm_volume = cell_volume * self.parameters["cytoplasm_fraction"]
 
         # calculate length and surface area
         length = length_from_volume(cell_volume, width)
         outer_surface_area = surface_area_from_length(length, width)
         inner_surface_area = self.outer_to_inner_area * outer_surface_area
 
-        cell_mmol_to_counts = mmol_to_counts_from_volume(cell_volume)
-        periplasm_mmol_to_counts = mmol_to_counts_from_volume(periplasm_volume)
-        cytoplasm_mmol_to_counts = mmol_to_counts_from_volume(cytoplasm_volume)
-
         update = {
             "cell_global": {
                 "length": length,
                 "outer_surface_area": outer_surface_area,
                 "inner_surface_area": inner_surface_area,
-                "mmol_to_counts": cell_mmol_to_counts.m if isinstance(cell_mmol_to_counts, Quantity) else cell_mmol_to_counts,
-                "mass": state["listener_cell_mass"] * units.fg,
+                "mmol_to_counts": mmol_to_counts_from_volume(cell_volume),
+                "mass": states["listener_cell_mass"] * units.fg,
                 "volume": cell_volume,
             },
             "periplasm_global": {
                 "volume": periplasm_volume,
-                "mmol_to_counts": periplasm_mmol_to_counts.m if isinstance(periplasm_mmol_to_counts, Quantity) else periplasm_mmol_to_counts,
+                "mmol_to_counts": mmol_to_counts_from_volume(periplasm_volume),
             },
             "cytoplasm_global": {
                 "volume": cytoplasm_volume,
-                "mmol_to_counts": cytoplasm_mmol_to_counts.m if isinstance(cytoplasm_mmol_to_counts, Quantity) else cytoplasm_mmol_to_counts,
+                "mmol_to_counts": mmol_to_counts_from_volume(cytoplasm_volume),
             },
         }
         return update
-
-    # TODO: make the schema for cell_global more specific than just a tree
-    # def ports_schema(self):
-    #     schema = {
-    #         "cell_global": {
-    #             "volume": {
-    #                 "_default": 0 * units.fL,
-    #                 "_updater": "set",
-    #                 "_emit": True,
-    #                 "_divider": "split",
-    #             },
-    #             "width": {
-    #                 "_default": 0 * units.um,
-    #                 "_updater": "set",
-    #                 "_emit": True,
-    #                 "_divider": "set",
-    #             },
-    #             "length": {
-    #                 "_default": 0 * units.um,
-    #                 "_updater": "set",
-    #                 "_emit": True,
-    #                 "_divider": "split",
-    #             },
-    #             "outer_surface_area": {
-    #                 "_default": 0 * units.um**2,
-    #                 "_updater": "set",
-    #                 "_emit": True,
-    #                 "_divider": "split",
-    #             },
-    #             "inner_surface_area": {
-    #                 "_default": 0 * units.um**2,
-    #                 "_updater": "set",
-    #                 "_emit": True,
-    #                 "_divider": "split",
-    #             },
-    #             "mmol_to_counts": {
-    #                 "_default": 0 / units.millimolar,
-    #                 "_emit": True,
-    #                 "_divider": "split",
-    #                 "_updater": "set",
-    #             },
-    #             "mass": {
-    #                 "_default": 0 * units.fg,
-    #                 "_updater": "set",
-    #                 "_emit": True,
-    #                 "_divider": "split",
-    #             },
-    #         },
-    #         "listener_cell_mass": {
-    #             "_default": self.parameters["initial_mass"].magnitude,  # fg
-    #         },
-    #         "listener_cell_volume": {
-    #             "_default": self.parameters["initial_cell_volume"].magnitude,  # fL
-    #         },
-    #         "periplasm_global": {
-    #             "volume": {
-    #                 "_default": self.parameters["initial_cell_volume"]
-    #                 * self.parameters["periplasm_fraction"],  # fL
-    #                 "_emit": True,
-    #                 "_divider": "split",
-    #                 "_updater": "set",
-    #             },
-    #             "mmol_to_counts": {
-    #                 "_default": 0 / units.millimolar,
-    #                 "_emit": True,
-    #                 "_divider": "split",
-    #                 "_updater": "set",
-    #             },
-    #         },
-    #         "cytoplasm_global": {
-    #             "volume": {
-    #                 "_default": self.parameters["initial_cell_volume"]
-    #                 * self.parameters["cytoplasm_fraction"],  # fL
-    #                 "_emit": True,
-    #                 "_divider": "split",
-    #                 "_updater": "set",
-    #             },
-    #             "mmol_to_counts": {
-    #                 "_default": 0 / units.millimolar,
-    #                 "_emit": True,
-    #                 "_divider": "split",
-    #                 "_updater": "set",
-    #             },
-    #         },
-    #     }
-    #     return schema

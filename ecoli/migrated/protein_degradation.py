@@ -1,6 +1,6 @@
 """
 ===================
-MIGRATED: Protein Degradation
+Protein Degradation
 ===================
 
 This process accounts for the degradation of protein monomers.
@@ -13,27 +13,30 @@ TODO:
 
 import numpy as np
 
+from vivarium.core.composition import simulate_process
+
 from ecoli.library.data_predicates import (
     monotonically_increasing,
     monotonically_decreasing,
     all_nonnegative,
 )
-from ecoli.library.schema import counts, bulk_name_to_idx
-from ecoli.shared.utils.schemas import numpy_schema
-from ecoli.shared.registry import ecoli_core
+from ecoli.library.schema import numpy_schema, counts, bulk_name_to_idx
+
+from ecoli.processes.registries import topology_registry
 from ecoli.migrated.partition import PartitionedProcess
 
 
 # Register default topology for this process, associating it with process name
 NAME = "ecoli-protein-degradation"
 TOPOLOGY = {"bulk": ("bulk",), "timestep": ("timestep",)}
-ecoli_core.topology.register(NAME, TOPOLOGY)
+topology_registry.register(NAME, TOPOLOGY)
 
 
 class ProteinDegradation(PartitionedProcess):
     """Protein Degradation PartitionedProcess"""
 
     name = NAME
+    topology = TOPOLOGY
     defaults = {
         "raw_degradation_rate": [],
         "water_id": "h2o",
@@ -46,24 +49,24 @@ class ProteinDegradation(PartitionedProcess):
     }
 
     # Constructor
-    def __init__(self, config=None, core=None):
-        super().__init__(config, core)
+    def __init__(self, parameters=None):
+        super().__init__(parameters)
 
-        self.raw_degradation_rate = self.config["raw_degradation_rate"]
+        self.raw_degradation_rate = self.parameters["raw_degradation_rate"]
 
-        self.water_id = self.config["water_id"]
-        self.amino_acid_ids = self.config["amino_acid_ids"]
-        self.amino_acid_counts = self.config["amino_acid_counts"]
+        self.water_id = self.parameters["water_id"]
+        self.amino_acid_ids = self.parameters["amino_acid_ids"]
+        self.amino_acid_counts = self.parameters["amino_acid_counts"]
 
         self.metabolite_ids = self.amino_acid_ids + [self.water_id]
         self.amino_acid_indexes = np.arange(0, len(self.amino_acid_ids))
         self.water_index = self.metabolite_ids.index(self.water_id)
 
         # Build protein IDs for S matrix
-        self.protein_ids = self.config["protein_ids"]
-        self.protein_lengths = self.config["protein_lengths"]
+        self.protein_ids = self.parameters["protein_ids"]
+        self.protein_lengths = self.parameters["protein_lengths"]
 
-        self.seed = self.config["seed"]
+        self.seed = self.parameters["seed"]
         self.random_state = np.random.RandomState(seed=self.seed)
 
         self.metabolite_idx = None
@@ -80,15 +83,10 @@ class ProteinDegradation(PartitionedProcess):
             np.sum(self.degradation_matrix[self.amino_acid_indexes, :], axis=0) - 1
         )
 
-    def inputs(self):
+    def ports_schema(self):
         return {
             "bulk": numpy_schema("bulk"),
-            "timestep": self.timestep_schema,
-        }
-    
-    def outputs(self):
-        return {
-            "bulk": numpy_schema("bulk")
+            "timestep": {"_default": self.parameters["time_step"]},
         }
 
     def calculate_request(self, timestep, states):
@@ -124,11 +122,11 @@ class ProteinDegradation(PartitionedProcess):
         }
         return requests
 
-    def update(self, state, interval):
+    def evolve_state(self, timestep, states):
         # Degrade selected proteins, release amino acids from those proteins
         # back into the cell, and consume H_2O that is required for the
         # degradation process
-        allocated_proteins = counts(state["bulk"], self.protein_idx)
+        allocated_proteins = counts(states["bulk"], self.protein_idx)
         metabolites_delta = np.dot(self.degradation_matrix, allocated_proteins)
 
         update = {
@@ -172,9 +170,9 @@ def test_protein_degradation(return_data=False):
         )
     }
 
-    settings = {"interval": 100, "state": state}
+    settings = {"total_time": 100, "initial_state": state}
 
-    data = protein_degradation.update(**settings)
+    data = simulate_process(protein_degradation, settings)
 
     # Assertions =======================================================
     bulk_timeseries = np.array(data["bulk"])
@@ -234,3 +232,7 @@ def test_protein_degradation(return_data=False):
 
     if return_data:
         return data
+
+
+if __name__ == "__main__":
+    test_protein_degradation()

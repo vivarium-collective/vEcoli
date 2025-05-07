@@ -29,6 +29,7 @@ from ecoli.library.schema import (
 from wholecell.utils import units
 from wholecell.utils.polymerize import buildSequences, polymerize, computeMassIncrease
 
+from ecoli.processes.registries import topology_registry
 from ecoli.migrated.partition import PartitionedProcess
 
 
@@ -44,7 +45,7 @@ TOPOLOGY = {
     "environment": ("environment",),
     "timestep": ("timestep",),
 }
-# topology_registry.register(NAME, TOPOLOGY)
+topology_registry.register(NAME, TOPOLOGY)
 
 
 class ChromosomeReplication(PartitionedProcess):
@@ -75,52 +76,45 @@ class ChromosomeReplication(PartitionedProcess):
         "emit_unique": False,
     }
 
-    def initialize(self, config):
-        self.max_time_step = config["max_time_step"]
+    def __init__(self, parameters=None):
+        super().__init__(parameters)
+
+        self.max_time_step = self.parameters["max_time_step"]
 
         # Load parameters
         self.get_dna_critical_mass = lambda doubling_time: units.Unum
-        self.criticalInitiationMass = config["criticalInitiationMass"]
-        self.nutrientToDoublingTime = config["nutrientToDoublingTime"]
-        self.replichore_lengths = config["replichore_lengths"]
-        self.sequences = self.config["sequences"]
-        self.polymerized_dntp_weights = config["polymerized_dntp_weights"]
-        self.replication_coordinate = config["replication_coordinate"]
-        self.D_period = config["D_period"]
-        self.replisome_protein_mass = config["replisome_protein_mass"]
-        self.no_child_place_holder = config["no_child_place_holder"]
-        self.basal_elongation_rate = config["basal_elongation_rate"]
+        self.criticalInitiationMass = self.parameters["criticalInitiationMass"]
+        self.nutrientToDoublingTime = self.parameters["nutrientToDoublingTime"]
+        self.replichore_lengths = self.parameters["replichore_lengths"]
+        self.sequences = self.parameters["sequences"]
+        self.polymerized_dntp_weights = self.parameters["polymerized_dntp_weights"]
+        self.replication_coordinate = self.parameters["replication_coordinate"]
+        self.D_period = self.parameters["D_period"]
+        self.replisome_protein_mass = self.parameters["replisome_protein_mass"]
+        self.no_child_place_holder = self.parameters["no_child_place_holder"]
+        self.basal_elongation_rate = self.parameters["basal_elongation_rate"]
         self.make_elongation_rates = (
             lambda random, replisomes, base, time_step: units.Unum
         )
 
         # Sim options
-        self.mechanistic_replisome = config["mechanistic_replisome"]
+        self.mechanistic_replisome = self.parameters["mechanistic_replisome"]
 
         # random state
-        self.seed = config["seed"]
+        self.seed = self.parameters["seed"]
         self.random_state = np.random.RandomState(seed=self.seed)
 
-        self.emit_unique = config.get("emit_unique", True)
+        self.emit_unique = self.parameters.get("emit_unique", True)
 
         # Bulk molecule names
-        self.replisome_trimers_subunits = config["replisome_trimers_subunits"]
-        self.replisome_monomers_subunits = config[
+        self.replisome_trimers_subunits = self.parameters["replisome_trimers_subunits"]
+        self.replisome_monomers_subunits = self.parameters[
             "replisome_monomers_subunits"
         ]
-        self.dntps = config["dntps"]
-        self.ppi = config["ppi"]
+        self.dntps = self.parameters["dntps"]
+        self.ppi = self.parameters["ppi"]
 
         self.ppi_idx = None
-
-    @property
-    def listener_schemas(self):
-        return {
-            "mass": listener_schema({"cell_mass": 0.0}),
-            "replication_data": listener_schema(
-                {"critical_initiation_mass": 0.0, "critical_mass_per_oriC": 0.0}
-            )
-        }
 
     def ports_schema(self):
         return {
@@ -130,46 +124,46 @@ class ChromosomeReplication(PartitionedProcess):
                 "mass": listener_schema({"cell_mass": 0.0}),
                 "replication_data": listener_schema(
                     {"critical_initiation_mass": 0.0, "critical_mass_per_oriC": 0.0}
-                )
+                ),
             },
             "environment": {
                 "media_id": {"_default": "", "_updater": "set"},
             },
             "active_replisomes": numpy_schema(
-                "active_replisomes"
+                "active_replisomes", emit=self.parameters["emit_unique"]
             ),
-            "oriCs": numpy_schema("oriCs"),
+            "oriCs": numpy_schema("oriCs", emit=self.parameters["emit_unique"]),
             "chromosome_domains": numpy_schema(
-                "chromosome_domains"
+                "chromosome_domains", emit=self.parameters["emit_unique"]
             ),
             "full_chromosomes": numpy_schema(
-                "full_chromosomes"
+                "full_chromosomes", emit=self.parameters["emit_unique"]
             ),
-            "timestep": {"_default": self.config["time_step"]},
+            "timestep": {"_default": self.parameters["time_step"]},
         }
 
-    def calculate_request(self, state, interval):
+    def calculate_request(self, timestep, states):
         if self.ppi_idx is None:
-            self.ppi_idx = bulk_name_to_idx(self.ppi, state["bulk"]["id"])
+            self.ppi_idx = bulk_name_to_idx(self.ppi, states["bulk"]["id"])
             self.replisome_trimers_idx = bulk_name_to_idx(
-                self.replisome_trimers_subunits, state["bulk"]["id"]
+                self.replisome_trimers_subunits, states["bulk"]["id"]
             )
             self.replisome_monomers_idx = bulk_name_to_idx(
-                self.replisome_monomers_subunits, state["bulk"]["id"]
+                self.replisome_monomers_subunits, states["bulk"]["id"]
             )
-            self.dntps_idx = bulk_name_to_idx(self.dntps, state["bulk"]["id"])
+            self.dntps_idx = bulk_name_to_idx(self.dntps, states["bulk"]["id"])
         requests = {}
         # Get total count of existing oriC's
-        n_oriC = state["oriCs"]["_entryState"].sum()
+        n_oriC = states["oriCs"]["_entryState"].sum()
         # If there are no origins, return immediately
         if n_oriC == 0:
             return requests
 
         # Get current cell mass
-        cellMass = state["listeners"]["mass"]["cell_mass"] * units.fg
+        cellMass = states["listeners"]["mass"]["cell_mass"] * units.fg
 
         # Get critical initiation mass for current simulation environment
-        current_media_id = state["environment"]["media_id"]
+        current_media_id = states["environment"]["media_id"]
         self.criticalInitiationMass = self.get_dna_critical_mass(
             self.nutrientToDoublingTime[current_media_id]
         )
@@ -190,19 +184,19 @@ class ChromosomeReplication(PartitionedProcess):
             requests["bulk"].append((self.replisome_monomers_idx, 2 * n_oriC))
 
         # If there are no active forks return
-        n_active_replisomes = state["active_replisomes"]["_entryState"].sum()
+        n_active_replisomes = states["active_replisomes"]["_entryState"].sum()
         if n_active_replisomes == 0:
             return requests
 
         # Get current locations of all replication forks
-        (fork_coordinates,) = attrs(state["active_replisomes"], ["coordinates"])
+        (fork_coordinates,) = attrs(states["active_replisomes"], ["coordinates"])
         sequence_length = np.abs(np.repeat(fork_coordinates, 2))
 
         self.elongation_rates = self.make_elongation_rates(
             self.random_state,
             len(self.sequences),
             self.basal_elongation_rate,
-            state["timestep"],
+            states["timestep"],
         )
 
         sequences = buildSequences(
@@ -219,7 +213,7 @@ class ChromosomeReplication(PartitionedProcess):
 
         # If one dNTP is limiting then limit the request for the other three by
         # the same ratio
-        dNtpsTotal = counts(state["bulk"], self.dntps_idx)
+        dNtpsTotal = counts(states["bulk"], self.dntps_idx)
         maxFractionalReactionLimit = (
             np.fmin(1, dNtpsTotal / sequenceComposition)
         ).min()
@@ -234,7 +228,7 @@ class ChromosomeReplication(PartitionedProcess):
 
         return requests
 
-    def evolve_state(self, state, interval):
+    def evolve_state(self, timestep, states):
         # Initialize the update dictionary
         update = {
             "bulk": [],
@@ -247,8 +241,8 @@ class ChromosomeReplication(PartitionedProcess):
 
         # Module 1: Replication initiation
         # Get number of existing replisomes and oriCs
-        n_active_replisomes = state["active_replisomes"]["_entryState"].sum()
-        n_oriC = state["oriCs"]["_entryState"].sum()
+        n_active_replisomes = states["active_replisomes"]["_entryState"].sum()
+        n_oriC = states["oriCs"]["_entryState"].sum()
 
         # If there are no origins, return immediately
         if n_oriC == 0:
@@ -256,14 +250,14 @@ class ChromosomeReplication(PartitionedProcess):
 
         # Get attributes of existing chromosome domains
         domain_index_existing_domain, child_domains = attrs(
-            state["chromosome_domains"], ["domain_index", "child_domains"]
+            states["chromosome_domains"], ["domain_index", "child_domains"]
         )
 
         initiate_replication = False
         if self.criticalMassPerOriC >= 1.0:
             # Get number of available replisome subunits
-            n_replisome_trimers = counts(state["bulk"], self.replisome_trimers_idx)
-            n_replisome_monomers = counts(state["bulk"], self.replisome_monomers_idx)
+            n_replisome_trimers = counts(states["bulk"], self.replisome_trimers_idx)
+            n_replisome_monomers = counts(states["bulk"], self.replisome_monomers_idx)
             # Initiate replication only when
             # 1) The cell has reached the critical mass per oriC
             # 2) If mechanistic replisome option is on, there are enough
@@ -278,7 +272,7 @@ class ChromosomeReplication(PartitionedProcess):
         # origin of replication
         if initiate_replication:
             # Get attributes of existing oriCs and domains
-            (domain_index_existing_oric,) = attrs(state["oriCs"], ["domain_index"])
+            (domain_index_existing_oric,) = attrs(states["oriCs"], ["domain_index"])
 
             # Get indexes of the domains that would be getting child domains
             # (domains that contain an origin)
@@ -362,7 +356,7 @@ class ChromosomeReplication(PartitionedProcess):
             return update
 
         # Get allocated counts of dNTPs
-        dNtpCounts = counts(state["bulk"], self.dntps_idx)
+        dNtpCounts = counts(states["bulk"], self.dntps_idx)
 
         # Get attributes of existing replisomes
         (
@@ -370,7 +364,7 @@ class ChromosomeReplication(PartitionedProcess):
             right_replichore,
             coordinates_replisome,
         ) = attrs(
-            state["active_replisomes"],
+            states["active_replisomes"],
             ["domain_index", "right_replichore", "coordinates"],
         )
 
@@ -417,7 +411,7 @@ class ChromosomeReplication(PartitionedProcess):
         updated_coordinates[~right_replichore] = -updated_coordinates[~right_replichore]
 
         # Update attributes and submasses of replisomes
-        (current_dna_mass,) = attrs(state["active_replisomes"], ["massDiff_DNA"])
+        (current_dna_mass,) = attrs(states["active_replisomes"], ["massDiff_DNA"])
         update["active_replisomes"].update(
             {
                 "set": {
@@ -450,9 +444,9 @@ class ChromosomeReplication(PartitionedProcess):
             (
                 domain_index_domains,
                 child_domains,
-            ) = attrs(state["chromosome_domains"], ["domain_index", "child_domains"])
+            ) = attrs(states["chromosome_domains"], ["domain_index", "child_domains"])
             (domain_index_full_chroms,) = attrs(
-                state["full_chromosomes"], ["domain_index"]
+                states["full_chromosomes"], ["domain_index"]
             )
 
             # Initialize array of replisomes that should be deleted
@@ -508,7 +502,7 @@ class ChromosomeReplication(PartitionedProcess):
                 chromosome_add_update = {
                     "add": {
                         "domain_index": domain_index_new_full_chroms,
-                        "division_time": state["global_time"] + self.D_period,
+                        "division_time": states["global_time"] + self.D_period,
                         "has_triggered_division": False,
                     }
                 }
@@ -540,3 +534,6 @@ def test_chromosome_replication():
     process = ChromosomeReplication(test_config)
     assert process is not None
 
+
+if __name__ == "__main__":
+    test_chromosome_replication()

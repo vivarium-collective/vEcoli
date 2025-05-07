@@ -1,6 +1,6 @@
 """
 ===========
-Equilibrium
+MIGRATED: Equilibrium
 ===========
 
 This process models how ligands are bound to or unbound
@@ -10,12 +10,10 @@ that maintains equilibrium.
 
 import numpy as np
 
-from ecoli.library.schema import bulk_name_to_idx, counts
-
-from ecoli.migrated.partition import PartitionedProcess
-from ecoli.shared.registry import ecoli_core
-from ecoli.shared.utils.schemas import listener_schema, numpy_schema
+from ecoli.library.schema import numpy_schema, bulk_name_to_idx, counts, listener_schema
 from ecoli.processes.registries import topology_registry
+from ecoli.migrated.partition import PartitionedProcess
+
 from wholecell.utils import units
 
 
@@ -49,22 +47,24 @@ class Equilibrium(PartitionedProcess):
     }
 
     # Constructor
-    def initialize(self, config):
+    def __init__(self, parameters=None):
+        super().__init__(parameters)
+
         # Simulation options
         # utilized in the fluxes and molecules function
-        self.jit = self.config["jit"]
+        self.jit = self.parameters["jit"]
 
         # Get constants
-        self.n_avogadro = self.config["n_avogadro"]
-        self.cell_density = self.config["cell_density"]
+        self.n_avogadro = self.parameters["n_avogadro"]
+        self.cell_density = self.parameters["cell_density"]
 
         # Create matrix and method
         # stoichMatrix: (94, 33), molecule counts are (94,).
-        self.stoichMatrix = self.config["stoichMatrix"]
+        self.stoichMatrix = self.parameters["stoichMatrix"]
 
         # fluxesAndMoleculesToSS: solves ODES to get to steady state based off
         # of cell density, volumes and molecule counts
-        self.fluxesAndMoleculesToSS = self.config["fluxesAndMoleculesToSS"]
+        self.fluxesAndMoleculesToSS = self.parameters["fluxesAndMoleculesToSS"]
 
         self.product_indices = [
             idx for idx in np.where(np.any(self.stoichMatrix > 0, axis=1))[0]
@@ -72,18 +72,18 @@ class Equilibrium(PartitionedProcess):
 
         # Build views
         # moleculeNames: list of molecules that are being iterated over size: 94
-        self.moleculeNames = self.config["moleculeNames"]
+        self.moleculeNames = self.parameters["moleculeNames"]
         self.molecule_idx = None
 
-        self.seed = self.config["seed"]
+        self.seed = self.parameters["seed"]
         self.random_state = np.random.RandomState(seed=self.seed)
 
-        self.complex_ids = self.config["complex_ids"]
-        self.reaction_ids = self.config["reaction_ids"]
-    
-    @property
-    def listener_schemas(self):
+        self.complex_ids = self.parameters["complex_ids"]
+        self.reaction_ids = self.parameters["reaction_ids"]
+
+    def ports_schema(self):
         return {
+            "bulk": numpy_schema("bulk"),
             "listeners": {
                 "mass": listener_schema({"cell_mass": 0}),
                 "equilibrium_listener": {
@@ -97,13 +97,7 @@ class Equilibrium(PartitionedProcess):
                     )
                 },
             },
-        }
-
-    def ports_schema(self):
-        return {
-            "bulk": numpy_schema("bulk"),
-            "listeners": self.listener_schemas,
-            "timestep": {"_default": self.config["time_step"]},
+            "timestep": {"_default": self.parameters["time_step"]},
         }
 
     def calculate_request(self, timestep, states):

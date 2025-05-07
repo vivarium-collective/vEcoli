@@ -5,17 +5,17 @@ MIGRATED: Convenience Kinetics
 """
 
 import numpy as np
+from vivarium.core.composition import simulate_process
 
-from ecoli.shared.interface import ProcessBase
+from ecoli.shared.interface import MigrateProcess as Process
 from ecoli.library.kinetic_rate_laws import KineticFluxModel
-from ecoli.library.schema import bulk_name_to_idx, counts
-from ecoli.shared.utils.schemas import numpy_schema
+from ecoli.library.schema import numpy_schema, bulk_name_to_idx, counts
 
 
 NAME = "enzyme_kinetics"
 
 
-class EnzymeKinetics(ProcessBase):
+class EnzymeKinetics(Process):
     """Michaelis-Menten-style enzyme kinetics model
 
     Arguments:
@@ -82,11 +82,11 @@ class EnzymeKinetics(ProcessBase):
         "kinetic_parameters": {},
     }
 
-    def __init__(self, config=None, core=None):
-        super().__init__(config, core)
+    def __init__(self, parameters=None):
+        super().__init__(parameters)
 
-        self.reactions = self.config["reactions"]
-        kinetic_parameters = self.config["kinetic_parameters"]
+        self.reactions = self.parameters["reactions"]
+        kinetic_parameters = self.parameters["kinetic_parameters"]
 
         # make the kinetic model
         self.kinetic_rate_laws = KineticFluxModel(self.reactions, kinetic_parameters)
@@ -105,26 +105,27 @@ class EnzymeKinetics(ProcessBase):
     #         initial_conc, self.parameters['time_step'])
     #     return initial_fluxes
 
-    def inputs(self):
-        return {
+    def ports_schema(self):
+        schema = {
             "bulk": numpy_schema("bulk"),
-        }
-    
-    def outputs(self):
-        return {
             "fluxes": {
-                str(rxn_id): "float"
+                str(rxn_id): {
+                    "_default": 0.0,
+                    "_updater": "set",
+                }
                 for rxn_id in self.kinetic_rate_laws.reaction_ids
             },
         }
 
-    def update(self, state, interval):
+        return schema
+
+    def next_update(self, timestep, states):
         if self.molecules_idx is None:
-            bulk_ids = state["bulk"]["id"]
+            bulk_ids = states["bulk"]["id"]
             self.molecules_idx = bulk_name_to_idx(self.molecules_ids, bulk_ids)
 
         # TODO (Cyrus) -- convert molecules to concentrations
-        molecule_counts = counts(state["bulk"], self.molecules_idx)
+        molecule_counts = counts(states["bulk"], self.molecules_idx)
         tuplified_states = {
             ("bulk", mol): molecule_counts[i]
             for i, mol in enumerate(self.molecules_ids)
@@ -169,7 +170,7 @@ def test_enzyme_kinetics(end_time=100):
     }
     settings = {"total_time": end_time, "initial_state": initial_state}
 
-    data = kinetic_process.update(settings.get("initial_state"), settings.get("total_time"))
+    data = simulate_process(kinetic_process, settings)
     return data is not None
 
 

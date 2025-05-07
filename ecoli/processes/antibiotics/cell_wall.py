@@ -113,8 +113,8 @@ class CellWall(Process):
         "time_step": 10,
     }
 
-    def __init__(self, parameters=None, core=None):
-        super().__init__(parameters, core)
+    def __init__(self, parameters=None):
+        super().__init__(parameters)
 
         self.murein = self.parameters["murein"]
         self.pbp1a = self.parameters["PBP"]["PBP1A"]

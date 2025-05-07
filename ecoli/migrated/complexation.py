@@ -20,20 +20,22 @@ simulation.
 import numpy as np
 from stochastic_arrow import StochasticSystem
 
-from ecoli.library.schema import bulk_name_to_idx, counts
+from vivarium.core.composition import simulate_process
+
+from ecoli.library.schema import numpy_schema, bulk_name_to_idx, counts, listener_schema
+from ecoli.processes.registries import topology_registry
 from ecoli.migrated.partition import PartitionedProcess
-from ecoli.shared.registry import ecoli_core
-from ecoli.shared.utils.schemas import listener_schema, numpy_schema
 
-
+# Register default topology for this process, associating it with process name
 NAME = "ecoli-complexation"
 TOPOLOGY = {"bulk": ("bulk",), "listeners": ("listeners",), "timestep": ("timestep",)}
-# ecoli_core.topology.register(NAME, TOPOLOGY)
+topology_registry.register(NAME, TOPOLOGY)
 
 
 class Complexation(PartitionedProcess):
     """Complexation PartitionedProcess"""
-    name = NAME 
+
+    name = NAME
     topology = TOPOLOGY
     defaults = {
         "stoichiometry": np.array([[]]),
@@ -45,47 +47,46 @@ class Complexation(PartitionedProcess):
         "time_step": 1,
     }
 
-    def initialize(self, config):
-        self.stoichiometry = config["stoichiometry"]
-        self.rates = config["rates"]
-        self.molecule_names = config["molecule_names"]
-        self.reaction_ids = config["reaction_ids"]
-        self.complex_ids = config["complex_ids"]
+    def __init__(self, parameters=None):
+        super().__init__(parameters)
 
-        self.randomState = np.random.RandomState(seed=config["seed"])
+        self.stoichiometry = self.parameters["stoichiometry"]
+        self.rates = self.parameters["rates"]
+        self.molecule_names = self.parameters["molecule_names"]
+        self.molecule_idx = None
+        self.reaction_ids = self.parameters["reaction_ids"]
+        self.complex_ids = self.parameters["complex_ids"]
+
+        self.randomState = np.random.RandomState(seed=self.parameters["seed"])
         self.seed = self.randomState.randint(2**31)
         self.system = StochasticSystem(self.stoichiometry, random_seed=self.seed)
-    
-    @property
-    def listener_schemas(self) -> dict:
-        return {
-            "complexation_listener": {
-                **listener_schema(
-                    {
-                        "complexation_events": (
-                            [0] * len(self.reaction_ids),
-                            self.reaction_ids,
-                        )
-                    }
-                )
-            }
-        }
-    
+
     def ports_schema(self):
         return {
             "bulk": numpy_schema("bulk"),
-            "listeners": self.listener_schemas,
-            "timestep": {"_default": self.config["time_step"]},
+            "listeners": {
+                "complexation_listener": {
+                    **listener_schema(
+                        {
+                            "complexation_events": (
+                                [0] * len(self.reaction_ids),
+                                self.reaction_ids,
+                            )
+                        }
+                    )
+                },
+            },
+            "timestep": {"_default": self.parameters["time_step"]},
         }
 
-    def calculate_request(self, state, interval):
-        timestep = state["timestep"]
+    def calculate_request(self, timestep, states):
+        timestep = states["timestep"]
         if self.molecule_idx is None:
             self.molecule_idx = bulk_name_to_idx(
-                self.molecule_names, state["bulk"]["id"]
+                self.molecule_names, states["bulk"]["id"]
             )
 
-        moleculeCounts = counts(state["bulk"], self.molecule_idx)
+        moleculeCounts = counts(states["bulk"], self.molecule_idx)
 
         result = self.system.evolve(timestep, moleculeCounts, self.rates)
         updatedMoleculeCounts = result["outcome"]
@@ -94,10 +95,10 @@ class Complexation(PartitionedProcess):
             (self.molecule_idx, np.fmax(moleculeCounts - updatedMoleculeCounts, 0))
         ]
         return requests
-    
-    def evolve_state(self, state, interval):
-        timestep = state["timestep"]
-        substrate = counts(state["bulk"], self.molecule_idx)
+
+    def evolve_state(self, timestep, states):
+        timestep = states["timestep"]
+        substrate = counts(states["bulk"], self.molecule_idx)
 
         result = self.system.evolve(timestep, substrate, self.rates)
         complexationEvents = result["occurrences"]
@@ -114,43 +115,44 @@ class Complexation(PartitionedProcess):
         }
 
         return update
-    
-    
-def test_partition():
-    # TODO: here use parameterization from migration.migration_utils in run_partitioned_process
-    pass
 
 
 def test_complexation():
-    from ecoli import ecoli_core
-
-    # define config
     test_config = {
-        "stoichiometry": [[-1, 1, 0], [0, -1, 1], [1, 0, -1], [-1, 0, 1], [1, -1, 0], [0, 1, -1]],
-        "rates": np.random.random((6,)).tolist(),
+        "stoichiometry": np.array(
+            [[-1, 1, 0], [0, -1, 1], [1, 0, -1], [-1, 0, 1], [1, -1, 0], [0, 1, -1]],
+            np.int64,
+        ),
+        "rates": np.array([1, 1, 1, 1, 1, 1], np.float64),
         "molecule_names": ["A", "B", "C"],
         "seed": 1,
         "reaction_ids": [1, 2, 3, 4, 5, 6],
         "complex_ids": [1, 2, 3, 4, 5, 6],
     }
 
-    complexation = Complexation(config=test_config, core=ecoli_core)
+    complexation = Complexation(test_config)
 
-    timestep = 1.0
     state = {
-        "bulk": [
-            ("A", 10),
-            ("B", 20),
-            ("C", 30),
-        ],
-        "timestep": timestep,
+        "bulk": np.array(
+            [
+                ("A", 10),
+                ("B", 20),
+                ("C", 30),
+            ],
+            dtype=[("id", "U40"), ("count", int)],
+        )
     }
 
-    data = complexation.update(state, timestep)
-    # complexation_events = data["listeners"]["complexation_listener"][
-    #     "complexation_events"
-    # ]
-    # assert isinstance(complexation_events, list)
-    # assert isinstance(complexation_events[1], list), "This is not a list."  # <-- TODO: does this need to be a list with the new structure?
-    print(f"Data:\n{data}")
+    settings = {"total_time": 10, "initial_state": state}
 
+    data = simulate_process(complexation, settings)
+    complexation_events = data["listeners"]["complexation_listener"][
+        "complexation_events"
+    ]
+    assert isinstance(complexation_events[0], list)
+    assert isinstance(complexation_events[1], list)
+    print(data)
+
+
+if __name__ == "__main__":
+    test_complexation()

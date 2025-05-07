@@ -1,6 +1,4 @@
-# from ecoli.shared.interface import MigrateProcess as Process
-from process_bigraph import Process
-
+from ecoli.shared.interface import MigrateProcess as Process
 from ecoli.library.schema import bulk_name_to_idx, numpy_schema, counts
 
 
@@ -9,23 +7,14 @@ class BulkTimelineProcess(Process):
 
     name = "bulk-timeline"
 
-    config_schema = {
-        "time_step": {
-            "_type": "float",
-            "_default": 1.0,
-        },
-        "timeline": {"_type": "tree", "_default": {}},
-    }
+    defaults = {"time_step": 1.0, "timeline": []}
 
-    def __init__(self, config=None, core=None):
-        super().__init__(config, core)
-
+    def __init__(self, parameters=None):
+        super().__init__(parameters)
         # Sort the timeline, which should be in the format:
         # {time: {(path, to, store): new_value, ...}, ...}
-        self.name = "bulk-timeline"
-        self.timeline = dict(sorted(self.config["timeline"].items()))
-
-        # Get top-level store names from paths in timeline TODO: how is this used?
+        self.timeline = dict(sorted(self.parameters["timeline"].items()))
+        # Get top-level store names from paths in timeline
         self.timeline_ports = [
             path[0] for events in self.timeline.values() for path in events.keys()
         ]
