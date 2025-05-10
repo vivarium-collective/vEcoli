@@ -42,12 +42,15 @@ from vivarium.core.composition import (
     simulate_composite,
     PROCESS_OUT_DIR,
 )
-from vivarium.core.process import Process
 from vivarium.core.composer import Composer
 from vivarium.core.registry import process_registry
+from vivarium.core.process import Process
 from vivarium.processes.injector import Injector
 from vivarium.plots.simulation_output import plot_simulation_output
 from vivarium.library.units import units
+
+# from pbg.data_model.base_process import BaseProcess
+
 
 TOY_ANTIBIOTIC_THRESHOLD = 5.0 * units.mM
 TOY_INJECTION_RATE = 2.0 * units.mM  # implicitly per second

@@ -99,6 +99,9 @@ This will run the following basic simulation workflow:
 3. [Analyze simulation output](runscripts/analysis.py) by creating a
     [mass fraction plot](ecoli/analysis/single/mass_fraction_summary.py).
 
+### Configuring a jupyter kernel:
+
+python -m ipykernel install --user --name=v2Ecoli --display-name "Python (v2Ecoli)"
 
 ## Next Steps
 Check out the [user guide](https://covertlab.github.io/vEcoli/) for a high-level

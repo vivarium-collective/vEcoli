@@ -13,6 +13,7 @@ out/
 /out
 .idea/
 *.iml
+venv
 
 # User files #
 ################
@@ -62,3 +63,9 @@ trace-*
 #######################
 .venv/
 
+encryption.py
+example.ipynb
+*.todo
+notes.md
+puzzle.py
+*.pckl

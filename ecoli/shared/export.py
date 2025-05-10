@@ -1,0 +1,108 @@
+"""
+This module's logic should ONLY be used when/if the DEFAULT model changes. Run once.
+
+as of 5/1/25: already run.
+"""
+
+import simdjson as json
+import copy
+import os 
+import unum
+
+import numpy as np
+from process_bigraph import pp
+from vivarium.core.composer import Composer
+
+from ecoli.experiments.ecoli_master_sim import EcoliSim
+from ecoli import ROOT
+
+
+def format_config(d: dict, instance=None):
+    if isinstance(d, dict):
+        for key, val in d.items():
+            if isinstance(val, np.ndarray): 
+                d[key] = val.tolist()
+            if isinstance(val, set):
+                d[key] = list(val)
+            if isinstance(val, unum.Unum):
+                d[key] = str(val)
+            if type(val).__name__ == "function":
+                if instance is not None:
+                    setattr(instance, key, val)
+                d[key] = key
+        else:
+            return {k: format_config(v, instance) for k, v in d.items()}
+    else:
+        return d 
+    
+
+def extract_process_states(export: bool = False):
+    sim = EcoliSim.from_file()
+    sim.build_ecoli()
+    processes = sim.processes
+
+    data_dir = os.path.join(ROOT, 'data', 'model')
+    topology_fp = os.path.join(data_dir, 'single_topology.json')
+    with open(topology_fp, 'r') as f:
+        raw_state = json.load(f)
+    
+    state = {}
+    for process_id, process_ports in raw_state.items():
+        process_spec = {
+            "address": f"local:{process_id}",
+            "inputs": process_ports,
+            "outputs": process_ports
+        }
+
+        # attempt config and exact address extract if instance is available
+        if process_id in processes:
+            instance = processes[process_id]
+            if 'name' in dir(instance):
+                process_spec["address"] = f"local:{instance.name}"
+
+            process_config = copy.deepcopy(instance.defaults)
+            process_config = format_config(
+                process_config, 
+                instance
+            )
+            process_spec["config"] = process_config
+
+        state[process_id] = process_spec
+    
+    if export:
+        export_state(data_dir, state, 'state.json')
+    return state
+
+
+def fix_special_addresses():
+    import copy
+    from vivarium import Vivarium 
+    from dataclasses import dataclass
+    import enum
+    from pprint import pp
+    from ecoli.shared.registry import ecoli_core
+    from ecoli import DEFAULT_STATE_PATH, load
+    import json 
+    
+    state = copy.deepcopy(load(DEFAULT_STATE_PATH))
+    processes = ecoli_core.process_registry.registry
+
+    for process_id, spec in state.items():
+        handler = filter(
+            lambda addr: addr in process_id,
+            ["allocator", "requester", "evolver"]
+        )
+        try:
+            address = f"local:{next(handler)}"
+            spec['address'] = address 
+        except StopIteration:
+            continue 
+
+    with open(DEFAULT_STATE_PATH.replace("state.json", "state-edit.json"), 'w') as f:
+        json.dump(state, f, indent=4)
+        
+
+def export_state(dirpath: str, state, filename: str | None = None):
+    state_fp = os.path.join(dirpath, filename or 'single_state.json')
+    with open(state_fp, 'w') as f:
+        json.dump(state, f, indent=4)

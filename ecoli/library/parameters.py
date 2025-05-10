@@ -24,6 +24,10 @@ class ParameterStore:
     def __init__(self, parameters, derivation_rules=None):
         self._parameters = parameters
         self.derive_parameters(derivation_rules or {})
+    
+    @property
+    def all(self):
+        return self._parameters
 
     def get_parameter(self, path):
         param_obj = get_in(self._parameters, path)

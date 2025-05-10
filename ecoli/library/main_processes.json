@@ -1,0 +1,67 @@
+{
+    "primary": {
+        "allocator": "ecoli.migrated.allocator.Allocator",
+        "bulk-timeline": "ecoli.migrated.bulk_timeline.BulkTimelineProcess",
+        "chemostat": "ecoli.migrated.chemostat.Chemostat",
+        "ecoli-chromosome-replication": "ecoli.migrated.chromosome_replication.ChromosomeReplication",
+        "ecoli-chromosome-structure": "ecoli.migrated.chromosome_structure.ChromosomeStructure",
+        "ecoli-complexation": "ecoli.migrated.complexation.Complexation",
+        "concentrations_deriver": "ecoli.migrated.concentrations_deriver.ConcentrationsDeriver",
+        "death_threshold": "ecoli.migrated.death_threshold.DeathThreshold",
+        "ecoli-equilibrium": "ecoli.migrated.equilibrium.Equilibrium",
+        "global_clock": "ecoli.migrated.global_clock.GlobalClock",
+        "ecoli-metabolism": "ecoli.migrated.metabolism.Metabolism",
+        "ecoli-metabolism-redux": "ecoli.migrated.metabolism_redux.MetabolismRedux",
+        "ecoli-metabolism-redux-classic": "ecoli.migrated.metabolism_redux_classic.MetabolismReduxClassic",
+        "ecoli-polypeptide-elongation": "ecoli.migrated.polypeptide_elongation.PolypeptideElongation",
+        "ecoli-polypeptide-initiation": "ecoli.migrated.polypeptide_initiation.PolypeptideInitiation",
+        "ecoli-protein-degradation": "ecoli.migrated.protein_degradation.ProteinDegradation",
+        "ecoli-rna-degradation": "ecoli.migrated.rna_degradation.RnaDegradation",
+        "ecoli-rna-interference": "ecoli.migrated.rna_interference.RnaInterference",
+        "ecoli-rna-maturation": "ecoli.migrated.rna_maturation.RnaMaturation",
+        "ecoli-shape": "ecoli.migrated.shape.Shape",
+        "ecoli-tf-binding": "ecoli.migrated.tf_binding.TfBinding",
+        "ecoli-tf-unbinding": "ecoli.migrated.tf_unbinding.TfUnbinding",
+        "ecoli-transcript-elongation": "ecoli.migrated.transcript_elongation.TranscriptElongation",
+        "ecoli-transcript-initiation": "ecoli.migrated.transcript_initiation.TranscriptInitiation",
+        "ecoli-two-component-system": "ecoli.migrated.two_component_system.TwoComponentSystem"
+    },
+    "antibiotics": {
+        "antibiotic-transport-odeint": "ecoli.migrated.antibiotics.antibiotic_transport_odeint.AntibioticTransportOdeint",
+        "antibiotic-transport-steady-state": "ecoli.migrated.antibiotics.antibiotic_transport_steady_state.AntibioticTransportSteadyState",
+        "ecoli-cell-wall": "ecoli.migrated.antibiotics.cell_wall.CellWall",
+        "conc_to_counts": "ecoli.migrated.antibiotics.conc_to_counts.ConcToCounts",
+        "death": "ecoli.migrated.antibiotics.death.DeathFreezeState",
+        "ecoli-lysis-initiation": "ecoli.migrated.antibiotics.lysis_initiation.LysisInitiation",
+        "murein-division": "ecoli.migrated.antibiotics.murein_division.MureinDivision",
+        "ecoli-pbp-binding": "ecoli.migrated.antibiotics.pbp_binding.PBPBinding",
+        "permeability": "ecoli.migrated.antibiotics.permeability.Permeability",
+        "tetracycline-ribosome-equilibrium": "ecoli.migrated.antibiotics.tetracycline_ribosome_equilibrium.TetracyclineRibosomeEquilibrium"
+    },
+    "chemotaxis": {},
+    "environment": {
+        "exchange_data": "ecoli.migrated.environment.exchange_data.ExchangeData",
+        "field_timeline": "ecoli.migrated.environment.field_timeline.FieldTimeline",
+        "local_field": "ecoli.migrated.environment.local_field.LocalField",
+        "lysis": "ecoli.migrated.environment.lysis.Lysis",
+        "media_update": "ecoli.migrated.environment.media_update.MediaUpdate"
+    },
+    "listeners": {
+        "aggregator": "ecoli.migrated.listeners.aggregator.Aggregator",
+        "dna_supercoiling_listener": "ecoli.migrated.listeners.dna_supercoiling.DnaSupercoiling",
+        "ecoli-mass-listener": "ecoli.migrated.listeners.mass_listener.MassListener",
+        "monomer_counts_listener": "ecoli.migrated.listeners.monomer_counts.MonomerCounts",
+        "post-division-mass-listener": "ecoli.migrated.listeners.mass_listener.PostDivisionMassListener",
+        "RNA_counts_listener": "ecoli.migrated.listeners.RNA_counts.RNACounts",
+        "replication_data_listener": "ecoli.migrated.listeners.replication_data.ReplicationData",
+        "ribosome_data_listener": "ecoli.migrated.listeners.ribosome_data.RibosomeData",
+        "rna_synth_prob_listener": "ecoli.migrated.listeners.rna_synth_prob.RnaSynthProb",
+        "rnap_data_listener": "ecoli.migrated.listeners.rnap_data.RnapData",
+        "unique_molecule_counts": "ecoli.migrated.listeners.unique_molecule_counts.UniqueMoleculeCounts"
+    },
+    "membrane": {},
+    "spatiality": {},
+    "stubs": {
+        "ecoli-exchange": "ecoli.migrated.stubs.exchange_stub.Exchange"
+    }
+}

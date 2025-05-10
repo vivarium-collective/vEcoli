@@ -19,6 +19,7 @@ from unum import Unum
 count = Unum.unit("count", mol / scipy.constants.Avogadro)
 nt = Unum.unit("nucleotide", count)
 aa = Unum.unit("amino_acid", count)
+default = Unum.unit("__default__", mol / s)
 
 
 def __truediv__(self, other):

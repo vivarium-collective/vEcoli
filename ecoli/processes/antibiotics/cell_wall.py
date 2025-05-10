@@ -63,8 +63,9 @@ from ecoli.library.schema import numpy_schema, bulk_name_to_idx, counts
 from ecoli.library.parameters import param_store
 from ecoli.processes.registries import topology_registry
 from ecoli.processes.shape import length_from_volume, surface_area_from_length
-from vivarium.core.process import Process
 from vivarium.library.units import units, remove_units
+from vivarium.core.process import Process
+
 
 # Register default topology for this process, associating it with process name
 NAME = "ecoli-cell-wall"

@@ -1,0 +1,77 @@
+## _*Core processes to Migrate*_:
+- [X] __init__.py
+- [X] allocator.py
+- [X] bulk_timeline.py
+- [X] cell_division.py
+- [X] chemostat.py
+- [X] chromosome_replication.py
+- [X] chromosome_structure.py
+- [X] complexation.py
+- [X] concentrations_deriver.py
+- [X] division_detector.py
+- [] engine_process.py  TODO: do we need this?
+- [X] enzyme_kinetics.py
+- [X] equilibrium.py
+- [X] global_clock.py
+- [] metabolism.py  TODO: do we need this and the redux classic?
+- [X] metabolism_redux.py
+- [] metabolism_redux_classic.py
+- [X] partition.py
+- [X] polypeptide_elongation.py
+- [X] polypeptide_initiation.py
+- [X] protein_degradation.py
+- [X] registries.py
+- [X] rna_degradation.py
+- [X] rna_interference.py
+- [X] rna_maturation.py
+- [X] shape.py
+- [X] tf_binding.py
+- [X] tf_unbinding.py
+- [X] transcript_elongation.py
+- [X] transcript_initiation.py
+- [X] two_component_system.py
+- [X] unique_update.py
+
+----------------------------------------------------------------------
+
+## _*Auxiliary processes to Migrate:*_
+### _`ecoli.processes.antibiotics`_:
+
+### _`ecoli.processes.chemotaxis`_:
+
+### _`ecoli.processes.environment`_:
+
+### _`ecoli.processes.listeners`_:
+
+### _`ecoli.processes.membrane`_:
+
+### _`ecoli.processes.spatiality`_:
+
+### _`ecoli.processes.stubs`_:
+
+
+## _*Misc*_:
+- [] merge topology and state into doc
+- [] refactor bulk_state declarations to be numpy_schema("bulk")
+- [] Look into defining biology-specific module constraints as JSON and parsing rather than explicitly defining them
+- [] For auto-parsed config schemas, ensure that lambda funcs are moved to directly being declared in constructor vs in config schema
+- [] for partitioned processes, parse exactly which inputs and which outputs should be defined, rather than bidirectional
+- [] review numpy_schema and ensure the migrated version works
+- [] Add formalized registration at module init of processes
+- [] Add formalized registration at module init of types
+- [] Clean up registration module
+- [] Review partitioned process vs. process/step implementations
+
+
+## _NOTES_:
+- We can infer an example initial state, and thus outputs for a given partitioned process by calling 
+`ecoli.shared.utils.migration.load_initial_state(<TIME INDEX>)`
+
+- refactor parca mig. and p
+- tensor types
+- VQE for optim
+- sens. analy.
+- infernc. bay. vs optim.
+- parcel python dask ray (hpc)
+
+

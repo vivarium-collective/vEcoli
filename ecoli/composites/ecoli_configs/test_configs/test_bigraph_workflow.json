@@ -1,0 +1,23 @@
+{
+    "experiment_id": "test_workflow",
+    "duration": 3,
+    "doc": {
+      "state": {
+        "func": {
+          "_type": "process",
+          "address": "local:func",
+          "inputs": {
+            "bulk": ["bulk"],
+            "listeners": ["listeners"],
+            "environment": ["environment"]
+          },
+          "outputs": {
+            "listeners": ["listeners"]
+          }
+        }
+      }
+    },
+    "args": [11.11, 22.22, 11.22],
+    "out_dir": "/var/folders/yy/8crj8x7x5_3b86f0js6_0bn00000gr/T/tmp6ykdewo0"
+  }
+  

@@ -5,7 +5,7 @@ from duckdb import DuckDBPyConnection
 import polars as pl
 import altair as alt
 
-from ecoli.library.parquet_emitter import num_cells, read_stacked_columns
+from ecoli.emitters.parquet import num_cells, read_stacked_columns
 
 COLORS_256 = [  # From colorbrewer2.org, qualitative 8-class set 1
     [228, 26, 28],

@@ -1,17 +1,46 @@
+"""
+ecoli: registration and configuration
+
+This module should:
+
+A. import all required type functions and register them via core
+B. import all ecoli.migrated processes and register them
+C. import all required type schemas/defs and register them (or read them via json)
+"""
+
+
+import copy
+import json
 import os
+import warnings
+import logging
+import faulthandler
+
+import numpy as np
+from ecoli.shared.utils.log import setup_logging
+
+# logger
+logger: logging.Logger = setup_logging(__name__)
+
+# suppress \s errors TODO: fix this in offending modules
+warnings.filterwarnings("ignore", category=SyntaxWarning)
 
 # Improve performance and reproducibility
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 
-from vivarium.core.registry import (
-    divider_registry,
-    emitter_registry,
-    serializer_registry,
-)
+# TODO: move/replace this?
+faulthandler.enable()
 
-from ecoli.library.parquet_emitter import ParquetEmitter
+from process_bigraph.processes import TOY_PROCESSES
+from process_bigraph import pp
+from bigraph_schema.units import units
+from bigraph_schema.type_functions import deserialize_array, check_list
+from bigraph_schema.type_system import required_schema_keys
+
+from ecoli.library.units import Quantity
+from ecoli.emitters.parquet import ParquetEmitter
 from ecoli.library.schema import (
     divide_binomial,
     divide_bulk,
@@ -20,6 +49,7 @@ from ecoli.library.schema import (
     divide_RNAs_by_domain,
     divide_set_none,
     empty_dict_divider,
+    bulk_numpy_updater,
 )
 from ecoli.library.serialize import (
     MethodSerializer,
@@ -37,34 +67,92 @@ from ecoli.library.updaters import (
     inverse_update_unique_numpy,
     inverse_updater_registry,
 )
+from ecoli.shared.registry import ecoli_core
+from ecoli.shared.dtypes import bulk_dtype
 
-# Enable segmentation and other fault handling for tracebacks
-import faulthandler
 
-faulthandler.enable()
+ROOT = os.path.dirname(
+    os.path.dirname(__file__)
+)
+MODEL_DATA_DIR = os.path.join(ROOT, 'data', 'model')
+DEFAULT_TOPOLOGY_PATH = os.path.join(MODEL_DATA_DIR, 'topology.json')
+DEFAULT_STATE_PATH = os.path.join(MODEL_DATA_DIR, 'state-edit.json')
 
-emitter_registry.register("parquet", ParquetEmitter)
+VERBOSE_REGISTER = eval(os.getenv("VERBOSE_REGISTER", "True"))
+PROCESS_PACKAGES = ["migrated"]  # TODO: add more here
+TYPE_MODULES = ["unum", "unit", "bulk"]  # TODO: add more here
+
+
+def load(fp: str):
+    import json
+    with open(fp, 'r') as f:
+        data = json.load(f)
+    return data 
+
+        
+def get_bulk_counts(bulk: np.ndarray) -> np.ndarray:
+    """
+    Args:
+        bulk: Numpy structured array with a `count` field
+    Returns:
+        Contiguous (required by orjson) array of bulk molecule counts
+    """
+    return np.ascontiguousarray(bulk["count"])
+
+
+# import and register types
+possible_schema_keys = required_schema_keys | {"_divide", "_description", "_value"}
+for modname in TYPE_MODULES:
+    ecoli_root = os.path.abspath(
+        os.path.dirname(__file__)
+    )
+    schema_fp = os.path.join(ecoli_root, 'shared', 'types', 'definitions', f'{modname}.json')
+    with open(schema_fp, 'r') as f:
+        schema = json.load(f)
+        for key in schema:
+            if key in possible_schema_keys:
+                try:
+                    val = schema[key]
+                    schema[key] = eval(val)
+                except:
+                    # schema.pop(key, None)
+                    pass
+        ecoli_core.register_type(schema)
+
+# import and register processes
+for pkg in PROCESS_PACKAGES:
+    ecoli_core.register_process_package(pkg, VERBOSE_REGISTER)
+
+# register toy processes
+for name, process in TOY_PROCESSES.items():
+    ecoli_core.process_registry.register(name.lower(), process)
+
+
+# NOTE: emitters are delimited with -
+ecoli_core.process_registry.register("parquet-emitter", ParquetEmitter)
+
 
 # register :term:`updaters`
-inverse_updater_registry.register("accumulate", inverse_update_accumulate)
-inverse_updater_registry.register("set", inverse_update_set)
-inverse_updater_registry.register("null", inverse_update_null)
-inverse_updater_registry.register("merge", inverse_update_merge)
-inverse_updater_registry.register(
+# inverse_updater_registry.register("accumulate", inverse_update_accumulate)
+# inverse_updater_registry.register("set", inverse_update_set)
+# inverse_updater_registry.register("null", inverse_update_null)
+# inverse_updater_registry.register("merge", inverse_update_merge)
+ecoli_core.apply_registry.register(
     "nonnegative_accumulate", inverse_update_nonnegative_accumulate
 )
-inverse_updater_registry.register("bulk_numpy", inverse_update_bulk_numpy)
-inverse_updater_registry.register("unique_numpy", inverse_update_unique_numpy)
+ecoli_core.apply_registry.register("bulk_numpy", inverse_update_bulk_numpy)
+ecoli_core.apply_registry.register("unique_numpy", inverse_update_unique_numpy)
 
 
 # register :term:`dividers`
-divider_registry.register("binomial_ecoli", divide_binomial)
-divider_registry.register("bulk_binomial", divide_bulk)
-divider_registry.register("by_domain", divide_by_domain)
-divider_registry.register("rna_by_domain", divide_RNAs_by_domain)
-divider_registry.register("empty_dict", empty_dict_divider)
-divider_registry.register("ribosome_by_RNA", divide_ribosomes_by_RNA)
-divider_registry.register("set_none", divide_set_none)
+ecoli_core.divide_registry.register("binomial_ecoli", divide_binomial)
+ecoli_core.divide_registry.register("bulk_binomial", divide_bulk)
+ecoli_core.divide_registry.register("by_domain", divide_by_domain)
+ecoli_core.divide_registry.register("rna_by_domain", divide_RNAs_by_domain)
+ecoli_core.divide_registry.register("empty_dict", empty_dict_divider)
+ecoli_core.divide_registry.register("ribosome_by_RNA", divide_ribosomes_by_RNA)
+ecoli_core.divide_registry.register("set_none", divide_set_none)
+
 
 # register serializers
 for serializer_cls in (
@@ -74,4 +162,4 @@ for serializer_cls in (
     MethodSerializer,
 ):
     serializer = serializer_cls()
-    serializer_registry.register(serializer.name, serializer)
+    ecoli_core.serialize_registry.register(serializer.name, serializer)

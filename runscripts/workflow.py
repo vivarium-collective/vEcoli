@@ -487,23 +487,28 @@ def main():
         out_uri,
         f"{experiment_id}_report.html",
     )
+    if os.path.exists(report_path):
+        os.remove(report_path)
+
     workdir = os.path.join(out_uri, "nextflow_workdirs")
     if nf_profile == "standard" or nf_profile == "gcloud":
+        cmd = [
+            "nextflow",
+            "-C",
+            local_config,
+            "run",
+            local_workflow,
+            "-profile",
+            nf_profile,
+            "-with-report",
+            report_path,
+            "-work-dir",
+            workdir
+        ]
+        if args.resume is not None:
+            cmd.append("-resume")
         subprocess.run(
-            [
-                "nextflow",
-                "-C",
-                local_config,
-                "run",
-                local_workflow,
-                "-profile",
-                nf_profile,
-                "-with-report",
-                report_path,
-                "-work-dir",
-                workdir,
-                "-resume" if args.resume is not None else "",
-            ],
+            cmd,
             check=True,
         )
     elif nf_profile == "sherlock":

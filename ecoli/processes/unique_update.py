@@ -23,3 +23,42 @@ class UniqueUpdate(Step):
 
     def next_update(self, timestep, states):
         return {unique_mol: {"update": True} for unique_mol in self.unique_topo.keys()}
+
+
+"""
+Chromo. Structure:
+    bidir ->
+        *bulk
+        *active_replisomes
+        *chromo. domains
+        *active RNAPs
+        *RNAs
+        *active ribosome
+        *promoters
+        *genes
+        *dnaA boxes
+
+    inputs() ->
+        global time
+        timestep
+    
+    outputs() ->
+        "next_update_time"
+        "listeners": {
+            "rnap_data": {
+                "n_total_collisions": n_total_collisions,
+                "n_headon_collisions": n_headon_collisions,
+                "n_codirectional_collisions": n_codirectional_collisions,
+                "headon_collision_coordinates": RNAP_coordinates[
+                    RNAP_headon_collision_mask
+                ],
+                "codirectional_collision_coordinates": RNAP_coordinates[
+                    RNAP_codirectional_collision_mask
+                ],
+            }
+        },
+        "oriCs": {},
+        "full_chromosomes": {},
+        "chromosomal_segments": {},
+
+"""

@@ -1,0 +1,87 @@
+{
+    "inherit_from": ["antibiotics.json"],
+    "add_processes": [
+        "ecoli-cell-wall",
+        "ecoli-pbp-binding",
+        "ecoli-lysis-initiation",
+        "murein-division"
+    ],
+
+    "spatial_environment_config": {
+        "reaction_diffusion": {
+            "reactions": {
+                "antibiotic_hydrolysis": {
+                    "stoichiometry": {
+                        "ampicillin": -1,
+                        "ampicillin_hydrolyzed": 1
+                    },
+                    "catalyzed by": "EG10040-MONOMER"
+                }
+            },
+            "kinetic_parameters": {
+                "antibiotic_hydrolysis": {
+                    "EG10040-MONOMER": {
+                        "kcat_f": "!ParameterSerializer[ampicillin>hydrolysis>kcat]",
+                        "ampicillin": "!ParameterSerializer[ampicillin>hydrolysis>km]"
+                    }
+                }
+            }
+        }
+    },
+
+    "engine_process_reports": [
+        ["murein_state", "incorporated_murein"],
+        ["murein_state", "unincorporated_murein"],
+        ["murein_state", "shadow_murein"],
+        ["boundary", "volume"],
+        ["wall_state", "lattice_rows"],
+        ["wall_state", "lattice_cols"],
+        ["wall_state", "extension_factor"],
+        ["wall_state", "cracked"],
+        ["wall_state", "attempted_shrinkage"],
+        ["burst"],
+        ["pbp_state", "active_fraction_PBP1A"],
+        ["pbp_state", "active_fraction_PBP1B"]
+    ],
+
+    "topology": {
+        "ecoli-cell-wall": {
+            "shape": ["boundary"],
+            "murein_state": ["murein_state"],
+            "bulk": ["bulk"],
+            "wall_state": ["wall_state"],
+            "listeners": ["listeners"]
+        },
+        "ecoli-pbp-binding": {
+            "murein_state": ["murein_state"],
+            "concentrations": ["periplasm", "concentrations"],
+            "bulk": ["bulk"],
+            "pbp_state": ["pbp_state"]
+        },
+        "ecoli-lysis-initiation": {
+            "cracked": ["wall_state", "cracked"],
+            "lysis_trigger": ["burst"]
+        }
+    },
+    "process_configs": {
+        "ecoli-cell-wall": {"time_step": 10},
+        "ecoli-pbp-binding": {},
+        "ecoli-metabolism": {
+            "reduce_murein_objective" : true
+        },
+        "ecoli-lysis-initiation": {},
+        "murein-division": {}
+    },
+
+    "lysis_config": {
+        "secreted_molecules": {
+            "EG10040-MONOMER[p]": "EG10040-MONOMER",
+            "ampicillin[p]": "ampicillin",
+            "ampicillin_hydrolyzed[p]": "ampicillin_hydrolyzed"
+        }
+    },
+
+    "flow": {
+        "ecoli-pbp-binding": [["ecoli-shape"]]
+    }
+}

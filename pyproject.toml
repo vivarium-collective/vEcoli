@@ -54,7 +54,19 @@ dependencies = [
     "wheel",
     "stochastic-arrow",
     "autograd",
+    "typer",
+    "astor",
+    "process-bigraph>=0.0.30",
+    "vivarium-interface>=0.0.4",
+    "dask[complete]>=2025.4.1",
+    "pysimdjson>=6.0.2",
 ]
+
+[project.scripts]
+gateway = "api.gateway.main:cli"
+crosspile = "pbg.app:cli"
+flow = "runscripts.flow:cli"
+
 
 [project.optional-dependencies]
 dev = [
@@ -69,13 +81,36 @@ docs = [
     "sphinx-rtd-theme",
     "nbsphinx"
 ]
+shared = [
+    "cryptography",
+]
+api = [
+    "broadcaster>=0.3.1",
+    "cryptography>=44.0.2",
+    "fastapi>=0.115.12",
+    "grpcio>=1.71.0",
+    "grpcio-tools>=1.71.0",
+    "pydantic>=2.11.3",
+    "python-dotenv>=1.1.0",
+    "python-multipart>=0.0.20",
+    "typer>=0.15.2",
+    "uvicorn>=0.34.1",
+    "websockets>=15.0.1",
+]
+graph = [
+    "rustworkx[mpl]>=0.16.0",
+]
 
 [tool.setuptools]
 packages = [
+    # original packages
     "ecoli",
-    "migration", 
     "reconstruction",
     "runscripts",
     "validation",
-    "wholecell"
+    "wholecell",
+    # packages added by Alex
+    "pbg",  # TODO: eventually extract needed from this and remove
+    "api",
+    "migration"
 ]

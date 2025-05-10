@@ -14,104 +14,33 @@ from vivarium.core.registry import Serializer
 
 RAND_MAX = 2**31 - 1
 
-UNIQUE_DIVIDERS = {
-    "active_ribosome": {
-        "divider": "ribosome_by_RNA",
-        "topology": {
-            "RNA": ("..", "RNA"),
-            "full_chromosome": ("..", "full_chromosome"),
-            "chromosome_domain": ("..", "chromosome_domain"),
-            "active_RNAP": (
-                "..",
-                "active_RNAP",
-            ),
-        },
-    },
-    "full_chromosomes": {
-        "divider": "by_domain",
-        "topology": {
-            "full_chromosome": (),
-            "chromosome_domain": ("..", "chromosome_domain"),
-        },
-    },
-    "chromosome_domains": {
-        "divider": "by_domain",
-        "topology": {
-            "full_chromosome": ("..", "full_chromosome"),
-            "chromosome_domain": (),
-        },
-    },
-    "active_replisomes": {
-        "divider": "by_domain",
-        "topology": {
-            "full_chromosome": ("..", "full_chromosome"),
-            "chromosome_domain": ("..", "chromosome_domain"),
-        },
-    },
-    "oriCs": {
-        "divider": "by_domain",
-        "topology": {
-            "full_chromosome": ("..", "full_chromosome"),
-            "chromosome_domain": ("..", "chromosome_domain"),
-        },
-    },
-    "promoters": {
-        "divider": "by_domain",
-        "topology": {
-            "full_chromosome": ("..", "full_chromosome"),
-            "chromosome_domain": ("..", "chromosome_domain"),
-        },
-    },
-    "chromosomal_segments": {
-        "divider": "by_domain",
-        "topology": {
-            "full_chromosome": ("..", "full_chromosome"),
-            "chromosome_domain": ("..", "chromosome_domain"),
-        },
-    },
-    "DnaA_boxes": {
-        "divider": "by_domain",
-        "topology": {
-            "full_chromosome": ("..", "full_chromosome"),
-            "chromosome_domain": ("..", "chromosome_domain"),
-        },
-    },
-    "active_RNAPs": {
-        "divider": "by_domain",
-        "topology": {
-            "full_chromosome": ("..", "full_chromosome"),
-            "chromosome_domain": ("..", "chromosome_domain"),
-        },
-    },
-    "RNAs": {
-        "divider": "rna_by_domain",
-        "topology": {
-            "active_RNAP": (
-                "..",
-                "active_RNAP",
-            ),
-            "full_chromosome": ("..", "full_chromosome"),
-            "chromosome_domain": ("..", "chromosome_domain"),
-        },
-    },
-    "genes": {
-        "divider": "by_domain",
-        "topology": {
-            "full_chromosome": ("..", "full_chromosome"),
-            "chromosome_domain": ("..", "chromosome_domain"),
-        },
-    },
-}
-"""A mapping of unique molecules to the names of their divider functions ars they are registered 
-in the ``divider_registry`` in ``ecoli/__init__.py``
-
-:meta hide-value:
-"""
-
 
 class MetadataArray(np.ndarray):
     """Subclass of Numpy array that allows for metadata to be stored with the array.
-    Currently used to store next unique molecule index for unique molecule arrays."""
+    Currently used to store next unique molecule index for unique molecule arrays.
+
+    Instantiating this class involves 3 steps:
+
+    1. define the dtype as a list[tuple[str, type]], where each item specifies the data name and python type:
+
+        dtype = [
+            ("unique_index", int),
+            ("_entryState", bool),
+            ("value", float),
+        ]
+
+    2. create the base array as an array of tuples[unique_index, _entryState, value], specifying the dtype:
+
+        data = np.array([
+            (1, True, 3.14),
+            (2, False, 2.71),
+            (3, True, 1.61),
+        ], dtype=dtype)
+
+    3. wrap this array in this class with optional metadata[dict]:
+
+        arr = MetadataArray(data, metadata={"description": "Molecule tracking array"})
+    """
 
     def __new__(cls, input_array, metadata=None):
         # Input array should be an array instance
@@ -202,7 +131,8 @@ def counts(states: np.ndarray, idx: int | np.ndarray) -> np.ndarray:
         return states["count"][idx]
     # evolve_state reads from ('allocate', process_name, 'bulk')
     # which is a simple Numpy array (not structured)
-    return states[idx].copy()
+    # return states[idx].copy()
+    return np.ascontiguousarray(states[idx].copy())
 
 
 class get_bulk_counts(Serializer):
@@ -941,3 +871,109 @@ def get_descendent_domains(root_domains, domain_index, child_domains, place_hold
             ]
         )
     )
+
+
+"""A mapping of unique molecules to the names of their divider functions ars they are registered 
+in the ``divider_registry`` in ``ecoli/__init__.py``
+
+:meta hide-value:
+"""
+UNIQUE_DIVIDERS = {
+    "active_ribosome": {
+        "_divide": divide_RNAs_by_domain,
+        "divider": "ribosome_by_RNA",
+        "topology": {
+            "RNA": ("..", "RNA"),
+            "full_chromosome": ("..", "full_chromosome"),
+            "chromosome_domain": ("..", "chromosome_domain"),
+            "active_RNAP": (
+                "..",
+                "active_RNAP",
+            ),
+        },
+    },
+    "full_chromosomes": {
+        "_divide": divide_by_domain,
+        "divider": "by_domain",
+        "topology": {
+            "full_chromosome": (),
+            "chromosome_domain": ("..", "chromosome_domain"),
+        },
+    },
+    "chromosome_domains": {
+        "_divide": divide_by_domain,
+        "divider": "by_domain",
+        "topology": {
+            "full_chromosome": ("..", "full_chromosome"),
+            "chromosome_domain": (),
+        },
+    },
+    "active_replisomes": {
+        "_divide": divide_by_domain,
+        "divider": "by_domain",
+        "topology": {
+            "full_chromosome": ("..", "full_chromosome"),
+            "chromosome_domain": ("..", "chromosome_domain"),
+        },
+    },
+    "oriCs": {
+        "_divide": divide_by_domain,
+        "divider": "by_domain",
+        "topology": {
+            "full_chromosome": ("..", "full_chromosome"),
+            "chromosome_domain": ("..", "chromosome_domain"),
+        },
+    },
+    "promoters": {
+        "_divide": divide_by_domain,
+        "divider": "by_domain",
+        "topology": {
+            "full_chromosome": ("..", "full_chromosome"),
+            "chromosome_domain": ("..", "chromosome_domain"),
+        },
+    },
+    "chromosomal_segments": {
+        "_divide": divide_by_domain,
+        "divider": "by_domain",
+        "topology": {
+            "full_chromosome": ("..", "full_chromosome"),
+            "chromosome_domain": ("..", "chromosome_domain"),
+        },
+    },
+    "DnaA_boxes": {
+        "_divide": divide_by_domain,
+        "divider": "by_domain",
+        "topology": {
+            "full_chromosome": ("..", "full_chromosome"),
+            "chromosome_domain": ("..", "chromosome_domain"),
+        },
+    },
+    "active_RNAPs": {
+        "_divide": divide_by_domain,
+        "divider": "by_domain",
+        "topology": {
+            "full_chromosome": ("..", "full_chromosome"),
+            "chromosome_domain": ("..", "chromosome_domain"),
+        },
+    },
+    "RNAs": {
+        "_divide": divide_RNAs_by_domain,
+        "divider": "rna_by_domain",
+        "topology": {
+            "active_RNAP": (
+                "..",
+                "active_RNAP",
+            ),
+            "full_chromosome": ("..", "full_chromosome"),
+            "chromosome_domain": ("..", "chromosome_domain"),
+        },
+    },
+    "genes": {
+        "_divide": divide_by_domain,
+        "divider": "by_domain",
+        "topology": {
+            "full_chromosome": ("..", "full_chromosome"),
+            "chromosome_domain": ("..", "chromosome_domain"),
+        },
+    },
+}

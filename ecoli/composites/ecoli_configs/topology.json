@@ -1,0 +1,22 @@
+{
+    "bulk-timeline": {
+        "bulk": [
+            "bulk"
+        ],
+        "global": [
+            "timeline"
+        ],
+        "media_id": [
+            "environment",
+            "media_id"
+        ]
+    },
+    "global_clock": {
+        "global_time": [
+            "global_time"
+        ],
+        "next_update_time": [
+            "next_update_time"
+        ]
+    }
+}

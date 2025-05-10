@@ -6,7 +6,7 @@ from duckdb import DuckDBPyConnection
 import pickle
 import polars as pl
 
-from ecoli.library.parquet_emitter import (
+from ecoli.emitters.parquet import (
     get_field_metadata,
     open_arbitrary_sim_data,
     named_idx,
