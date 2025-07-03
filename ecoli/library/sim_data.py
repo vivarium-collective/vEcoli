@@ -596,6 +596,7 @@ class LoadSimData:
             "exchange_data": self.get_exchange_data_config,
             "media_update": self.get_media_update_config,
             "bulk-timeline": self.get_bulk_timeline_config,
+            "publish-state": self.get_publish_state_config,
         }
 
         try:
@@ -1773,6 +1774,20 @@ class LoadSimData:
             "timeline": {
                 time: {("media_id",): media_id} for time, media_id in current_timeline
             },
+        }
+
+    def get_publish_state_config(self, time_step=1):
+        u_masses = self.sim_data.internal_state.unique_molecule.unique_molecule_masses
+        molecule_ids = tuple(sorted(u_masses["id"]))
+
+        return {
+            "publish": False,
+            "bulk_ids": self.sim_data.internal_state.bulk_molecules.bulk_data["id"],
+            "unique_ids": molecule_ids,
+            "emit_unique": self.emit_unique,
+            "submass_to_idx": self.sim_data.submass_name_to_index,
+            "n_avogadro": self.sim_data.constants.n_avogadro,
+            "time_step": time_step
         }
 
     def generate_initial_state(self):
