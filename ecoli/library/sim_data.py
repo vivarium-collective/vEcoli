@@ -1781,7 +1781,7 @@ class LoadSimData:
         molecule_ids = tuple(sorted(u_masses["id"]))
 
         return {
-            "publish": False,
+            "publish": {},
             "bulk_ids": self.sim_data.internal_state.bulk_molecules.bulk_data["id"],
             "unique_ids": molecule_ids,
             "emit_unique": self.emit_unique,

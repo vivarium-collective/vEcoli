@@ -11,15 +11,17 @@ as the simulation is running
 import numpy as np
 from numpy.lib import recfunctions as rfn
 
+import sys
+import json
+import asyncio
+import logging
 import threading
 
 from vivarium.core.process import Step
 from ecoli.library.schema import numpy_schema, counts, attrs, bulk_name_to_idx
 from ecoli.processes.registries import topology_registry
 from wholecell.utils import units
-
-from nats.aio.client import Client as NATSClient
-from nats.aio.msg import Msg
+from wholecell.io.simple_nats import NatsClient
 
 # Register default topology for this step, associating it with process name
 NAME = "publish-state"
@@ -40,7 +42,7 @@ class PublishState(Step):
     topology = TOPOLOGY
 
     defaults = {
-        "publish": False,
+        "publish": {},
         "bulk_ids": [],
         "unique_ids": [],
         "emit_unique": False,
@@ -61,6 +63,11 @@ class PublishState(Step):
 
     def __init__(self, parameters=None):
         super().__init__(parameters)
+
+        if self.parameters['publish']:
+            self.producer = NatsClient()
+            self.producer.connect(
+                self.parameters['publish']['address'])
 
         # molecule indexes and masses
         self.bulk_ids = self.parameters["bulk_ids"]
@@ -178,8 +185,10 @@ class PublishState(Step):
             states["bulk"],
             self.bulk_idx)
 
-        # TODO: we want to craft and send the message here
-        import ipdb; ipdb.set_trace()
+        self.producer.publish(
+            'test.ecoli-publish',
+            json.dumps(
+                bulk_counts.tolist()).encode('utf8'))
 
         return {}
 

@@ -115,7 +115,7 @@
     ],
     "process_configs": {
         "global_clock": {},
-        "publish-state": {"publish": true},
+        "publish-state": {"publish": {"address": "nats://localhost:4222"}},
         "replication_data_listener": {"time_step": 1}},
     "topology": {
         "bulk-timeline": {
