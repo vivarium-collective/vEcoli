@@ -185,10 +185,13 @@ class PublishState(Step):
             states["bulk"],
             self.bulk_idx)
 
+        update = {
+            'bulk': bulk_counts.tolist()
+        }
+
         self.producer.publish(
             'test.ecoli-publish',
-            json.dumps(
-                bulk_counts.tolist()).encode('utf8'))
+            json.dumps(update).encode('utf8'))
 
         return {}
 
