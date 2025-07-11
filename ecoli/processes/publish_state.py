@@ -10,6 +10,7 @@ as the simulation is running
 
 import numpy as np
 from numpy.lib import recfunctions as rfn
+from datetime import date, datetime, timedelta
 
 import sys
 import json
@@ -33,6 +34,31 @@ TOPOLOGY = {
     "timestep": ("timestep",),
 }
 topology_registry.register(NAME, TOPOLOGY)
+
+
+class NpEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.bool_):
+            return bool(obj)
+        if isinstance(obj, (np.floating, np.complexfloating)):
+            return float(obj)
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, np.string_):
+            return str(obj)
+        if isinstance(obj, (datetime, date)):
+            return obj.isoformat()
+        if isinstance(obj, timedelta):
+            return str(obj)
+        return super(NpEncoder, self).default(obj)
+
+
+def json_encode(message):
+    return json.dumps(
+        message,
+        cls=NpEncoder).encode('utf8')
 
 
 class PublishState(Step):
@@ -177,18 +203,31 @@ class PublishState(Step):
     def next_update(self, timestep, states):
         if self.bulk_idx is None:
             bulk_ids = states["bulk"]["id"]
-            self.bulk_idx = bulk_name_to_idx(self.bulk_ids, bulk_ids)
-
-        dry_mass = states["listeners"]["mass"]["dry_mass"]
+            self.bulk_idx = bulk_name_to_idx(
+                self.bulk_ids,
+                bulk_ids)
 
         bulk_counts = counts(
             states["bulk"],
             self.bulk_idx)
 
+        message = {}
+        message['time'] = states['global_time']
+        message['mass'] = states['listeners']['mass']
+        message['bulk'] = bulk_counts
+        message['RNA'] = states['unique']['RNA']
+        message['chromosome'] = {}
+        message['chromosome']['full'] = states['unique']['full_chromosome']
+        message['chromosome']['domain'] = states['unique']['chromosome_domain']
+        message['chromosome']['segment'] = states['unique']['chromosomal_segment']
+        message['chromosome']['replisome'] = states['unique']['active_replisome']
+        message['chromosome']['oriC'] = states['unique']['oriC']
+
+        encoded = json_encode(message)
+
         self.producer.publish(
             'test.ecoli-publish',
-            json.dumps(
-                bulk_counts.tolist()).encode('utf8'))
+            encoded)
 
         return {}
 
