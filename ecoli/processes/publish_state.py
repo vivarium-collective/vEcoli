@@ -94,6 +94,7 @@ class PublishState(Step):
             self.producer = NatsClient()
             self.producer.connect(
                 self.parameters['publish']['address'])
+            self.subject = self.parameters['publish']['subject']
 
         # molecule indexes and masses
         self.bulk_ids = self.parameters["bulk_ids"]
@@ -226,7 +227,7 @@ class PublishState(Step):
         encoded = json_encode(message)
 
         self.producer.publish(
-            'test.ecoli-publish',
+            self.subject,
             encoded)
 
         return {}

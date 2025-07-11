@@ -117,7 +117,7 @@
         "global_clock": {},
         "publish-state": {
           "publish": {
-            "address": "nats://0.0.0.0:4222",
+            "address": "nats://sms.cam.uchc.edu:30050",
             "subject": "test.ecoli-publish"}},
         "replication_data_listener": {"time_step": 1}},
     "topology": {
