@@ -118,7 +118,7 @@
         "publish-state": {
           "publish": {
             "address": "nats://sms.cam.uchc.edu:30050",
-            "subject": "test.ecoli-publish"}},
+            "subject": "prod.ecoli-publish"}},
         "replication_data_listener": {"time_step": 1}},
     "topology": {
         "bulk-timeline": {
