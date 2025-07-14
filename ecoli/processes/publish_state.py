@@ -96,6 +96,7 @@ class PublishState(Step):
                 self.parameters['publish']['address'])
             self.subject = self.parameters['publish']['subject']
             self.correlation_id = self.parameters['publish'].get('correlation_id', 'not-set')
+            self.modulus = self.parameters['publish'].get('modulus', 1)
 
         # molecule indexes and masses
         self.bulk_ids = self.parameters["bulk_ids"]
@@ -122,6 +123,7 @@ class PublishState(Step):
         # Helper indices for Numpy indexing
         self.bulk_idx = None
 
+        self.step_number = 0
         self.sequence_number = 0
 
     def ports_schema(self):
@@ -211,32 +213,37 @@ class PublishState(Step):
                 self.bulk_ids,
                 bulk_ids)
 
-        bulk_counts = counts(
-            states["bulk"],
-            self.bulk_idx)
+        if self.step_number % self.modulus == 0:
+            bulk_counts = counts(
+                states["bulk"],
+                self.bulk_idx)
 
-        message = {}
-        message['correlation_id'] = self.correlation_id
-        message['sequence_number'] = self.sequence_number
-        message['time'] = states['global_time']
-        message['mass'] = states['listeners']['mass']
-        message['bulk'] = bulk_counts
-        message['RNA'] = states['unique']['RNA']
-        message['chromosome'] = {}
-        message['chromosome']['full'] = states['unique']['full_chromosome']
-        message['chromosome']['domain'] = states['unique']['chromosome_domain']
-        message['chromosome']['segment'] = states['unique']['chromosomal_segment']
-        message['chromosome']['replisome'] = states['unique']['active_replisome']
-        message['chromosome']['oriC'] = states['unique']['oriC']
+            message = {}
+            message['correlation_id'] = self.correlation_id
+            message['sequence_number'] = self.sequence_number
+            message['time'] = states['global_time']
+            message['mass'] = states['listeners']['mass']
+            message['bulk'] = bulk_counts
+            # message['RNA'] = states['unique']['RNA']
+            # message['chromosome'] = {}
+            # message['chromosome']['full'] = states['unique']['full_chromosome']
+            # message['chromosome']['domain'] = states['unique']['chromosome_domain']
+            # message['chromosome']['segment'] = states['unique']['chromosomal_segment']
+            # message['chromosome']['replisome'] = states['unique']['active_replisome']
+            # message['chromosome']['oriC'] = states['unique']['oriC']
 
-        encoded = json_encode(message)
+            if self.sequence_number == 0:
+                message['bulk_index'] = self.bulk_ids
 
-        self.producer.publish(
-            self.subject,
-            encoded)
+            encoded = json_encode(message)
 
-        self.sequence_number = self.sequence_number + 1
+            self.producer.publish(
+                self.subject,
+                encoded)
 
+            self.sequence_number += 1
+
+        self.step_number += 1
         return {}
 
 

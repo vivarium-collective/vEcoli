@@ -119,6 +119,7 @@
           "publish": {
             "address": "nats://sms.cam.uchc.edu:30050",
             "subject": "prod.ecoli-publish",
+            "modulus": 10,
             "correlation_id": "CORRELATION_ID_REPLACE_ME"}},
         "replication_data_listener": {"time_step": 1}},
     "topology": {
