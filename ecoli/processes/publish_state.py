@@ -95,6 +95,7 @@ class PublishState(Step):
             self.producer.connect(
                 self.parameters['publish']['address'])
             self.subject = self.parameters['publish']['subject']
+            self.correlation_id = self.parameters['publish'].get('correlation_id', 'not-set')
 
         # molecule indexes and masses
         self.bulk_ids = self.parameters["bulk_ids"]
@@ -213,6 +214,7 @@ class PublishState(Step):
             self.bulk_idx)
 
         message = {}
+        message['correlation_id'] = self.correlation_id
         message['time'] = states['global_time']
         message['mass'] = states['listeners']['mass']
         message['bulk'] = bulk_counts
