@@ -122,6 +122,8 @@ class PublishState(Step):
         # Helper indices for Numpy indexing
         self.bulk_idx = None
 
+        self.sequence_number = 0
+
     def ports_schema(self):
         def split_divider_schema(metadata):
             return {
@@ -215,6 +217,7 @@ class PublishState(Step):
 
         message = {}
         message['correlation_id'] = self.correlation_id
+        message['sequence_number'] = self.sequence_number
         message['time'] = states['global_time']
         message['mass'] = states['listeners']['mass']
         message['bulk'] = bulk_counts
@@ -231,6 +234,8 @@ class PublishState(Step):
         self.producer.publish(
             self.subject,
             encoded)
+
+        self.sequence_number = self.sequence_number + 1
 
         return {}
 
