@@ -9,19 +9,13 @@ as the simulation is running
 """
 
 import numpy as np
-from numpy.lib import recfunctions as rfn
 from datetime import date, datetime, timedelta
 
-import sys
 import json
-import asyncio
-import logging
-import threading
 
 from vivarium.core.process import Step
-from ecoli.library.schema import numpy_schema, counts, attrs, bulk_name_to_idx
+from ecoli.library.schema import numpy_schema, counts, bulk_name_to_idx
 from ecoli.processes.registries import topology_registry
-from wholecell.utils import units
 from wholecell.io.simple_nats import NatsClient
 
 # Register default topology for this step, associating it with process name
@@ -56,9 +50,7 @@ class NpEncoder(json.JSONEncoder):
 
 
 def json_encode(message):
-    return json.dumps(
-        message,
-        cls=NpEncoder).encode('utf8')
+    return json.dumps(message, cls=NpEncoder).encode("utf8")
 
 
 class PublishState(Step):
@@ -90,13 +82,14 @@ class PublishState(Step):
     def __init__(self, parameters=None):
         super().__init__(parameters)
 
-        if self.parameters['publish']:
+        if self.parameters["publish"]:
             self.producer = NatsClient()
-            self.producer.connect(
-                self.parameters['publish']['address'])
-            self.subject = self.parameters['publish']['subject']
-            self.correlation_id = self.parameters['publish'].get('correlation_id', 'not-set')
-            self.modulus = self.parameters['publish'].get('modulus', 1)
+            self.producer.connect(self.parameters["publish"]["address"])
+            self.subject = self.parameters["publish"]["subject"]
+            self.correlation_id = self.parameters["publish"].get(
+                "correlation_id", "not-set"
+            )
+            self.modulus = self.parameters["publish"].get("modulus", 1)
 
         # molecule indexes and masses
         self.bulk_ids = self.parameters["bulk_ids"]
@@ -203,27 +196,25 @@ class PublishState(Step):
         return ports
 
     def update_condition(self, timestep, states):
-        return self.parameters['publish'] and (
-            states["global_time"] % states["timestep"]) == 0
+        return (
+            self.parameters["publish"]
+            and (states["global_time"] % states["timestep"]) == 0
+        )
 
     def next_update(self, timestep, states):
         if self.bulk_idx is None:
             bulk_ids = states["bulk"]["id"]
-            self.bulk_idx = bulk_name_to_idx(
-                self.bulk_ids,
-                bulk_ids)
+            self.bulk_idx = bulk_name_to_idx(self.bulk_ids, bulk_ids)
 
         if self.step_number % self.modulus == 0:
-            bulk_counts = counts(
-                states["bulk"],
-                self.bulk_idx)
+            bulk_counts = counts(states["bulk"], self.bulk_idx)
 
             message = {}
-            message['correlation_id'] = self.correlation_id
-            message['sequence_number'] = self.sequence_number
-            message['time'] = states['global_time']
-            message['mass'] = states['listeners']['mass']
-            message['bulk'] = bulk_counts
+            message["correlation_id"] = self.correlation_id
+            message["sequence_number"] = self.sequence_number
+            message["time"] = states["global_time"]
+            message["mass"] = states["listeners"]["mass"]
+            message["bulk"] = bulk_counts
             # message['RNA'] = states['unique']['RNA']
             # message['chromosome'] = {}
             # message['chromosome']['full'] = states['unique']['full_chromosome']
@@ -233,17 +224,13 @@ class PublishState(Step):
             # message['chromosome']['oriC'] = states['unique']['oriC']
 
             if self.sequence_number == 0:
-                message['bulk_index'] = self.bulk_ids
+                message["bulk_index"] = self.bulk_ids
 
             encoded = json_encode(message)
 
-            self.producer.publish(
-                self.subject,
-                encoded)
+            self.producer.publish(self.subject, encoded)
 
             self.sequence_number += 1
 
         self.step_number += 1
         return {}
-
-
