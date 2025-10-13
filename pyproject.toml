@@ -33,6 +33,8 @@ dependencies = [
     "ortools<9.11",
     "pandas",
     "polars",
+    "xarray",
+    "zarr",
     "pymunk",
     "scikit-image",
     "scikit-learn",

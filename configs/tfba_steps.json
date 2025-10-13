@@ -1,0 +1,13 @@
+{
+    "experiment_id": "dfba_steps",
+    "fixed_media": "minimal",
+    "suffix_time": false,
+    "max_duration": 500.0,
+    "fail_at_max_duration": false,
+    "generations": 1,
+    "n_init_sims": 1,
+    "single_daughters": true,
+    "emitter" : "timeseries",
+    "log_updates": true,
+    "raw_output": true
+}
