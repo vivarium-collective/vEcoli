@@ -12,7 +12,22 @@
             "genes": {
                 "observable_ids": [
                   "alr",
-                  "ruvB"
+                  "ruvB",
+                  "dapF",
+                  "dbpA",
+                  "dcm",
+                  "dcp",
+                  "ddlA",
+                  "ddlB",
+                  "deaD",
+                  "dedA",
+                  "accD",
+                  "dedD",
+                  "deoA",
+                  "deoB",
+                  "deoC",
+                  "deoD",
+                  "fucU"
                 ]
             }
         }
