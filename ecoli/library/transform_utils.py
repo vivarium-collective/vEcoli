@@ -80,3 +80,11 @@ def downsample(df_long: pl.LazyFrame) -> pl.LazyFrame:
     tp_ds = list(itertools.islice(tp_all, 0, tp_all.max(), ds_ratio))
     df_ds = df_long.filter(pl.col("time").is_in(tp_ds))
     return df_ds
+
+
+def get_cardinality(x: pl.DataFrame, y: pl.DataFrame) -> tuple[float, float]:
+    nx, ny = list(map(lambda df: len(df.rows()), [x, y]))
+    dx, dy = list(map(lambda df: len(df.columns), [x, y]))
+    return (
+        (ny / nx), (dy / dx)
+    )

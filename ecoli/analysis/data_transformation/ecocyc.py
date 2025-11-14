@@ -1,3 +1,4 @@
+import json
 import warnings
 from pathlib import Path
 from typing import Any
@@ -8,7 +9,7 @@ import numpy as np
 
 from ecoli.library.parquet_emitter import read_stacked_columns
 from ecoli.library.sim_data import LoadSimData
-from ecoli.library.transform_utils import ANSIColors, SimulationConfigData, partition_log, downsample, ctext
+from ecoli.library.transform_utils import ANSIColors, SimulationConfigData, partition_log, downsample, ctext, get_cardinality
 
 
 def plot(
@@ -84,8 +85,8 @@ def genes_transform(
         mrna_plot_dict["time"] = outputs_loaded["time"]
 
         mrna_df_long = pl.LazyFrame(mrna_plot_dict).unpivot(
-            index=["time"],  # columns to keep fixed
-            on=None,  # columns to unpivot; None = all other columns
+            index=["time"],
+            on=None,
             variable_name="gene names",
             value_name="counts"
         )
@@ -93,7 +94,20 @@ def genes_transform(
         mrna_df: pl.LazyFrame = downsample(mrna_df_long)
         observable_ids = params.get("observable_ids")
         genes_data: pl.LazyFrame = mrna_df.filter(pl.col("gene names").is_in(observable_ids))
-        return genes_data.collect()
+
+        # export reported metadata about transform, including cardinality
+        x = outputs_loaded
+        y = genes_data.collect()
+        metadata = {'cardinality': get_cardinality(x, y), 'type': "ecocyc_genes", "schemas": {}}
+        for df_name, dataframe in dict(zip(['X', 'Y'], [x, y])).items():
+            schema = {
+                colname: val_type.__name__ for colname, val_type in dataframe.collect_schema().to_python().items()
+            }
+            metadata['schemas'][df_name] = schema
+        with open(Path(outdir) / "transformation_metadata.json", 'w') as fp:
+            json.dump(metadata, fp, indent=4)
+
+        return y
 
     # read the data while performing the transformation
     required_columns = ["listeners__rna_counts__full_mRNA_cistron_counts"]
@@ -105,8 +119,8 @@ def genes_transform(
     filename = f"genes_{experiment_id}"
     export_format = "parquet"
     out_path = Path(outdir) / f"{filename}.{export_format}"
-    exporter = getattr(lf, f'sink_{export_format}')
-    exporter(out_path)
+    data_exporter = getattr(lf, f'sink_{export_format}')
+    data_exporter(out_path)
 
 
 def bulk_transform(
