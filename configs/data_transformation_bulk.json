@@ -6,11 +6,13 @@
         "experiment_id": ["sms_multiseed_multigen"],
         "variant_data_dir": ["out/sms_multiseed_multigen/variant_sim_data"],
         "validation_data_path": ["out/sms_multiseed_multigen/parca/kb/validationData.cPickle"],
-        "outdir": "out/transforms/transformed_GENES3_sms_multiseed_multigen",
+        "outdir": "out/transforms/transformed_BULK_sms_multiseed_multigen",
         "cpus": 11,
         "data_transform": {
             "ecocyc": {
                 "type": "bulk",
+                "common_labels": false,
+                "cache": false,
                 "observable_ids": [
                     "--TRANS-ACENAPHTHENE-12-DIOL",
                     "ACETOLACTSYNI-CPLX",
