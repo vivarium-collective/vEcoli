@@ -27,19 +27,25 @@ def plot(
     warnings.warn(
         ctext('You requested {} num observables!'.format(len(params.get("observable_ids", []))), color=ANSIColors.RED)
     )
-
-    transformation_type = params.get('type')
-    match transformation_type:
-        case "genes":
-            print('Running Genes transform...')
-            genes_transform(params, conn, history_sql, config_sql, success_sql, sim_data_paths, outdir)
-        case "bulk":
-            print('Running Bulk transform...')
-            bulk_transform(params, conn, history_sql, config_sql, success_sql, sim_data_paths, outdir)
-        case None:
-            warnings.warn('No explicit observable ids passed: this may be alot of data!')
-            genes_transform(params, conn, history_sql, config_sql, success_sql, sim_data_paths, outdir)
-            bulk_transform(params, conn, history_sql, config_sql, success_sql, sim_data_paths, outdir)
+    requested_transformations = params.get("request", [])
+    if requested_transformations:
+        for request in requested_transformations:
+            transformation_type = request["type"]
+            match transformation_type:
+                case "genes":
+                    print('Running Genes transform...')
+                    genes_transform(params, conn, history_sql, config_sql, success_sql, sim_data_paths, outdir)
+                case "bulk":
+                    print('Running Bulk transform...')
+                    bulk_transform(params, conn, history_sql, config_sql, success_sql, sim_data_paths, outdir)
+                case "reactions":
+                    print('Running Reactions transform...')
+                    reactions_transform(params, conn, history_sql, config_sql, success_sql, sim_data_paths, outdir)
+                case None:
+                    warnings.warn('No explicit observable ids passed: this may be alot of data!')
+                    genes_transform(params, conn, history_sql, config_sql, success_sql, sim_data_paths, outdir)
+                    bulk_transform(params, conn, history_sql, config_sql, success_sql, sim_data_paths, outdir)
+                    reactions_transform(params, conn, history_sql, config_sql, success_sql, sim_data_paths, outdir)
 
 
 def genes_transform(
@@ -136,3 +142,16 @@ def bulk_transform(
         ctext('You requested {} num observables!'.format(len(params.get("observable_ids", []))), color=ANSIColors.RED)
     )
 
+
+def reactions_transform(
+    params: dict[str, Any],
+    conn: DuckDBPyConnection,
+    history_sql: str,
+    config_sql: str,
+    success_sql: str,
+    sim_data_paths: dict[str, dict[int, str]],
+    outdir: str
+) -> None:
+    warnings.warn(
+        ctext('You requested {} num observables!'.format(len(params.get("observable_ids", []))), color=ANSIColors.RED)
+    )

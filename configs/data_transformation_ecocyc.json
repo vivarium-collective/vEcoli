@@ -1,0 +1,73 @@
+{
+  "emitter_arg": {
+    "out_dir": "out"
+  },
+  "analysis_options": {
+    "experiment_id": [
+      "sms_multiseed_multigen"
+    ],
+    "variant_data_dir": [
+      "out/sms_multiseed_multigen/variant_sim_data"
+    ],
+    "validation_data_path": [
+      "out/sms_multiseed_multigen/parca/kb/validationData.cPickle"
+    ],
+    "outdir": "out/transforms/transformed_GENES_sms_multiseed_multigen",
+    "cpus": 11,
+    "data_transformation": {
+      "ecocyc": {
+        "request": [
+          {
+            "type": "genes",
+            "observable_ids": [
+              "alr",
+              "ruvB",
+              "dapF",
+              "dbpA",
+              "dcm",
+              "dcp",
+              "ddlA",
+              "ddlB",
+              "deaD",
+              "dedA",
+              "accD",
+              "dedD",
+              "deoA",
+              "deoB",
+              "deoC",
+              "deoD",
+              "fucU"
+            ]
+          },
+          {
+            "type": "bulk",
+            "observable_ids": [
+              "--TRANS-ACENAPHTHENE-12-DIOL",
+              "ACETOLACTSYNI-CPLX",
+              "CPD-3729",
+              "TU00415",
+              "TU00423",
+              "TU00424",
+              "TU00428",
+              "TU00430",
+              "TU00431",
+              "TU00439",
+              "TU00444",
+              "TU00445",
+              "TU00449",
+              "TU00451",
+              "TU00452",
+              "TU00454",
+              "TU00455",
+              "TU00456",
+              "TU00459",
+              "TU00460",
+              "TU00461"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
+
