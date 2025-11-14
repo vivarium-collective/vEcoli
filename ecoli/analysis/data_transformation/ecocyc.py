@@ -24,32 +24,25 @@ def plot(
     variant_metadata: dict[str, dict[int, Any]],
     variant_names: dict[str, str],
 ) -> None:
-    warnings.warn(
-        ctext('You requested {} num observables!'.format(len(params.get("observable_ids", []))), color=ANSIColors.RED)
-    )
     requested_transformations = params.get("request", [])
     if requested_transformations:
         for request in requested_transformations:
             transformation_type = request["type"]
-            match transformation_type:
-                case "genes":
-                    print('Running Genes transform...')
-                    genes_transform(params, conn, history_sql, config_sql, success_sql, sim_data_paths, outdir)
-                case "bulk":
-                    print('Running Bulk transform...')
-                    bulk_transform(params, conn, history_sql, config_sql, success_sql, sim_data_paths, outdir)
-                case "reactions":
-                    print('Running Reactions transform...')
-                    reactions_transform(params, conn, history_sql, config_sql, success_sql, sim_data_paths, outdir)
-                case None:
-                    warnings.warn('No explicit observable ids passed: this may be alot of data!')
-                    genes_transform(params, conn, history_sql, config_sql, success_sql, sim_data_paths, outdir)
-                    bulk_transform(params, conn, history_sql, config_sql, success_sql, sim_data_paths, outdir)
-                    reactions_transform(params, conn, history_sql, config_sql, success_sql, sim_data_paths, outdir)
+            observable_ids = request.get("observable_ids", [])
+            data_transformer = genes_transform if transformation_type == "genes" \
+                else bulk_transform if transformation_type == "bulk" \
+                else reactions_transform if transformation_type == "reactions" \
+                else None
+
+            if data_transformer is None:
+                raise ValueError('You must pass an analysis type as config parameter!')
+            data_transformer(observable_ids, conn, history_sql, config_sql, success_sql, sim_data_paths, outdir)
+    else:
+        full_transformation([], conn, history_sql, config_sql, success_sql, sim_data_paths, outdir)
 
 
 def genes_transform(
-    params: dict[str, Any],
+    observable_ids: list[str],
     conn: DuckDBPyConnection,
     history_sql: str,
     config_sql: str,
@@ -57,6 +50,9 @@ def genes_transform(
     sim_data_paths: dict[str, dict[int, str]],
     outdir: str
 ) -> None:
+    warnings.warn(
+        ctext('You requested {} num observables!'.format(len(observable_ids)), color=ANSIColors.RED)
+    )
     # extract exposed params
     config_df = SimulationConfigData(config_sql)
     experiment_id, variant, seed, generation, agent_id, sim_outdir = list(
@@ -98,7 +94,6 @@ def genes_transform(
         )
 
         mrna_df: pl.LazyFrame = downsample(mrna_df_long)
-        observable_ids = params.get("observable_ids")
         genes_data: pl.LazyFrame = mrna_df.filter(pl.col("gene names").is_in(observable_ids))
 
         # export reported metadata about transform, including cardinality
@@ -130,7 +125,7 @@ def genes_transform(
 
 
 def bulk_transform(
-    params: dict[str, Any],
+    observable_ids: list[str],
     conn: DuckDBPyConnection,
     history_sql: str,
     config_sql: str,
@@ -139,12 +134,12 @@ def bulk_transform(
     outdir: str
 ) -> None:
     warnings.warn(
-        ctext('You requested {} num observables!'.format(len(params.get("observable_ids", []))), color=ANSIColors.RED)
+        ctext('You requested {} num observables!'.format(len(observable_ids)), color=ANSIColors.RED)
     )
 
 
 def reactions_transform(
-    params: dict[str, Any],
+    observable_ids: list[str],
     conn: DuckDBPyConnection,
     history_sql: str,
     config_sql: str,
@@ -153,5 +148,22 @@ def reactions_transform(
     outdir: str
 ) -> None:
     warnings.warn(
-        ctext('You requested {} num observables!'.format(len(params.get("observable_ids", []))), color=ANSIColors.RED)
+        ctext('You requested {} num observables!'.format(len(observable_ids)), color=ANSIColors.RED)
     )
+
+
+def full_transformation(
+    observable_ids: list[str],
+    conn: DuckDBPyConnection,
+    history_sql: str,
+    config_sql: str,
+    success_sql: str,
+    sim_data_paths: dict[str, dict[int, str]],
+    outdir: str
+) -> None:
+    for _ in map(
+            lambda f: f(observable_ids, conn, history_sql, config_sql, success_sql, sim_data_paths, outdir),
+            [genes_transform, bulk_transform, reactions_transform]
+    ):
+        pass
+
