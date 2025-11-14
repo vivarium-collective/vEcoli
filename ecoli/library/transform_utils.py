@@ -141,12 +141,6 @@ def get_ids(sim_data: SimulationDataEcoli) -> tuple[..., ..., ..., ..., ..., ...
     )
 
 
-def cache_transformed(y: pd.DataFrame | pl.DataFrame) -> None:
-    # import redis
-    # r = redis.Redis(host='localhost', port=6379, db=0)
-    raise NotImplementedError("This feature is coming soon.")
-
-
 def downsample_pd(df_long: pd.DataFrame) -> pd.DataFrame:
     tp_all = np.unique(df_long["time"]).astype(int)
     ds_ratio = int(np.ceil(np.shape(df_long)[0] / 20000))
@@ -155,7 +149,11 @@ def downsample_pd(df_long: pd.DataFrame) -> pd.DataFrame:
     return df_ds
 
 
-def export_metadata(partition_dict: dict[str, int | str], x: pl.DataFrame, y: pl.DataFrame, outdir: str) -> None:
+def export_metadata(partition_dict: dict[str, int | str], x: pl.DataFrame | pd.DataFrame, y: pl.DataFrame | pd.DataFrame, outdir: str) -> pl.LazyFrame:
+    x, y = list(map(
+        lambda df: pl.from_pandas(df) if isinstance(df, pd.DataFrame) else df,
+        [x, y]
+    ))
     metadata = {
         'cardinality': get_cardinality(x, y),
         'type': f"ecocyc_bulk",
@@ -169,3 +167,10 @@ def export_metadata(partition_dict: dict[str, int | str], x: pl.DataFrame, y: pl
         metadata['schemas'][df_name] = schema
     with open(Path(outdir) / "transformation_metadata.json", 'w') as fp:
         json.dump(metadata, fp, indent=4)
+    return y.lazy()
+
+
+def cache_transformed(y: pd.DataFrame | pl.DataFrame) -> None:
+    # import redis
+    # r = redis.Redis(host='localhost', port=6379, db=0)
+    raise NotImplementedError("This feature is coming soon.")
