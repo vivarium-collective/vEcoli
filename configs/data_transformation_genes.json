@@ -8,7 +8,7 @@
         "validation_data_path": ["out/sms_multiseed_multigen/parca/kb/validationData.cPickle"],
         "outdir": "out/transforms/transformed_GENES_sms_multiseed_multigen",
         "cpus": 11,
-        "data_transform": {
+        "data_transformation": {
             "ecocyc": {
                 "type": "genes",
                 "observable_ids": [
