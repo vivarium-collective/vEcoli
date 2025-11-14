@@ -56,7 +56,7 @@ ANALYSIS_TYPES = {
     "multidaughter": ["experiment_id", "variant", "lineage_seed", "generation"],
     "single": ["experiment_id", "variant", "lineage_seed", "generation", "agent_id"],
     "parca": [],
-    "data_transform": ["experiment_id", "variant", "lineage_seed", "generation", "agent_id"]
+    "data_transformation": ["experiment_id", "variant", "lineage_seed", "generation", "agent_id"],  # cast as "single" analysis
 }
 """Mapping of all possible analysis types to the combination of identifiers that
 must be unique for each subset of the data given to that analysis type as input."""
