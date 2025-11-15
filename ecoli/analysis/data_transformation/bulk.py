@@ -66,6 +66,7 @@ def plot(
 
 # ============= Bulk Transformation ============= #
 
+
 def _bulk_transform(
     sim_data: SimulationDataEcoli,
     experiment_id: str,
@@ -104,29 +105,30 @@ def _bulk_transform(
     # TODO: each iteration iterates over ~12k rows! Crazy slow: optimize it!
     # == intermediate mappings ==
     # get bulk sp traj
-    sp_trajs = []
-    for i, bulk_id in enumerate(bulk_names_unique):
-        start = time.time()
-        # print(ctext(f'\n>> TRANSFORM CALLBACK: ({i}) {bulk_id}\n', ANSIColors.BLUE))
-        if molecule_id_type == "common name":
-            sp_name = bulk_names_unique[bulk_common_names.index(bulk_id)]
-        elif molecule_id_type.value == "bulk id":
-            sp_name = bulk_id
-        sp_idxs = [index for index, item in enumerate(bulk_ids_biocyc) if item == sp_name]
-        bulk_sp_traj = np.sum(bulk_mtx[:, sp_idxs], 1)
-        traj = bulk_sp_traj
-        sp_trajs.append(traj)
-        print(
-            ctext(f'\ni: {i}, duration: {time.time() - start}\n', ANSIColors.BLUE)
-        )
+    # sp_trajs = []
+    # for i, bulk_id in enumerate(bulk_names_unique):
+    #     start = time.time()
+    #     # print(ctext(f'\n>> TRANSFORM CALLBACK: ({i}) {bulk_id}\n', ANSIColors.BLUE))
+    #     if molecule_id_type == "common name":
+    #         sp_name = bulk_names_unique[bulk_common_names.index(bulk_id)]
+    #     elif molecule_id_type.value == "bulk id":
+    #         sp_name = bulk_id
+    #     sp_idxs = [index for index, item in enumerate(bulk_ids_biocyc) if item == sp_name]
+    #     bulk_sp_traj = np.sum(bulk_mtx[:, sp_idxs], 1)
+    #     traj = bulk_sp_traj
+    #     sp_trajs.append(traj)
+    #     print(
+    #         ctext(f'\ni: {i}, duration: {time.time() - start}\n', ANSIColors.BLUE)
+    #     )
+    # plot_dict = dict(zip(bulk_names_unique, sp_trajs))
+    # plot_dict["time"] = outputs_loaded["time"]
+    # df_long = pd.DataFrame(plot_dict).melt(
+    #     id_vars=["time"],
+    #     var_name="bulk_molecules",
+    #     value_name="counts",
+    # )
 
-    plot_dict = dict(zip(bulk_names_unique, sp_trajs))
-    plot_dict["time"] = outputs_loaded["time"]
-    df_long = pd.DataFrame(plot_dict).melt(
-        id_vars=["time"],
-        var_name="bulk_molecules",
-        value_name="counts",
-    )
+    df_long: pd.DataFrame = _map_trajectory(bulk_names_unique, molecule_id_type, bulk_common_names, bulk_ids_biocyc, bulk_mtx, outputs_loaded)
 
     # == downsampling and final transform ==
     df: pd.DataFrame = downsample_pd(df_long)
@@ -144,6 +146,38 @@ def _bulk_transform(
     out_path = Path(outdir) / f"{filename}.{export_format}"
     lf_y.sink_parquet(out_path)
     print(f'Transform finished for partition:\n{partition_dict}')
+
+
+def _map_trajectory(
+        bulk_names_unique: list[str],
+        molecule_id_type: str | MoleculeIdType,
+        bulk_common_names: list[str],
+        bulk_ids_biocyc: list[str],
+        bulk_mtx: np.ndarray,
+        outputs_loaded: pd.DataFrame
+) -> pd.DataFrame:
+    sp_trajs = []
+    for i, bulk_id in enumerate(bulk_names_unique):
+        start = time.time()
+        # print(ctext(f'\n>> TRANSFORM CALLBACK: ({i}) {bulk_id}\n', ANSIColors.BLUE))
+        if molecule_id_type == "common name":
+            sp_name = bulk_names_unique[bulk_common_names.index(bulk_id)]
+        elif molecule_id_type.value == "bulk id":
+            sp_name = bulk_id
+        sp_idxs = [index for index, item in enumerate(bulk_ids_biocyc) if item == sp_name]
+        bulk_sp_traj = np.sum(bulk_mtx[:, sp_idxs], 1)
+        traj = bulk_sp_traj
+        sp_trajs.append(traj)
+        print(
+            ctext(f'\n===\nBulk Name: {bulk_id}\ni: {i}\nduration: {time.time() - start}\n===\n', ANSIColors.BLUE)
+        )
+    plot_dict = dict(zip(bulk_names_unique, sp_trajs))
+    plot_dict["time"] = outputs_loaded["time"]
+    return pd.DataFrame(plot_dict).melt(
+        id_vars=["time"],
+        var_name="bulk_molecules",
+        value_name="counts",
+    )
 
 
 def _read_outputs(
