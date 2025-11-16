@@ -174,3 +174,15 @@ def cache_transformed(y: pd.DataFrame | pl.DataFrame) -> None:
     # import redis
     # r = redis.Redis(host='localhost', port=6379, db=0)
     raise NotImplementedError("This feature is coming soon.")
+
+
+def get_ecocyc_transforms(expid: str, outdir_root: Path, **partitioning_params) -> pl.DataFrame:
+    outdir = Path(outdir_root) / f"{expid}_ecocyc_transform" / f"experiment_id={expid}"
+    return pl.scan_parquet(f"{outdir!s}/**/*.parquet").collect()
+
+
+def test_get_ecocyc_transforms():
+    expid = "sms_multiseed_multigen"
+    outdir_root = Path("out/transforms")
+    df = get_ecocyc_transforms(expid, outdir_root)
+    print(df.head())
