@@ -177,19 +177,20 @@ def cache_transformed(y: pd.DataFrame | pl.DataFrame) -> None:
     raise NotImplementedError("This feature is coming soon.")
 
 
-def load_ecocyc_transforms(expid: str, outdir_root: Path):
-    @dataclass
-    class TransformData:
-        experiment_id: str
-        bulk: pl.LazyFrame | pl.DataFrame
-        genes: pl.LazyFrame | pl.DataFrame
+@dataclass
+class TransformData:
+    experiment_id: str
+    bulk: pl.LazyFrame | pl.DataFrame
+    genes: pl.LazyFrame | pl.DataFrame
 
+
+def load_ecocyc_transforms(expid: str, outdir_root: Path, lazy: bool = False) -> TransformData:
     def load_pq(expid: str, kind: Literal["bulk", "genes"], outdir_root: Path) -> pl.LazyFrame:
         base = outdir_root / f"{expid}_ecocyc_transform"
         all_parquet = glob.glob(str(base / f"**/*/{kind}_{expid}.parquet"), recursive=True)
-        lframe = pl.scan_parquet(all_parquet, cast_options=pl.ScanCastOptions(integer_cast="upcast"))
+        lframe = pl.scan_parquet(all_parquet, cast_options=pl.ScanCastOptions(integer_cast="upcast")).sort("time")
         print("Found", len(all_parquet), f"{kind} parquet files")
-        return lframe
+        return lframe.collect() if not lazy else lframe
 
     bulk, genes = list(map(
         lambda kind: load_pq(expid, kind, outdir_root),
@@ -201,5 +202,14 @@ def load_ecocyc_transforms(expid: str, outdir_root: Path):
 def test_get_ecocyc_transforms():
     expid = "sms_multiseed_multigen"
     outdir_root = Path("out/transforms")
-    data = load_ecocyc_transforms(expid, outdir_root)
-    print(data)
+    data = load_ecocyc_transforms(expid, outdir_root, lazy=True)
+
+    assert isinstance(data.bulk, pl.LazyFrame)
+    assert isinstance(data.genes, pl.LazyFrame)
+
+    expected_bulk_schema = pl.Schema([('time', pl.Float64), ('bulk_molecules', pl.String), ('counts', pl.Int64)])
+    assert data.bulk.collect_schema() == expected_bulk_schema
+    expected_genes_schema = pl.Schema([('time', pl.Float64), ('gene names', pl.String), ('counts', pl.UInt32)])
+    assert data.genes.collect_schema() == expected_genes_schema
+
+    assert data.bulk.collect()[-1].to_numpy().flatten().tolist() == np.array([114653.0, 'a-hepta-acylated-core-oligosaccharide-li', 0], dtype=object).tolist()
