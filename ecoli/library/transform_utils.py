@@ -1,8 +1,9 @@
+import glob
 import json
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import duckdb
 import pandas as pd
@@ -176,13 +177,29 @@ def cache_transformed(y: pd.DataFrame | pl.DataFrame) -> None:
     raise NotImplementedError("This feature is coming soon.")
 
 
-def get_ecocyc_transforms(expid: str, outdir_root: Path, **partitioning_params) -> pl.DataFrame:
-    outdir = Path(outdir_root) / f"{expid}_ecocyc_transform" / f"experiment_id={expid}"
-    return pl.scan_parquet(f"{outdir!s}/**/*.parquet").collect()
+def load_ecocyc_transforms(expid: str, outdir_root: Path):
+    @dataclass
+    class TransformData:
+        experiment_id: str
+        bulk: pl.LazyFrame | pl.DataFrame
+        genes: pl.LazyFrame | pl.DataFrame
+
+    def load_pq(expid: str, kind: Literal["bulk", "genes"], outdir_root: Path) -> pl.LazyFrame:
+        base = outdir_root / f"{expid}_ecocyc_transform"
+        all_parquet = glob.glob(str(base / f"**/*/{kind}_{expid}.parquet"), recursive=True)
+        lframe = pl.scan_parquet(all_parquet, cast_options=pl.ScanCastOptions(integer_cast="upcast"))
+        print("Found", len(all_parquet), f"{kind} parquet files")
+        return lframe
+
+    bulk, genes = list(map(
+        lambda kind: load_pq(expid, kind, outdir_root),
+        ["bulk", "genes"]
+    ))
+    return TransformData(experiment_id=expid, bulk=bulk, genes=genes)
 
 
 def test_get_ecocyc_transforms():
     expid = "sms_multiseed_multigen"
     outdir_root = Path("out/transforms")
-    df = get_ecocyc_transforms(expid, outdir_root)
-    print(df.head())
+    data = load_ecocyc_transforms(expid, outdir_root)
+    print(data)

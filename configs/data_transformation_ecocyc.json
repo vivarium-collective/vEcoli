@@ -12,7 +12,7 @@
     "validation_data_path": [
       "out/sms_multiseed_multigen/parca/kb/validationData.cPickle"
     ],
-    "outdir": "out/transforms/transformed_ECOCYC_sms_multiseed_multigen",
+    "outdir": "out/transforms/sms_multiseed_multigen_ecocyc_transform",
     "cpus": 11,
     "data_transformation": {
       "ecocyc": {
@@ -63,7 +63,17 @@
               "TU00459",
               "TU00460",
               "TU00461",
-              "a-hepta-acylated-core-oligosaccharide-li"
+              "a-hepta-acylated-core-oligosaccharide-li",
+              "TUNGSTATE",
+              "TYLOSIN",
+              "TYR",
+              "TYRAMINE",
+              "TYRB-DIMER",
+              "TYRB-MONOMER",
+              "TYRP-MONOMER",
+              "TYRS-CPLX",
+              "TYRS-MONOMER",
+              "Thiazoles"
             ]
           }
         ]
