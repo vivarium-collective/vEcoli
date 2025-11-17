@@ -184,6 +184,7 @@ class TransformData:
     genes: pl.LazyFrame | pl.DataFrame
 
 
+# this should be in the api
 def load_ecocyc_transforms(expid: str, outdir_root: Path, lazy: bool = False) -> TransformData:
     def load_pq(expid: str, kind: Literal["bulk", "genes"], outdir_root: Path) -> pl.LazyFrame:
         base = outdir_root / f"{expid}_ecocyc_transform"
@@ -197,6 +198,20 @@ def load_ecocyc_transforms(expid: str, outdir_root: Path, lazy: bool = False) ->
         ["bulk", "genes"]
     ))
     return TransformData(experiment_id=expid, bulk=bulk, genes=genes)
+
+
+def test_load_ecocyc_transforms():
+    expid = "sms_multiseed_multigen"
+    outdir_root = Path("out/transforms")
+    data = load_ecocyc_transforms(expid, outdir_root, lazy=False)
+
+    expected_bulk_schema = pl.Schema([('time', pl.Float64), ('bulk_molecules', pl.String), ('counts', pl.Int64)])
+    assert data.bulk.collect_schema() == expected_bulk_schema
+    expected_genes_schema = pl.Schema([('time', pl.Float64), ('gene names', pl.String), ('counts', pl.UInt32)])
+    assert data.genes.collect_schema() == expected_genes_schema
+
+    assert data.bulk.collect()[-1].to_numpy().flatten().tolist() == np.array([114653.0, 'a-hepta-acylated-core-oligosaccharide-li', 0], dtype=object).tolist()
+    print(data.genes.collect().head())
 
 
 def test_get_ecocyc_transforms():
@@ -213,3 +228,4 @@ def test_get_ecocyc_transforms():
     assert data.genes.collect_schema() == expected_genes_schema
 
     assert data.bulk.collect()[-1].to_numpy().flatten().tolist() == np.array([114653.0, 'a-hepta-acylated-core-oligosaccharide-li', 0], dtype=object).tolist()
+    print(data.genes.collect().head())
