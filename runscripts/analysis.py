@@ -47,6 +47,7 @@ FILTERS = {
 }
 """Mapping of data filters to data type."""
 
+
 ANALYSIS_TYPES = {
     "multiexperiment": [],
     "multivariant": ["experiment_id"],
@@ -55,6 +56,7 @@ ANALYSIS_TYPES = {
     "multidaughter": ["experiment_id", "variant", "lineage_seed", "generation"],
     "single": ["experiment_id", "variant", "lineage_seed", "generation", "agent_id"],
     "parca": [],
+    "data_transformation": ["experiment_id", "variant", "lineage_seed", "generation", "agent_id"],  # cast as "single" analysis
 }
 """Mapping of all possible analysis types to the combination of identifiers that
 must be unique for each subset of the data given to that analysis type as input."""
@@ -105,7 +107,19 @@ def parse_variant_data_dir(
     return variant_metadata, sim_data_dict, variant_names
 
 
-def main():
+def make_sim_data_dict(exp_id: str, variants: list[int], sim_data_path: list[str]):
+    if len(variants) == 0:
+        raise ValueError(
+            "Must specify variant or variant_range if not using variant_data_dir"
+        )
+    if len(sim_data_path) != len(variants):
+        raise ValueError(
+            "Must specify sim_data_path for each variant if not using variant_data_dir"
+        )
+    return {exp_id: dict(zip(variants, sim_data_path))}
+
+
+def test_main():
     parser = argparse.ArgumentParser()
     default_config = os.path.join(CONFIG_DIR_PATH, "default.json")
     parser.add_argument(
@@ -169,6 +183,7 @@ def main():
         " --variant_metadata_path. If >1 experiment IDs, this is required and"
         " must have the same length and order as the given experiment IDs.",
     )
+    # multiseed: nexp_ids * n_variants, multigen:
     parser.add_argument(
         "--analysis_types",
         "-t",
@@ -259,6 +274,8 @@ def main():
     duckdb_filter = " AND ".join(duckdb_filter)
 
     # Load variant metadata
+    if "experiment_id" not in config:
+        raise KeyError("Must provide at least one experiment ID with experiment_id")
     if len(config["experiment_id"]) > 1:
         assert "variant_data_dir" in config, (
             "Must provide --variant_data_dir for each experiment ID."
@@ -276,7 +293,7 @@ def main():
         variant_metadata, sim_data_dict, variant_names = parse_variant_data_dir(
             config["experiment_id"], config["variant_data_dir"]
         )
-    else:
+    elif "variant_metadata_path" in config:
         with open(config["variant_metadata_path"], "r") as f:
             variant_metadata = json.load(f)
             variant_name = list(variant_metadata.keys())[0]
@@ -285,14 +302,26 @@ def main():
                     int(k): v for k, v in variant_metadata[variant_name].items()
                 }
             }
-        sim_data_dict = {
-            config["experiment_id"][0]: dict(
-                zip(config["variant"], config["sim_data_path"])
-            )
-        }
-        variant_names = {config["experiment_id"][0]: variant_name}
+            variant_names = {config["experiment_id"][0]: variant_name}
+        sim_data_dict = make_sim_data_dict(
+            config["experiment_id"][0],
+            config.get("variant", []),
+            config.get("sim_data_path", []),
+        )
+    else:
+        warnings.warn(
+            "No variant metadata provided. Using empty variant metadata/names dictionaries."
+        )
+        variant_metadata = {config["experiment_id"][0]: {}}
+        variant_names = {config["experiment_id"][0]: None}
+        sim_data_dict = make_sim_data_dict(
+            config["experiment_id"][0],
+            config.get("variant", []),
+            config.get("sim_data_path", []),
+        )
 
     # Save copy of config JSON with parameters for plots
+    os.makedirs(config["outdir"], exist_ok=True)
     metadata_path = os.path.join(os.path.abspath(config["outdir"]), "metadata.json")
     if os.path.exists(metadata_path):
         raise FileExistsError(
@@ -376,7 +405,7 @@ def main():
                     config_q,
                     success_q,
                     sim_data_dict,
-                    config["validation_data_path"],
+                    config.get("validation_data_path", []),
                     curr_outdir,
                     variant_metadata,
                     variant_names,
@@ -384,4 +413,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    test_main()
