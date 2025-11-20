@@ -1,0 +1,99 @@
+{
+  "experiment_id": "wcecoli_figure2_setD4",
+  "suffix_time": false,
+  "parca_options": {
+    "cpus": 11,
+    "outdir": "out",
+    "operons": true,
+    "ribosome_fitting": false,
+    "rnapoly_fitting": false,
+    "remove_rrna_operons": false,
+    "remove_rrff": false,
+    "stable_rrna": false,
+    "new_genes": "off",
+    "debug_parca": false,
+    "load_intermediate": null,
+    "save_intermediates": false,
+    "intermediates_directory": "",
+    "variable_elongation_transcription": true,
+    "variable_elongation_translation": false
+  },
+  "initial_global_time": 0.0,
+  "time_step": 1.0,
+  "fail_at_max_duration": false,
+  "sim_data_path": null,
+  "generations": 4,
+  "n_init_sims": 30,
+  "single_daughters": true,
+  "emitter": "parquet",
+  "emitter_arg": {
+    "out_dir": "out"
+  },
+  "analysis_options": {
+    "data_transformation": {
+      "ecocyc": {
+        "request": [
+          {
+            "type": "genes",
+            "observable_ids": [
+              "alr",
+              "ruvB",
+              "dapF",
+              "dbpA",
+              "dcm",
+              "dcp",
+              "ddlA",
+              "ddlB",
+              "deaD",
+              "dedA",
+              "accD",
+              "dedD",
+              "deoA",
+              "deoB",
+              "deoC",
+              "deoD",
+              "fucU"
+            ]
+          },
+          {
+            "type": "bulk",
+            "observable_ids": [
+              "--TRANS-ACENAPHTHENE-12-DIOL",
+              "ACETOLACTSYNI-CPLX",
+              "CPD-3729",
+              "TU00415",
+              "TU00423",
+              "TU00424",
+              "TU00428",
+              "TU00430",
+              "TU00431",
+              "TU00439",
+              "TU00444",
+              "TU00445",
+              "TU00449",
+              "TU00451",
+              "TU00452",
+              "TU00454",
+              "TU00455",
+              "TU00456",
+              "TU00459",
+              "TU00460",
+              "TU00461",
+              "a-hepta-acylated-core-oligosaccharide-li",
+              "TUNGSTATE",
+              "TYLOSIN",
+              "TYR",
+              "TYRAMINE",
+              "TYRB-DIMER",
+              "TYRB-MONOMER",
+              "TYRP-MONOMER",
+              "TYRS-CPLX",
+              "TYRS-MONOMER",
+              "Thiazoles"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

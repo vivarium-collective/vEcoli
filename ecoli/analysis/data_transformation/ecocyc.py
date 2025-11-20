@@ -134,10 +134,16 @@ def _genes_transform(
     def callback(*outputs) -> pl.DataFrame:
         start = time.time()
         outputs_loaded = outputs[0]
+        # guard: no rows → nothing to stack
+        if outputs_loaded.height == 0:
+            print(">> EMPTY PARTITION — NO RNA COUNTS; SKIPPING")
+            empty = pl.DataFrame({"time": [], "gene names": [], "counts": []})
+            return empty
         cistron_data = sim_data.process.transcription.cistron_data
         mrna_cistron_ids = cistron_data["id"][cistron_data["is_mRNA"]].tolist()
         mrna_cistron_names = [sim_data.common_names.get_common_name(cistron_id) for cistron_id in mrna_cistron_ids]
         mrna_select = mrna_cistron_names
+        print(outputs_loaded.select("listeners__rna_counts__full_mRNA_cistron_counts"))
         mrna_mtx = np.stack(outputs_loaded["listeners__rna_counts__full_mRNA_cistron_counts"])
         mrna_idxs = [mrna_cistron_names.index(gene_id) for gene_id in mrna_select]
         mrna_trajs = [mrna_mtx[:, mrna_idx] for mrna_idx in mrna_idxs]
@@ -209,7 +215,9 @@ def _bulk_transform(
         "listeners__unique_molecule_counts__active_ribosome",
     ]
     outputs_loaded = _read_outputs(history_sql, conn, required_columns)
-    bulk_mtx = np.stack(outputs_loaded["bulk"].values)
+    bulk_data = outputs_loaded["bulk"]
+    print(bulk_data)
+    bulk_mtx = np.stack(bulk_data.to_numpy())
 
     # TODO: filter bulk_names_unique BEFORE sending it to this function
     df_long: pd.DataFrame = _map_trajectory(
@@ -285,9 +293,17 @@ def _read_outputs(
         return query_sql
 
     query_sql = build_query(columns, history_sql)
+
     outputs_df = conn.sql(query_sql).df()
     outputs_df = outputs_df.groupby("time", as_index=False).sum()
     return outputs_df
+    # lf = conn.sql(query_sql).pl(lazy=True)  # lazy Polars expression, zero-copy from DuckDB
+    # # STREAMING GROUPBY
+    # lf_grouped = (
+    #     lf.group_by("time")
+    #     .agg([pl.all().exclude("time").sum()])
+    # )
+    # return lf_grouped.collect()  # This executes streaming in <1GB RAM
 
 
 # ============= Reactions Transformation ============= #
