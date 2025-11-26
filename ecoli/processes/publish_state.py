@@ -16,7 +16,7 @@ import json
 from vivarium.core.process import Step
 from ecoli.library.schema import numpy_schema, counts, bulk_name_to_idx
 from ecoli.processes.registries import topology_registry
-from wholecell.io.simple_nats import NatsClient
+import redis
 
 # Register default topology for this step, associating it with process name
 NAME = "publish-state"
@@ -49,7 +49,7 @@ class NpEncoder(json.JSONEncoder):
         return super(NpEncoder, self).default(obj)
 
 
-def json_encode(message):
+def json_encode(message) -> bytes:
     return json.dumps(message, cls=NpEncoder).encode("utf8")
 
 
@@ -83,9 +83,10 @@ class PublishState(Step):
         super().__init__(parameters)
 
         if self.parameters["publish"]:
-            self.producer = NatsClient()
-            self.producer.connect(self.parameters["publish"]["address"])
-            self.subject = self.parameters["publish"]["subject"]
+            redis_host = self.parameters["publish"]["redis_host"]
+            redis_port = int(self.parameters["publish"]["redis_port"])
+            self.producer = redis.Redis(host=redis_host, port=redis_port, db=0)
+            self.redis_channel = self.parameters["publish"]["redis_channel"]
             self.correlation_id = self.parameters["publish"].get(
                 "correlation_id", "not-set"
             )
@@ -226,9 +227,9 @@ class PublishState(Step):
             if self.sequence_number == 0:
                 message["bulk_index"] = self.bulk_ids
 
-            encoded = json_encode(message)
+            encoded: bytes = json_encode(message)
 
-            self.producer.publish(self.subject, encoded)
+            self.producer.publish(channel=self.redis_channel, message=encoded)
 
             self.sequence_number += 1
 

@@ -21,9 +21,9 @@
     "initial_state_overrides": [],
     "initial_state": {},
     "time_step": 1.0,
-    "total_time": 10800.0,
+    "max_duration": 10800.0,
     "initial_global_time": 0.0,
-    "fail_at_total_time": false,
+    "fail_at_max_duration": false,
 
     "variants": {},
     "skip_baseline": false,
@@ -49,6 +49,10 @@
         "intermediates_directory": "",
         "variable_elongation_transcription": true,
         "variable_elongation_translation": false
+    },
+
+    "analysis_options": {
+        "cpus": 1
     },
 
     "gcloud": null,
@@ -117,8 +121,9 @@
         "global_clock": {},
         "publish-state": {
           "publish": {
-            "address": "nats://sms.cam.uchc.edu:30050",
-            "subject": "test.ecoli-publish",
+            "redis_host": "REDIS_HOST_REPLACE_ME",
+            "redis_port": "REDIS_PORT_REPLACE_ME",
+            "redis_channel": "REDIS_CHANNEL_REPLACE_ME",
             "correlation_id": "CORRELATION_ID_REPLACE_ME",
             "modulus": 10}},
         "replication_data_listener": {"time_step": 1}},
