@@ -1,0 +1,22 @@
+{
+  "emitter_arg": {
+    "out_dir": "/Users/alexanderpatrie/sms/vecoli_fork/out"
+  },
+  "analysis_options": {
+    "experiment_id": [
+      "sms_multiseed_multigen"
+    ],
+    "variant_data_dir": [
+      "/Users/alexanderpatrie/sms/vecoli_fork/out/sms_multiseed_multigen/variant_sim_data"
+    ],
+    "validation_data_path": [
+      "/Users/alexanderpatrie/sms/vecoli_fork/out/sms_multiseed_multigen/parca/kb/validationData.cPickle"
+    ],
+    "outdir": "/Users/alexanderpatrie/sms/vecoli_fork/out/sms_multiseed_multigen/analyses",
+    "cpus": 11,
+    "multiseed": {
+        "ptools_rna": {}
+    }
+  }
+}
+

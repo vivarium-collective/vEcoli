@@ -1,0 +1,13 @@
+{
+    "experiment_id": "single_cell",
+    "suffix_time": false,
+    "fail_at_max_duration": false,
+    "generations": 1,
+    "n_init_sims": 1,
+    "single_daughters": true,
+    "emitter" : "timeseries",
+    "log_updates": true,
+    "raw_output": true,
+    "sim_data_path": "out/kb/simData.cPickle"
+}
+

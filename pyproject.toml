@@ -31,7 +31,6 @@ dependencies = [
     # Constraint can be removed once cvxpy supports newer ortools
     # than 9.12, need 9.11 to support newer protobuf (see gh-326)
     "ortools<9.11",
-    "pandas",
     "polars",
     "pymunk",
     "scikit-image",
@@ -52,6 +51,8 @@ dependencies = [
     "xmltodict",
     # Required to save Altair charts as PNG
     "vl-convert-python",
+    "pandas[performance]>=2.3.3",
+    "python-dotenv>=1.2.1",
 ]
 
 [project.optional-dependencies]
@@ -79,3 +80,138 @@ packages = [
     "validation",
     "wholecell"
 ]
+
+[dependency-groups]
+dev = [
+    "pytest-asyncio>=1.3.0",
+    "pytest-cov",
+    "mypy",
+    "ruff",
+    "pre-commit",
+    "jupyter",
+    "marimo[sql,lsp]"
+]
+
+[tool.mypy]
+files = ["ecoli/library/transform", "ecoli/analysis/data_transform"]
+strict = true
+
+[tool.ruff]
+target-version = "py39"
+line-length = 120
+fix = true
+include = [
+    "ecoli/library/transform/**/*.py",
+    "ecoli/analysis/data_transform/**/*.py",
+]
+
+[tool.ruff.format]
+preview = true
+
+[tool.ruff.lint]
+select = [
+    # flake8-2020
+    "YTT",
+    # flake8-bandit
+    "S",
+    # flake8-bugbear
+    "B",
+    # flake8-builtins
+    "A",
+    # flake8-comprehensions
+    "C4",
+    # flake8-debugger
+    "T10",
+    # flake8-simplify
+    "SIM",
+    # isort
+    "I",
+    # mccabe
+    "C90",
+    # pycodestyle
+    "E", "W",
+    # pyflakes
+    "F",
+    # pygrep-hooks
+    "PGH",
+    # pyupgrade
+    "UP",
+    # ruff
+    "RUF",
+    # tryceratops
+    "TRY",
+]
+ignore = [
+    # "DEP001",
+#    # A001 Variable `sum` is shadowing a Python builtin
+     "A001",
+     "A002",
+#    # B008 Do not perform function call `Body` in argument defaults; instead, perform the call within the function, or read the default from a module-level singleton variable
+#    "B008",
+#    # B026 Star-arg unpacking after a keyword argument is strongly discouraged
+#    "B026",
+    # B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+    "B904",
+#    # C414 Unnecessary `list` call within `tuple()`
+#    "C414",
+#    # C416 Unnecessary `list` comprehension (rewrite using `list()`)
+#    "C416",
+#    # C417 Unnecessary `map` usage (rewrite using a `list` comprehension)
+#    "C417",
+#    # C419 Unnecessary list comprehension
+#    "C419",
+#    # E501 Line too long (131 > 120)
+#    "E501",
+#    # E722 Do not use bare `except`
+#    "E722",
+#    # E731 Do not assign a `lambda` expression, use a `def`
+#    "E731",
+#    # F841 Local variable `keys` is assigned to but never used
+#    "F841",
+#    # PGH003 Use specific rule codes when ignoring type issues
+#    "PGH003",
+#    # RUF009 Do not perform function call `Field` in dataclass defaults
+#    "RUF009",
+    # RUF012 Mutable class attributes should be annotated with `typing.ClassVar`
+    "RUF012",
+#    # RUF013 PEP 484 prohibits implicit `Optional
+#    "RUF013",
+#    # S101 Use of `assert` detected
+#    "S101",
+#    # *** S113 Probable use of `requests` call without timeout
+#    "S113",
+#    # S301 `pickle` and modules that wrap it can be unsafe when used to deserialize untrusted data, possible security issue
+#    "S301",
+#    # S307 Use of possibly insecure function
+#    "S307",
+#    # S603 `subprocess` call: check for execution of untrusted input
+#    "S603",
+#    # S608 Possible SQL injection vector through string-based query construction
+#    "S608",
+#    # SIM101 Multiple `isinstance` calls for expression, merge into a single call
+    "SIM101",
+#    # SIM105 Use `contextlib.suppress(KeyError)` instead of `try`-`except`-`pass`
+#    "SIM105",
+#    # SIM108 Use ternary operator `source = self.model_source.value if isinstance(self.model_source, ModelFilepath) else self.model_source` instead of `if`-`else`-block
+#    "SIM108",
+#    # SIM118 Use `key not in dict` instead of `key not in dict.keys()`
+#    "SIM118",
+    # TRY002 Create your own exception
+    "TRY002",
+    # TRY003 Avoid specifying long messages outside the exception class
+    "TRY003",
+#    # TRY004 Prefer `TypeError` exception for invalid type
+#    "TRY004",
+    # TRY201 Use `raise` without specifying exception name
+    "TRY201",
+    # TRY300 Consider moving this statement to an `else` block
+    "TRY300",
+#    # TRY400 Use `logging.exception` instead of `logging.error`
+#    "TRY400",
+    # UP006 Use `dict` instead of `Dict` for type annotation
+    "UP006",
+#    # UP035 `typing.Dict` is deprecated, use `dict` instead
+#    "UP035",
+    "C417"
+]
+exclude = ["ecoli/library/transform/tests/*"]

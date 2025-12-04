@@ -1,0 +1,35 @@
+{
+  "emitter_arg": {
+    "out_dir": "data"
+  },
+  "analysis_options": {
+    "experiment_id": [
+      "wcecoli_figure2_setD4"
+    ],
+    "variant_data_dir": [
+      "data/wcecoli_figure2_setD4/variant_sim_data"
+    ],
+    "validation_data_path": [
+      "data/wcecoli_figure2_setD4/parca/kb/validationData.cPickle"
+    ],
+    "outdir": "data/wcecoli_figure2_setD4/analyses",
+    "cpus": 11,
+    "data_transformation": {
+      "ecocyc": {
+        "request": [
+          {
+            "type": "genes",
+            "observable_ids": [
+              "deoA",
+              "deoB",
+              "deoC",
+              "deoD",
+              "fucU"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
+

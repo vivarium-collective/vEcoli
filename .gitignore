@@ -71,3 +71,11 @@ test_sherlock/
 /scripts
 /configs/debug
 /reconstruction/sim_data
+
+transforms/
+credentials
+data/wcecoli_figure2_setD4/
+data_assets/
+parameters/
+notebooks/marimo/credentials/.env
+notebooks/marimo/credentials/biocyc_credentials.json

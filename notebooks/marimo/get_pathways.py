@@ -1,8 +1,26 @@
+import json
 import os
+from pathlib import Path
+
+import requests
 import xmltodict
 import pandas as pd
 from notebooks.marimo.utils.biocyc_webservice import biocyc_credentials
 
+
+def biocyc_credentials(dir_credentials, s: requests.Session):
+    cred_path = os.path.join(dir_credentials, "biocyc_credentials.json")
+    with open(cred_path, "r") as f:
+        credentials = json.load(f)
+    s.post(
+        "https://websvc.biocyc.org/credentials/login/",
+        data={"email": credentials["email"], "password": credentials["password"]},
+    )
+
+    return s
+
+
+s = requests.Session()
 wd_root = os.getcwd().split("/notebooks")[0]
 
 
@@ -11,7 +29,7 @@ dir_credentials = os.path.join(wd_root, "notebooks", "marimo", "credentials")
 wd_out = os.path.join(wd_root, "notebooks", "marimo", "pathways")
 
 
-biocyc_session = biocyc_credentials(dir_credentials)
+biocyc_session = biocyc_credentials(dir_credentials, s)
 url_pathways = "https://websvc.biocyc.org/apixml?fn=get-class-all-instances&id=ECOLI:Pathways&detail=none"
 r_pathways = biocyc_session.get(url_pathways)
 
@@ -24,6 +42,7 @@ pathways_frameids = [pwy["@frameid"] for pwy in pathways_dict]
 pwy_rxns = {}
 
 for pwy_id in pathways_frameids:
+    print(f'Getting Reactions: {pwy_id}')
     rxns_url = f"https://websvc.biocyc.org/getxml?ECOLI:{pwy_id}"
     pwy_dict = xmltodict.parse(biocyc_session.get(rxns_url).text)["ptools-xml"][
         "Pathway"
@@ -45,6 +64,7 @@ for pwy_id in pathways_frameids:
 # %% genes of rxn  ['EG10181 // EG10178 // EG10179 // EG10180', 'EG10801']}}
 
 for pwy_id in list(pwy_rxns.keys()):
+    print(f'Getting genes: {pwy_id}')
     pwy_entry = pwy_rxns[pwy_id]
     pwy_entry_rxns = pwy_entry["rxns"]
     pwy_entry_genes = []

@@ -56,7 +56,8 @@ ANALYSIS_TYPES = {
     "multidaughter": ["experiment_id", "variant", "lineage_seed", "generation"],
     "single": ["experiment_id", "variant", "lineage_seed", "generation", "agent_id"],
     "parca": [],
-    "data_transformation": ["experiment_id", "variant", "lineage_seed", "generation", "agent_id"],  # cast as "single" analysis
+    # "data_transformation": ["experiment_id", "variant", "lineage_seed", "generation", "agent_id"],  # cast as "single" analysis
+    "data_transformation": ["experiment_id", "variant"],  # cast as "multiseed" analysis
 }
 """Mapping of all possible analysis types to the combination of identifiers that
 must be unique for each subset of the data given to that analysis type as input."""
@@ -121,7 +122,7 @@ def make_sim_data_dict(exp_id: str, variants: list[int], sim_data_path: list[str
 
 def test_main():
     parser = argparse.ArgumentParser()
-    default_config = os.path.join(CONFIG_DIR_PATH, "default.json")
+    default_config = os.path.join(CONFIG_DIR_PATH, "data_transformation_bulk.json")
     parser.add_argument(
         "--config",
         default=default_config,
@@ -274,6 +275,7 @@ def test_main():
     duckdb_filter = " AND ".join(duckdb_filter)
 
     # Load variant metadata
+    print(config)
     if "experiment_id" not in config:
         raise KeyError("Must provide at least one experiment ID with experiment_id")
     if len(config["experiment_id"]) > 1:

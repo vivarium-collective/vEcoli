@@ -1,0 +1,46 @@
+{
+  "emitter_arg": {
+    "out_dir": "out"
+  },
+  "analysis_options": {
+    "experiment_id": [
+      "expression_unfit"
+    ],
+    "variant_data_dir": [
+      "out/expression_unfit/variant_sim_data"
+    ],
+    "validation_data_path": [
+      "out/expression_unfit/parca/kb/validationData.cPickle"
+    ],
+    "outdir": "out/expression_unfit/analyses",
+    "cpus": 11,
+    "data_transformation": {
+            "ecocyc": {
+                "request": [
+                    {
+                        "type": "genes",
+                        "observable_ids": [
+                          "accD",
+                          "dedD",
+                          "deoA",
+                          "deoB",
+                          "deoC",
+                          "deoD",
+                          "fucU"
+                        ]
+                    },
+                    {
+                        "type": "bulk",
+                        "observable_ids": [
+                          "--TRANS-ACENAPHTHENE-12-DIOL",
+                          "ACETOLACTSYNI-CPLX",
+                          "CPD-3729",
+                          "TU00415"
+                        ]
+                    }
+                ]
+            }
+        }
+    }
+}
+

@@ -1,11 +1,23 @@
 import os
 from typing import Any
 
+import polars
 from duckdb import DuckDBPyConnection
 import numpy as np
 import pandas as pd
 
 from ecoli.library.sim_data import LoadSimData
+
+
+def _build_query(
+    columns, history_sql
+):  # generates sql query for user specified parquet columns
+    query_sql = f"""
+        SELECT {",".join(columns)}, time FROM ({history_sql})
+        ORDER BY time
+    """
+
+    return query_sql
 
 
 def build_query(
@@ -26,11 +38,8 @@ def read_outputs(
 ):
     # retrieves specifc columns from parquet outputs and returns a dataframe
     query_sql = build_query(columns, history_sql)
-
     outputs_df = conn.sql(query_sql).df()
-
     outputs_df = outputs_df.groupby("time", as_index=False).sum()
-
     return outputs_df
 
 
@@ -109,10 +118,10 @@ def build_bulk2monomers_matrix(sim_data):
     return bulk2monomers, all_monomers
 
 
-def consolidate_timepoints(state_mtx, n_tp, normalized=False):
+def _consolidate_timepoints(state_mtx, n_tp=None, normalized=False):
     # generate consolidated relative time points
-    checkpoints = np.linspace(0, np.shape(state_mtx)[0] - 1, n_tp, dtype=int)
-
+    checkpoints = np.linspace(0, np.shape(state_mtx)[0] - 1, n_tp or np.shape(state_mtx)[0] - 1, dtype=int)
+    print(f'using checkpoints:\n{checkpoints}')
     if normalized:
         denom = [
             len(state_mtx[checkpoints[i] : checkpoints[i + 1]])
@@ -132,6 +141,28 @@ def consolidate_timepoints(state_mtx, n_tp, normalized=False):
 
     block_sums = np.stack(block_sums, axis=0)
     block_sums_final = np.insert(block_sums, 0, state_mtx[0], axis=0)
+
+    return block_sums_final, checkpoints
+
+
+def consolidate_timepoints(state_mtx, n_tp=None, normalized=False):
+    n = state_mtx.shape[0]
+    checkpoints = np.linspace(0, n - 1, n_tp or n - 1, dtype=int)
+
+    # compute block sums using vectorized reduceat
+    block_sums = np.add.reduceat(state_mtx, checkpoints)
+
+    # drop the last partial if checkpoints include the very end
+    if block_sums.shape[0] > len(checkpoints) - 1:
+        block_sums = block_sums[:-1]
+
+    if normalized:
+        # block sizes = differences between checkpoints
+        sizes = np.diff(checkpoints)
+        block_sums = block_sums / sizes[:, None]
+
+    # prepend the very first row exactly like your original code
+    block_sums_final = np.vstack([state_mtx[0], block_sums])
 
     return block_sums_final, checkpoints
 
@@ -360,7 +391,10 @@ def plot(
 
     rna_counts_gene = np.matmul(tu_counts_mtx, tu_gene_mtx)
 
-    n_tp = int(params["n_tp"])
+    specified_tp = params.get("n_tp", 1111)
+    print(f'Len mtx:\n{rna_counts_gene.shape}')
+    n_tp = int(specified_tp) if specified_tp is not None else None
+    # n_tp = int(params["n_tp"])
 
     rna_counts_gene_blocksum, tp_idx = consolidate_timepoints(
         rna_counts_gene, n_tp, normalized=True
@@ -389,3 +423,4 @@ def plot(
         header=True,
         float_format="%.4f",
     )
+# rm -rf /Users/alexanderpatrie/sms/vecoli_fork/out/sms_multiseed_multigen/analyses/experiment_id=sms_multiseed_multigen && rm /Users/alexanderpatrie/sms/vecoli_fork/out/sms_multiseed_multigen/analyses/metadata.json && uv run runscripts/analysis.py --config configs/multiseed_transform.json

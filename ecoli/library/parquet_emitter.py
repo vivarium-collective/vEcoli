@@ -512,7 +512,8 @@ def read_stacked_columns(
     conn: Optional[duckdb.DuckDBPyConnection] = None,
     order_results: bool = True,
     success_sql: Optional[str] = None,
-) -> pl.DataFrame | str:
+    lazy: bool = False
+) -> pl.DataFrame | str | pl.LazyFrame:
     """
     Loads columns for many cells. If you would like to perform more advanced
     computatations (aggregations, window functions, etc.) using the optimized
@@ -602,6 +603,8 @@ def read_stacked_columns(
             a manual ``ORDER BY``. Doing this can greatly reduce RAM usage.
         success_sql: Final DuckDB SQL string from :py:func:`~.dataset_sql`.
             If provided, will be used to filter out unsuccessful sims.
+        lazy: If set to ``True``, this function returns a ``polars.LazyFrame``,
+            rather than a ``polars.DataFrame``.
     """
     id_cols = "experiment_id, variant, lineage_seed, generation, agent_id, time"
     columns_str = ", ".join(columns)
@@ -645,7 +648,7 @@ def read_stacked_columns(
                 f"history/experiment_id={experiment_id}/variant={variant}/lineage_seed={lineage_seed}/generation={generation}/agent_id={agent_id}",
             )
             # Apply func to data for each cell
-            all_cell_tbls.append(func(conn.sql(cell_sql).pl()))
+            all_cell_tbls.append(func(conn.sql(cell_sql).pl(lazy=lazy)))
         return pl.concat(all_cell_tbls)
     if order_results:
         query = f"SELECT * FROM ({sql_query}) ORDER BY {id_cols}"
@@ -653,7 +656,7 @@ def read_stacked_columns(
         query = sql_query
     if conn is None:
         return query
-    return conn.sql(query).pl()
+    return conn.sql(query).pl(lazy=lazy)
 
 
 def np_dtype(val: Any, field_name: str) -> Any:

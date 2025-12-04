@@ -1,0 +1,3 @@
+- fig 3C in paper: simulated fluxome (mMol/gram/dry/per )
+- get fluxome from Arnab
+ uv run /Users/alexanderpatrie/sms/vecoli_fork/notebooks/marimo/utils/simdata_traversal.py --inpath /Users/alexanderpatrie/sms/vecoli_fork/out/kb/simData.cPickle --outpath /Users/alexanderpatrie/sms/vecoli_fork/out/parameter_registry/default/schema

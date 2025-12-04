@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.14.7"
+__generated_with = "0.17.7"
 app = marimo.App(width="medium")
 
 
@@ -8,6 +8,7 @@ app = marimo.App(width="medium")
 def _():
     import marimo as mo
     import os
+    from pathlib import Path
     import pickle
     import numpy as np
     import pandas as pd
@@ -17,14 +18,26 @@ def _():
     import polars as pl
     from scipy.stats import pearsonr
     import itertools
-
-    return alt, duckdb, itertools, mo, np, os, pd, pearsonr, pickle, pl, sys
+    return (
+        Path,
+        alt,
+        duckdb,
+        itertools,
+        mo,
+        np,
+        os,
+        pd,
+        pearsonr,
+        pickle,
+        pl,
+        sys,
+    )
 
 
 @app.cell
-def _(os, pickle, sys):
+def _(Path, os, pickle, sys):
     wd_root = os.getcwd().split("/notebooks")[0]
-
+    wd_root = Path(__file__).parent.parent.parent 
     sys.path.append(wd_root)
 
     from ecoli.library.sim_data import LoadSimData
@@ -73,7 +86,6 @@ def _(LoadSimData):
         sim_data = LoadSimData(sim_data_path).sim_data
         rxn_ids = sim_data.process.metabolism.base_reaction_ids
         return rxn_ids
-
     return get_bulk_ids, get_rxn_ids
 
 
@@ -108,20 +120,17 @@ def _(get_bulk_ids, get_rxn_ids, np, sim_data, sim_data_path):
 
 @app.cell
 def _(mo):
-    mo.md(
-        """
+    mo.md("""
     <p style="font-family: Arial, sans-serif;">
         </p>
     Welcome to the vEcoli data explorer notebook! This notebook provides and interactive interface to explore, analyze and visualize the outputs of the E. Coli whole cell model simulations.
-    """
-    )
+    """)
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        """
+    mo.md("""
     <p style="font-family: Arial, sans-serif;">
         </p>
 
@@ -137,20 +146,17 @@ def _(mo):
         </p>
 
     This allows efficient organization, storage and retrieval of outputs from simulation workflows that run tasks with many variants,lineage seeds, generations and agent IDs.
-    """
-    )
+    """)
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        """
+    mo.md("""
     <p style="font-family: Arial, sans-serif;">
         </p>
     To proceed, please select the analysis type, which defines the manner in which simulation output will be aggregated. You may choose to retrieve output for a single cell, or aggregated output from multiple cells with groups defined by varying levels of hierarchy. For example, a multiseed analysis will aggregate all "agents" and "generations" for a selected "lineage_seed". The selected analysis type will determine how many and which parititions are to be specified by the user. For a "single" analysis, all the partitions required to define a single cell need to be specified, i.e., experiment_id, variant, lineage_seed, generation and agent_id.
-    """
-    )
+    """)
     return
 
 
@@ -168,7 +174,6 @@ def _(mo):
 def _(mo, os, wd_root):
     exp_select = mo.ui.dropdown(options=os.listdir(os.path.join(wd_root, "out")))
     y_scale = mo.ui.dropdown(options=["linear", "log", "symlog"], value="linear")
-
     return exp_select, y_scale
 
 
@@ -190,14 +195,12 @@ def _(analysis_select, mo, partition_groups, partitions_display):
 
 @app.cell
 def _(mo):
-    mo.md(
-        """
+    mo.md("""
     <p style="font-family: Arial, sans-serif;">
         </p>
 
     Once all the paritions are correctly specified for the selected analysis type, outputs may be loaded for visualizations and further analysis. In the following series of visualizaitons, we present the time series plots of selected compound molecule counts, mRNA counts, protein monomer counts and metabolic reaction fluxes. Elements within each plotted dataset (i.e. RNA, protein, reaction) may be selected by the user from the attached dropdown menu. Alternatively, the user may select a pathway from the following menu which will specify the plotted elements based on the pathway components as defined by the EcoCyc database.
-    """
-    )
+    """)
     return
 
 
@@ -244,7 +247,6 @@ def _(exp_select, gen_select, get_agents, mo, seed_select, variant_select):
 def _(analysis_select, get_db_filter, partitions_dict):
     dbf_dict = partitions_dict(analysis_select.value)
     db_filter = get_db_filter(dbf_dict)
-
     return (db_filter,)
 
 
@@ -257,11 +259,39 @@ def _(dataset_sql, db_filter, exp_select, os, wd_root):
         "listeners__monomer_counts",
     ]
 
-    history_sql_base, _, _ = dataset_sql(
+    history_sql_base, config_sql, success_sql = dataset_sql(
         os.path.join(wd_root, "out"), experiment_ids=[exp_select.value]
     )
     history_sql_filtered = f"SELECT {','.join(pq_columns)},time FROM ({history_sql_base}) WHERE {db_filter} ORDER BY time"
-    return history_sql_base, history_sql_filtered
+    return history_sql_base, history_sql_filtered, pq_columns, success_sql
+
+
+@app.cell
+def _(conn):
+    dir(conn)
+    return
+
+
+@app.cell
+def _(
+    conn,
+    history_sql_filtered,
+    pl,
+    pq_columns,
+    read_stacked_columns,
+    success_sql,
+):
+    def callback(df):
+        outputs_df = df.to_pandas()
+        outputs_df = outputs_df.groupby("time", as_index=False).sum()
+
+        return outputs_df
+
+    
+    lf = pl.LazyFrame(
+        read_stacked_columns(history_sql_filtered, pq_columns, conn=conn, success_sql=success_sql, func=callback)
+    )
+    return
 
 
 @app.cell
@@ -271,7 +301,6 @@ def _(bulk_sp_plot, get_bulk_sp_traj, history_sql_filtered, load_outputs, np):
     bulk_mtx = np.stack(output_loaded["bulk"].values)
 
     sp_trajs = [get_bulk_sp_traj(bulk_id, bulk_mtx) for bulk_id in bulk_sp_plot.value]
-
     return output_loaded, sp_trajs
 
 
@@ -297,7 +326,6 @@ def _(
         bulk_sp_traj = np.sum(bulk_mtx[:, sp_idxs], 1)
 
         return bulk_sp_traj
-
     return (get_bulk_sp_traj,)
 
 
@@ -308,7 +336,6 @@ def _(bulk_sp_plot, output_loaded, pd, sp_trajs):
     plot_dict["time"] = output_loaded["time"]
 
     plot_df = pd.DataFrame(plot_dict)
-
     return (plot_df,)
 
 
@@ -341,7 +368,6 @@ def _(mo):
     molecule_id_type = mo.ui.radio(
         options=["common name", "bulk id"], value="common name"
     )
-
     return (molecule_id_type,)
 
 
@@ -369,14 +395,12 @@ def _(
 
 @app.cell
 def _(mo):
-    mo.md(
-        """
+    mo.md("""
     <p style="font-family: Arial, sans-serif;">
         </p>
 
     **Compound Molecule Counts:** The "bulk" store in the vEcoli model tracks individual molecule counts of modeled comopunds, namely, transcription units, RNAs, proteins, complexes, metabolites and small molecules. In this section, we generate time course plots of user selected compounds. If no pathway is selected, you may specify compounds to plot from the following menu, using their BioCyc IDs or display names.
-    """
-    )
+    """)
     return
 
 
@@ -414,14 +438,12 @@ def _(alt, dfds_long, y_scale):
 
 @app.cell
 def _(mo):
-    mo.md(
-        """
+    mo.md("""
     <p style="font-family: Arial, sans-serif;">
         </p>
 
     **mRNA Counts:** In this section, we generate time course plots of selected mRNA cistron counts. If no pathway is selected, mRNAs may be specified with gene names or their BioCyc IDs.
-    """
-    )
+    """)
     return
 
 
@@ -482,7 +504,6 @@ def _(
         value=mrna_override(select_pathway.value),
         max_selections=500,
     )
-
     return (mrna_select_plot,)
 
 
@@ -518,7 +539,6 @@ def _(molecule_id_type, mrna_cistron_names, mrna_gene_ids, rna_label_type):
         mrna_traj = mrna_mtx[:, mrna_idx]
 
         return mrna_traj
-
     return (get_mrna_traj,)
 
 
@@ -564,13 +584,11 @@ def _(alt, mrna_dfds_long, y_scale_mrna):
 
 @app.cell
 def _(mo):
-    mo.md(
-        """
+    mo.md("""
     <p style="font-family: Arial, sans-serif;">
         </p>
     **Protein Monomer Counts:** This time course plot visualizes the protein content of the simulation output in terms of monomer counts. Monomers to plot can be specified with their BioCyc IDs or display names.
-    """
-    )
+    """)
     return
 
 
@@ -603,7 +621,6 @@ def _(monomer_ids, monomer_label_type, monomer_names):
         monomer_traj = monomer_mtx[:, monomer_idx]
 
         return monomer_traj
-
     return (get_monomer_traj,)
 
 
@@ -653,14 +670,12 @@ def _(alt, monomer_dfds_long, y_scale_monomers):
 
 @app.cell
 def _(mo):
-    mo.md(
-        """
+    mo.md("""
     <p style="font-family: Arial, sans-serif;">
         </p>
 
     **Metabolic Reaction Fluxes:** In this plot, we visualize time course of metabolic reaction fluxes. Individual reactions can be selected using their BioCyc IDs
-    """
-    )
+    """)
     return
 
 
@@ -721,8 +736,7 @@ def _(alt, rxns_dfds_long, y_scale_rxns):
 
 @app.cell
 def _(create_duckdb_conn, os, wd_root):
-    conn = create_duckdb_conn(os.path.join(wd_root, "out"), False, 1)
-
+    conn = create_duckdb_conn(os.path.join(wd_root, "out"), False, 11)
     return (conn,)
 
 
@@ -841,19 +855,16 @@ def _(sim_data, val_label_type):
         }
         val_ids_final = val_ids_mapping[val_label_type.value]
         return val_ids_final
-
     return (get_val_ids,)
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        """
+    mo.md("""
     <p style="font-family: Arial, sans-serif;">
         </p>
     **Protein Count Validation:** This is a scatter plot comparing simulated average protein counts to experimental proteomics datasets. This is applicable to proteins overlapping the modeled proteins and either of the validation datasets. You may choose to visualize all available proteins or pathway specific proteins. Alternatively, the attached drop down menu can be used to select proteins using their BioCyc IDs or display names.
-    """
-    )
+    """)
     return
 
 
@@ -924,7 +935,6 @@ def _(alt, np, pearsonr, pl, val_id_select, val_options):
         chart_final = chart + parity
 
         return chart_final
-
     return (val_chart,)
 
 
@@ -1022,7 +1032,6 @@ def _(exp_select, os, wd_root):
             agents = ["N/A"]
 
         return agents
-
     return get_agents, get_gens, get_seeds, get_variants
 
 
@@ -1045,7 +1054,6 @@ def _(partition_groups, read_partitions):
         db_filter = " AND ".join(db_filter_list)
 
         return db_filter
-
     return get_db_filter, partitions_dict
 
 
@@ -1084,7 +1092,6 @@ def _(agent_select, exp_select, gen_select, seed_select, variant_select):
             "agent_id": agent_select.value,
         }
         return partitions_selected
-
     return partition_groups, partitions_display, read_partitions
 
 
@@ -1103,7 +1110,6 @@ def _(duckdb, itertools, np):
         df_ds = df_long[np.isin(df_long["time"], tp_ds)]
 
         return df_ds
-
     return downsample, load_outputs
 
 
@@ -1146,8 +1152,9 @@ def _(
     rxn_ids,
     val_dataset_select,
     val_options,
+    wd_root,
 ):
-    pathway_dir = "pathways"
+    pathway_dir = wd_root / "notebooks" / "marimo" / "pathways"
 
     def get_pathways(pathway_dir):
         pathway_file = os.path.join(pathway_dir, "pathways.txt")
@@ -1264,7 +1271,6 @@ def _(
             np.array(protein_list)[np.isin(protein_list, protein_ids_val)]
         )
         return protein_val
-
     return (
         bulk_override,
         get_pathways,
@@ -1274,6 +1280,16 @@ def _(
         protein_val_override,
         rxn_override,
     )
+
+
+@app.cell
+def _():
+    return
+
+
+@app.cell
+def _():
+    return
 
 
 if __name__ == "__main__":

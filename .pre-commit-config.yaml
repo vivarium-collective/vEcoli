@@ -7,6 +7,9 @@ repos:
     - id: ruff
       types_or: [ python, pyi ]
       args: [ --fix ]
+      files: ^(ecoli/library/transform|ecoli/analysis/data_transform)/
+
     # Run the formatter.
     - id: ruff-format
       types_or: [ python, pyi ]
+      files: ^(ecoli/library/transform|ecoli/analysis/data_transform)/

@@ -74,7 +74,7 @@ git diff HEAD >source-info/git_diff.txt
 if [ "$RUN_LOCAL" -ne 0 ]; then
   echo "=== Locally building Docker Image ${IMAGE} ==="
   echo "=== git hash ${GIT_HASH}, git branch ${GIT_BRANCH} ==="
-  docker build -f runscripts/container/Dockerfile -t "${IMAGE}" \
+  docker build --platform=linux/amd64 -f runscripts/container/Dockerfile -t "${IMAGE}" \
     --build-arg git_hash="${GIT_HASH}" \
     --build-arg git_branch="${GIT_BRANCH}" \
     --build-arg timestamp="${TIMESTAMP}" .

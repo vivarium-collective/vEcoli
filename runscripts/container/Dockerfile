@@ -18,7 +18,7 @@ RUN echo "alias ls='ls --color=auto'" >> ~/.bashrc \
 # procps necessary for `ps` command used by Nextflow to track processes.
 # nano is a text editor for convenience.
 # curl is necessary for authentication on Google Cloud VMs
-RUN apt-get update && apt-get install -y gcc procps nano curl
+RUN apt-get update && apt-get install -y gcc procps nano curl build-essential g++
 
 # Install the project into `/vEcoli`
 WORKDIR /vEcoli
