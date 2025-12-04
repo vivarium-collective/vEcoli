@@ -71,3 +71,4 @@ test_sherlock/
 /scripts
 /configs/debug
 /reconstruction/sim_data
+.ccam.env

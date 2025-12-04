@@ -84,6 +84,7 @@ process createVariants {
     """
 }
 
+// TODO: do we want to make a ccamHqWorker?
 process hqWorker {
     cpus { num_sims }
 

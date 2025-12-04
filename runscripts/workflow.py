@@ -5,12 +5,15 @@ import pathlib
 import random
 import shutil
 import subprocess
+import textwrap
 import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from urllib import parse
 from typing import Optional
+
+import dotenv
 
 # Try to import fsspec, but make it optional
 try:
@@ -540,6 +543,76 @@ def main():
                 # Always delete log file to stop streaming thread
                 log_path.unlink()
         nf_config = nf_config.replace("IMAGE_NAME", container_image)
+
+    # =========================================== ccam config ====================================================== #
+    # NOTE: this is what will run on the HPC, thus os.getcwd() == $HOME/$IMAGE_DIR where $HOME is ccam $USER home
+    # TODO: formalize ccam config data model
+    ccam_config = config.get("ccam", None)
+    if ccam_config is not None:
+        if nf_profile == "gcloud" or nf_profile == "sherlock":
+            raise RuntimeError(
+                "Cannot set both CCAM and Google Cloud or CCAM and Sherlock options in the input JSON."
+            )
+        nf_profile = "ccam"
+
+        # TODO: find out if the warning below is also valid for CCAM
+        # Suggest that users turn off background thread for Parquet emitter
+        # if config["emitter"] == "parquet" and config["emitter_arg"].get(
+        #         "threaded", True
+        # ):
+        #     warnings.warn(
+        #         "Using a background thread in the Parquet emitter may degrade "
+        #         "performance on Sherlock, where each simulation is allocated a "
+        #         "single CPU core. Consider setting 'threaded' to False "
+        #         "under 'emitter_arg'."
+        #     )
+
+        # --- start a new thread to forward output of submitted jobs to stdout --- #
+        thread_executor = ThreadPoolExecutor(max_workers=1)
+        container_image = ccam_config.get("container_image", None)
+        if container_image is None:
+            raise RuntimeError("Must supply name for container image.")
+        image_dir = os.path.abspath(os.path.dirname(container_image))
+        if not os.path.exists(image_dir):
+            warnings.warn(
+                f"Container image directory does not exist, creating: {image_dir}."
+            )
+            os.makedirs(image_dir, exist_ok=True)
+
+        # --- build image (if applicable) -- #
+        if ccam_config.get("build_image", False):
+            image_cmd = " ".join(build_image_cmd(container_image, True))
+            image_build_script = os.path.join(local_outdir, "container.sh")
+            log_file = os.path.join(local_outdir, "build-image.out")
+            # TODO: do we want to clean up the build image outdir?
+            # NOTE: "outdir" here refers to whatever has been specified in the config JSON
+            # ccam_env_path = pathlib.Path(__file__).parent.parent / ".ccam.env"
+            # _ = dotenv.load_dotenv(ccam_env_path)
+            # slurm_job_log_file = pathlib.Path(os.getenv('SLURM_LOG_BASE_PATH')) / log_filename
+            with open(image_build_script, "w") as f:
+                f.write(textwrap.dedent(f""" \
+                    #!/bin/bash
+                    #SBATCH --job-name="build-image-{experiment_id}"
+                    #SBATCH --time=30:00
+                    #SBATCH --cpus-per-task 2
+                    #SBATCH --mem=8GB
+                    #SBATCH --partition=vivarium
+                    #SBATCH --wait
+                    #SBATCH --output={log_file}
+                    {image_cmd}
+                """))
+            # Create empty log file for thread to stream from
+            log_path = pathlib.Path(log_file)
+            log_path.touch(exist_ok=True)
+            thread_executor.submit(stream_log, log_file)
+            try:
+                subprocess.run(["sbatch", image_build_script], check=True)
+            finally:
+                # Always delete log file to stop streaming thread
+                log_path.unlink()
+        nf_config = nf_config.replace("IMAGE_NAME", container_image)
+    # ========================================================================================================= #
+
     local_config = os.path.join(local_outdir, "nextflow.config")
     with open(local_config, "w") as f:
         f.writelines(nf_config)
@@ -586,6 +659,7 @@ def main():
                 "Please move, delete, or rename it, then run with --resume again."
             )
     workdir = os.path.join(out_uri, "nextflow_workdirs")
+    # check standard (no explicit config) or gcloud
     if nf_profile == "standard" or nf_profile == "gcloud":
         subprocess.run(
             [
@@ -604,40 +678,41 @@ def main():
             ],
             check=True,
         )
+    # check sherlock
     elif nf_profile == "sherlock":
         batch_script = os.path.join(local_outdir, "nextflow_job.sh")
         hyperqueue_init = ""
         hyperqueue_exit = ""
         if sherlock_config.get("hyperqueue", False):
             nf_profile = "sherlock_hq"
-            hyperqueue_init = f"""
-# Set the directory which HyperQueue will use 
-export HQ_SERVER_DIR={os.path.join(outdir, ".hq-server")}
-mkdir -p ${{HQ_SERVER_DIR}}
-
-# Start the server in the background (&) and wait until it has started
-hq server start --journal {os.path.join(outdir, ".hq-server/journal")} &
-until hq job list &>/dev/null ; do sleep 1 ; done
-
-"""
+            hyperqueue_init = textwrap.dedent(""" \
+                # Set the directory which HyperQueue will use 
+                export HQ_SERVER_DIR={os.path.join(outdir, ".hq-server")}
+                mkdir -p ${{HQ_SERVER_DIR}}
+                
+                # Start the server in the background (&) and wait until it has started
+                hq server start --journal {os.path.join(outdir, ".hq-server/journal")} &
+                until hq job list &>/dev/null ; do sleep 1 ; done
+            """)
             hyperqueue_exit = "hq job wait all; hq worker stop all; hq server stop"
         nf_slurm_output = os.path.join(outdir, f"{experiment_id}_slurm.out")
         with open(batch_script, "w") as f:
-            f.write(f"""#!/bin/bash
-#SBATCH --job-name="nf-{experiment_id}"
-#SBATCH --time=7-00:00:00
-#SBATCH --cpus-per-task 1
-#SBATCH --mem=4GB
-#SBATCH --partition=mcovert
-#SBATCH --output={nf_slurm_output}
-{"#SBATCH --wait" if sherlock_config.get("jenkins", False) else ""}
-set -e
-# Ensure HyperQueue shutdown on failure or interruption
-trap 'exitcode=$?; {hyperqueue_exit}' EXIT
-{hyperqueue_init}
-nextflow -C {config_path} run {workflow_path} -profile {nf_profile} \
-    -with-report {report_path} -work-dir {workdir} {"-resume" if args.resume is not None else ""}
-""")
+            f.write(textwrap.dedent(f""" \
+                #!/bin/bash
+                #SBATCH --job-name="nf-{experiment_id}"
+                #SBATCH --time=7-00:00:00
+                #SBATCH --cpus-per-task 1
+                #SBATCH --mem=4GB
+                #SBATCH --partition=mcovert
+                #SBATCH --output={nf_slurm_output}
+                {"#SBATCH --wait" if sherlock_config.get("jenkins", False) else ""}
+                set -e
+                # Ensure HyperQueue shutdown on failure or interruption
+                trap 'exitcode=$?; {hyperqueue_exit}' EXIT
+                {hyperqueue_init}
+                nextflow -C {config_path} run {workflow_path} -profile {nf_profile} \
+                    -with-report {report_path} -work-dir {workdir} {"-resume" if args.resume is not None else ""}
+            """))
         copy_to_filesystem(
             batch_script, os.path.join(outdir, "nextflow_job.sh"), filesystem
         )
@@ -654,6 +729,53 @@ nextflow -C {config_path} run {workflow_path} -profile {nf_profile} \
                 log_path.unlink()
         else:
             subprocess.run(["sbatch", batch_script], check=True)
+
+    # ============================================ check ccam ===================================================== #
+    elif nf_profile == "ccam":
+        batch_script = os.path.join(local_outdir, "nextflow_job.sh")
+        # NOTE: "outdir" here refers to whatever has been specified in the config JSON
+        nf_slurm_output = os.path.join(outdir, f"{experiment_id}_slurm.out")
+        slurm_job_name = f"nf-{experiment_id}"
+        ccam_env_path = pathlib.Path(__file__).parent.parent / ".ccam.env"
+        _ = dotenv.load_dotenv(ccam_env_path)
+        slurm_job_outfile = pathlib.Path(os.getenv('SLURM_LOG_BASE_PATH')) / slurm_job_name
+        with open(batch_script, "w") as f:
+            f.write(textwrap.dedent(f""" \
+                #!/bin/bash
+                #SBATCH --job-name="{slurm_job_name}"
+                #SBATCH --time=7-00:00:00
+                #SBATCH --cpus-per-task 1
+                #SBATCH --mem=4GB
+                #SBATCH --partition=vivarium
+                #SBATCH --output={slurm_job_outfile!s}
+                
+                ### {"#SBATCH --wait" if ccam_config.get("wait", False) else ""}
+                
+                set -e
+                
+                ### TODO: do we need shutdown on failure or interruption? If so:
+                ### trap ...
+                
+                nextflow -C {config_path} run {workflow_path} -profile {nf_profile} \
+                    -with-report {report_path} -work-dir {workdir} {"-resume" if args.resume is not None else ""}
+            """))
+        copy_to_filesystem(
+            batch_script, os.path.join(outdir, "nextflow_job.sh"), filesystem
+        )
+        # Make stdout of workflow viewable in Jenkins
+        if ccam_config.get("wait", False):
+            # Create empty log file for thread to stream from
+            log_path = pathlib.Path(nf_slurm_output)
+            log_path.touch(exist_ok=True)
+            thread_executor.submit(stream_log, nf_slurm_output)
+            try:
+                subprocess.run(["sbatch", batch_script], check=True)
+            finally:
+                # Always delete log file to stop streaming thread
+                log_path.unlink()
+        else:
+            subprocess.run(["sbatch", batch_script], check=True)
+    # ============================================================================================================= #
     shutil.rmtree(local_outdir)
 
 
