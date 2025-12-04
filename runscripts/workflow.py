@@ -731,6 +731,7 @@ def main():
             subprocess.run(["sbatch", batch_script], check=True)
 
     # ============================================ check ccam ===================================================== #
+    # NOTE: remember that the following logic is relative to the IMAGE itself
     elif nf_profile == "ccam":
         batch_script = os.path.join(local_outdir, "nextflow_job.sh")
         # NOTE: "outdir" here refers to whatever has been specified in the config JSON
@@ -738,16 +739,28 @@ def main():
         slurm_job_name = f"nf-{experiment_id}"
         ccam_env_path = pathlib.Path(__file__).parent.parent / ".ccam.env"
         _ = dotenv.load_dotenv(ccam_env_path)
-        slurm_job_outfile = pathlib.Path(os.getenv('SLURM_LOG_BASE_PATH')) / slurm_job_name
+        slurm_log_base_path = os.getenv('SLURM_LOG_BASE_PATH')
+        if not slurm_log_base_path:
+            raise OSError(
+                '''For now, you must provide a SLURM_LOG_BASE_PATH environment variable if using the ccam profile'''
+            )
+        slurm_job_outfile = pathlib.Path(slurm_log_base_path) / slurm_job_name
+
+        slurm_qos = os.getenv('SLURM_QOS', '')
+        qos_clause = f"#SBATCH --qos={slurm_qos}"
+        slurm_node_list = os.getenv('SLURM_NODE_LIST', '')
+        nodelist_clause = f"#SBATCH --nodelist={slurm_node_list}"
         with open(batch_script, "w") as f:
             f.write(textwrap.dedent(f""" \
                 #!/bin/bash
-                #SBATCH --job-name="{slurm_job_name}"
+                #SBATCH --job-name={slurm_job_name}
                 #SBATCH --time=7-00:00:00
                 #SBATCH --cpus-per-task 1
                 #SBATCH --mem=4GB
                 #SBATCH --partition=vivarium
+                {qos_clause}
                 #SBATCH --output={slurm_job_outfile!s}
+                {nodelist_clause}
                 
                 ### {"#SBATCH --wait" if ccam_config.get("wait", False) else ""}
                 
