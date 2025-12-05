@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import pathlib
+from pprint import pp
 import random
 import shutil
 import subprocess
@@ -23,7 +24,6 @@ try:
     FSSPEC_AVAILABLE = True
 except ImportError:
     FSSPEC_AVAILABLE = False
-
 
 LIST_KEYS_TO_MERGE = (
     "save_times",
@@ -114,11 +114,11 @@ def generate_colony(seeds: int):
 
 
 def generate_lineage(
-    seed: int,
-    n_init_sims: int,
-    generations: int,
-    single_daughters: bool,
-    analysis_config: dict[str, dict[str, dict]],
+        seed: int,
+        n_init_sims: int,
+        generations: int,
+        single_daughters: bool,
+        analysis_config: dict[str, dict[str, dict]],
 ):
     """
     Create strings to import and compose Nextflow processes for lineage sims:
@@ -192,7 +192,7 @@ def generate_lineage(
     else:
         sim_workflow.append(f"\t{all_sim_tasks[0]}.set {{ simCh }}")
 
-    sims_per_seed = generations if single_daughters else 2**generations - 1
+    sims_per_seed = generations if single_daughters else 2 ** generations - 1
 
     if analysis_config.get("multivariant", False):
         # Channel that groups all sim tasks
@@ -232,7 +232,7 @@ def generate_lineage(
         # Channel that groups sim tasks by variant sim_data, initial seed, and generation
         # When simulating both daughters, will have >1 cell for generation >1
         gen_size = (
-            "[" + ", ".join([f"{g + 1}: {2**g}" for g in range(generations)]) + "]"
+                "[" + ", ".join([f"{g + 1}: {2 ** g}" for g in range(generations)]) + "]"
         )
         sim_workflow.append(MULTIDAUGHTER_CHANNEL.format(gen_size=gen_size))
         sim_workflow.append(
@@ -299,7 +299,7 @@ def build_image_cmd(image_name, apptainer=False) -> list[str]:
 
 
 def copy_to_filesystem(
-    source: str, dest: str, filesystem: Optional["AbstractFileSystem"] = None
+        source: str, dest: str, filesystem: Optional["AbstractFileSystem"] = None
 ):
     """
     Robustly copy the contents of a local source file to a destination path.
@@ -362,8 +362,8 @@ def main():
         type=str,
         default=None,
         help="Resume workflow with given experiment ID. The experiment ID must "
-        "match the supplied configuration file and if suffix_time was used, must "
-        "contain the full time suffix (suffix_time will not be applied again).",
+             "match the supplied configuration file and if suffix_time was used, must "
+             "contain the full time suffix (suffix_time will not be applied again).",
     )
     args = parser.parse_args()
     with open(config_file, "r") as f:
@@ -425,7 +425,7 @@ def main():
     # Use random seed for Jenkins CI runs
     if config.get("sherlock", {}).get("jenkins", False) \
             or config.get("ccam", {}).get("wait", False):
-        config["lineage_seed"] = random.randint(0, 2**31 - 1)
+        config["lineage_seed"] = random.randint(0, 2 ** 31 - 1)
     filesystem, outdir = parse_uri(out_uri)
     outdir = os.path.join(outdir, experiment_id, "nextflow")
     exp_outdir = os.path.dirname(outdir)
@@ -504,7 +504,7 @@ def main():
         nf_profile = "sherlock"
         # Suggest that users turn off background thread for Parquet emitter
         if config["emitter"] == "parquet" and config["emitter_arg"].get(
-            "threaded", True
+                "threaded", True
         ):
             warnings.warn(
                 "Using a background thread in the Parquet emitter may degrade "
@@ -736,8 +736,8 @@ def main():
             subprocess.run(["sbatch", batch_script], check=True)
 
     # ============================================ execute ccam ===================================================== #
-    # NOTE: remember that the following logic is relative to the IMAGE itself
-    elif nf_profile == "ccam":
+    # NOTE: remember that the following logic is relative to the IMAGE (which we possibly build above) itself
+    if nf_profile == "ccam":
         batch_script = os.path.join(local_outdir, "nextflow_job.sh")
         # NOTE: "outdir" here refers to whatever has been specified in the config JSON
         nf_slurm_output = os.path.join(outdir, f"{experiment_id}_slurm.out")
@@ -756,7 +756,7 @@ def main():
         slurm_node_list = os.getenv('SLURM_NODE_LIST', '')
         nodelist_clause = f"#SBATCH --nodelist={slurm_node_list}"
         with open(batch_script, "w") as f:
-            f.write(textwrap.dedent(f""" \
+            script = textwrap.dedent(f"""\
                 #!/bin/bash
                 #SBATCH --job-name={slurm_job_name}
                 #SBATCH --time=7-00:00:00
@@ -766,33 +766,33 @@ def main():
                 {qos_clause}
                 #SBATCH --output={slurm_job_outfile!s}
                 {nodelist_clause}
-                
                 ### {"#SBATCH --wait" if ccam_config.get("wait", False) else ""}
-                
                 set -e
-                
                 ### TODO: do we need shutdown on failure or interruption? If so:
                 ### trap ...
-                
+                export JAVA_HOME=$HOME/.local/bin/java-22
+                export PATH=$JAVA_HOME/bin:$HOME/.local/bin:$PATH
                 nextflow -C {config_path} run {workflow_path} -profile {nf_profile} \
                     -with-report {report_path} -work-dir {workdir} {"-resume" if args.resume is not None else ""}
-            """))
+            """)
+            f.write(script)
         copy_to_filesystem(
             batch_script, os.path.join(outdir, "nextflow_job.sh"), filesystem
         )
-        # Make stdout of workflow viewable in Jenkins
-        if ccam_config.get("wait", False):
-            # Create empty log file for thread to stream from
-            log_path = pathlib.Path(nf_slurm_output)
-            log_path.touch(exist_ok=True)
-            thread_executor.submit(stream_log, nf_slurm_output)
-            try:
-                subprocess.run(["sbatch", batch_script], check=True)
-            finally:
-                # Always delete log file to stop streaming thread
-                log_path.unlink()
-        else:
-            subprocess.run(["sbatch", batch_script], check=True)
+        # if ccam_config.get("wait", False):
+        #     # Create empty log file for thread to stream from
+        #     log_path = pathlib.Path(nf_slurm_output)
+        #     log_path.touch(exist_ok=True)
+        #     thread_executor.submit(stream_log, nf_slurm_output)
+        #     print(f'Batch script:\n>>>>>>>>>>>>>>>>>\n{pp(batch_script)}')
+        #     try:
+        #         subprocess.run(["sbatch", batch_script], check=True)
+        #     finally:
+        #         # Always delete log file to stop streaming thread
+        #         log_path.unlink()
+        # else:
+        #     subprocess.run(["sbatch", batch_script], check=True)
+        subprocess.run(["sbatch", batch_script], check=True)
     # =============================================================================================================== #
     shutil.rmtree(local_outdir)
 
