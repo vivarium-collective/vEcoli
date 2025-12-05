@@ -382,6 +382,7 @@ def main():
                 user_config[key].sort()
             merge_dicts(config, user_config)
 
+    # >> parse config ((entrypoint args))
     experiment_id = config["experiment_id"]
     if experiment_id is None:
         raise RuntimeError("No experiment ID was provided.")
@@ -422,7 +423,8 @@ def main():
     if config["sim_data_path"] is not None:
         config["sim_data_path"] = os.path.abspath(config["sim_data_path"])
     # Use random seed for Jenkins CI runs
-    if config.get("sherlock", {}).get("jenkins", False):
+    if config.get("sherlock", {}).get("jenkins", False) \
+            or config.get("ccam", {}).get("wait", False):
         config["lineage_seed"] = random.randint(0, 2**31 - 1)
     filesystem, outdir = parse_uri(out_uri)
     outdir = os.path.join(outdir, experiment_id, "nextflow")
@@ -467,10 +469,12 @@ def main():
     )
     nf_config = nf_config.replace("PARCA_CPUS", str(config["parca_options"]["cpus"]))
 
+    # >> set nextflow profile ((config))
     # By default, assume running on local device
     nf_profile = "standard"
     # If not running on a local device, build container images according
     # to options under gcloud or sherlock configuration keys
+    # gcloud config
     cloud_config = config.get("gcloud", None)
     if cloud_config is not None:
         nf_profile = "gcloud"
@@ -490,6 +494,7 @@ def main():
             image_cmd = build_image_cmd(container_image)
             subprocess.run(image_cmd, check=True)
         nf_config = nf_config.replace("IMAGE_NAME", image_prefix + container_image)
+    # sherlock config
     sherlock_config = config.get("sherlock", None)
     if sherlock_config is not None:
         if nf_profile == "gcloud":
@@ -659,7 +664,7 @@ def main():
                 "Please move, delete, or rename it, then run with --resume again."
             )
     workdir = os.path.join(out_uri, "nextflow_workdirs")
-    # check standard (no explicit config) or gcloud
+    # execute standard (no explicit config) or gcloud
     if nf_profile == "standard" or nf_profile == "gcloud":
         subprocess.run(
             [
@@ -678,7 +683,7 @@ def main():
             ],
             check=True,
         )
-    # check sherlock
+    # execute sherlock
     elif nf_profile == "sherlock":
         batch_script = os.path.join(local_outdir, "nextflow_job.sh")
         hyperqueue_init = ""
@@ -730,7 +735,7 @@ def main():
         else:
             subprocess.run(["sbatch", batch_script], check=True)
 
-    # ============================================ check ccam ===================================================== #
+    # ============================================ execute ccam ===================================================== #
     # NOTE: remember that the following logic is relative to the IMAGE itself
     elif nf_profile == "ccam":
         batch_script = os.path.join(local_outdir, "nextflow_job.sh")
@@ -788,7 +793,7 @@ def main():
                 log_path.unlink()
         else:
             subprocess.run(["sbatch", batch_script], check=True)
-    # ============================================================================================================= #
+    # =============================================================================================================== #
     shutil.rmtree(local_outdir)
 
 
