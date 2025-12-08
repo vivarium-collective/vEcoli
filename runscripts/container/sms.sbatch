@@ -29,13 +29,14 @@ container_image=/home/FCAM/svc_vivarium/workspace/images/vecoli-079c43c.sif
 runscript=/home/FCAM/svc_vivarium/workspace/vEcoli/runscripts/container/interactive_ccam.sh
 chmod +x $runscript
 
-# $interpreter "${vecoli_dir}/runscripts/workflow.py" --config "$config_path"
+# -p "${HOME}/workspace/api_outputs:/out:rw" \
 "${runscript}" -i "${container_image}" \
     -a \
     -p "${HOME}/workspace/vEcoli:/vEcoli" \
-    -p "${HOME}/workspace/api_outputs:/out" \
+    -p "${HOME}/workspace/api_outputs:/tmp/out:rw" \
     -p "${JAVA_HOME}:${JAVA_HOME}" \
     -p "${HOME}/.local/bin:${HOME}/.local/bin" \
-    -c "uv run /vEcoli/runscripts/workflow.py --config ${config_path}"
+    -p "${HOME}/.local/share/uv:/home/FCAM/svc_vivarium/.local/share/uv" \
+    -c "uv run /vEcoli/runscripts/workflow.py --config ${config_path} --outdir /tmp/out"
 
 

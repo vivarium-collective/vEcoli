@@ -1,5 +1,4 @@
-#!/usr/bin/env bash
-
+#!/bin/bash
 # Start an interactive singularity container from an image
 # built with runscripts/container/build-image.sh.
 # Supports optional bind mounts and Cloud Storage bucket mounting
@@ -113,6 +112,8 @@ if [ -n "$BUCKET" ] && [ "$USE_SINGULARITY" -eq 1 ]; then
   exit 1
 fi
 
+export PATH="$HOME/.local/bin:$PATH"
+
 # ============= SINGULARITY-specific logic ============= #
 if (($USE_SINGULARITY)); then
   # If there are bind mounts, format them for Singularity
@@ -151,6 +152,7 @@ if (($USE_SINGULARITY)); then
       && export UV_COMPILE_BYTECODE=0 \
       && export JAVA_HOME=$HOME/.local/bin/java-22 \
       && export PATH=$JAVA_HOME/bin:$HOME/.local/bin:$PATH \
+      && export PATH="$HOME/.local/bin:$PATH" \
       && uv sync --frozen && $COMMAND"
   else
     # Non-interactive mode with custom command
