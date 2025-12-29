@@ -12,6 +12,13 @@ from fsspec.spec import AbstractFileSystem
 from tqdm import tqdm
 from vivarium.core.emitter import Emitter
 
+
+def num_io_cpus() -> int:
+    cpus = os.cpu_count()
+    return cpus - 1 if cpus is not None else 2
+
+DEFAULT_NUM_CPUS: int = num_io_cpus()
+
 METADATA_PREFIX = "output_metadata__"
 """
 In the config dataset, user-defined metadata for each store
@@ -126,8 +133,9 @@ def create_duckdb_conn(
     conn.execute("SET enable_object_cache = true")
     # Set number of threads for DuckDB
     if cpus is not None:
-        conn.execute(f"SET threads = {cpus}")
+        conn.execute(f"SET threads = {cpus or DEFAULT_NUM_CPUS}")
     return conn
+
 
 
 def dataset_sql(out_dir: str, experiment_ids: list[str]) -> tuple[str, str, str]:

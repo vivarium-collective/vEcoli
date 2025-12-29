@@ -1,0 +1,44 @@
+{
+    "analysis_options": {
+        "experiment_id": [
+            "publication_multiseed_multigen-a7ae0b4e093e20e6_1762830572273"
+        ],
+        "variant_data_dir": [
+            "/home/FCAM/svc_vivarium/workspace/api_outputs/publication_multiseed_multigen-a7ae0b4e093e20e6_1762830572273/variant_sim_data"
+        ],
+        "validation_data_path": [
+            "/home/FCAM/svc_vivarium/workspace/api_outputs/publication_multiseed_multigen-a7ae0b4e093e20e6_1762830572273/parca/kb/validationData.cPickle"
+        ],
+        "outdir": "/home/FCAM/svc_vivarium/workspace/output_store/analyses/analysis-2e69-20251213",
+        "cpus": 3,
+        "single": {},
+        "multidaughter": {},
+        "multigeneration": {
+            "ptools_rxns": {
+                "n_tp": 2
+            },
+            "ptools_rna": {
+                "n_tp": 3
+            },
+            "ptools_proteins": {
+                "n_tp": 2
+            }
+        },
+        "multiseed": {
+            "ptools_rxns": {
+                "n_tp": 8
+            },
+            "ptools_rna": {
+                "n_tp": 3
+            },
+            "ptools_proteins": {
+                "n_tp": 9
+            }
+        },
+        "multivariant": {},
+        "multiexperiment": {}
+    },
+    "emitter_arg": {
+        "out_dir": "/home/FCAM/svc_vivarium/workspace/api_outputs"
+    }
+}

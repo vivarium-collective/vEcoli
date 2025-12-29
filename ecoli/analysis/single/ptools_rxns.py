@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 from ecoli.library.sim_data import LoadSimData
+from ecoli.library.analyses import read_outputs
 
 
 def build_query(
@@ -17,21 +18,6 @@ def build_query(
     """
 
     return query_sql
-
-
-def read_outputs(
-    history_sql: str,
-    conn: DuckDBPyConnection,
-    columns=["bulk", "listeners__rna_counts__full_mRNA_counts"],
-):
-    # retrieves specifc columns from parquet outputs and returns a dataframe
-    query_sql = build_query(columns, history_sql)
-
-    outputs_df = conn.sql(query_sql).df()
-
-    outputs_df = outputs_df.groupby("time", as_index=False).sum()
-
-    return outputs_df
 
 
 def consolidate_timepoints(state_mtx, n_tp, normalized=False):
