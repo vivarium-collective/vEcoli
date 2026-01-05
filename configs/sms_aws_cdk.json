@@ -1,0 +1,74 @@
+{
+  "experiment_id": "sms_aws_cdk",
+  "suffix_time": false,
+  "parca_options": {
+    "cpus": 5,
+    "outdir": "/home/FCAM/svc_vivarium/workspace/api_outputs",
+    "operons": true,
+    "ribosome_fitting": true,
+    "rnapoly_fitting": true,
+    "remove_rrna_operons": false,
+    "remove_rrff": false,
+    "stable_rrna": false,
+    "new_genes": "off",
+    "debug_parca": false,
+    "load_intermediate": null,
+    "save_intermediates": false,
+    "intermediates_directory": "",
+    "variable_elongation_transcription": true,
+    "variable_elongation_translation": false
+  },
+  "initial_global_time": 0.0,
+  "time_step": 1.0,
+  "fail_at_max_duration": true,
+  "sim_data_path": "/home/FCAM/svc_vivarium/workspace/parameters/registry/default/simData.cPickle",
+  "generations": 5,
+  "n_init_sims": 35,
+  "single_daughters": true,
+  "emitter": "parquet",
+  "emitter_arg": {
+    "out_dir": "/home/FCAM/svc_vivarium/workspace/api_outputs"
+  },
+  "analysis_options": {
+    "cpus": 3,
+    "multiseed": {
+      "ptools_rxns": {
+        "n_tp": 8
+      },
+      "ptools_rna": {
+        "n_tp": 8
+      },
+      "ptools_proteins": {
+        "n_tp": 8
+      }
+    },
+    "multigeneration": {
+      "ptools_rxns": {
+        "n_tp": 8
+      },
+      "ptools_rna": {
+        "n_tp": 8
+      },
+      "ptools_proteins": {
+        "n_tp": 8
+      }
+    },
+    "single": {
+      "mass_fraction_summary": {},
+      "ptools_rxns": {
+        "n_tp": 8
+      },
+      "ptools_rna": {
+        "n_tp": 8
+      },
+      "ptools_proteins": {
+        "n_tp": 8
+      }
+    }
+  },
+  "aws_cdk": {
+    "build_image": false,
+    "container_image": "/home/FCAM/svc_vivarium/workspace/images/vecoli-079c43c.sif",
+    "wait": false
+  }
+}

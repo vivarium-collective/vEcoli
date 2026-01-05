@@ -549,16 +549,77 @@ def main():
                 log_path.unlink()
         nf_config = nf_config.replace("IMAGE_NAME", container_image)
 
-    # =========================================== ccam config ====================================================== #
+    # =========================================== ccam init ====================================================== #
     # NOTE: this is what will run on the HPC, thus os.getcwd() == $HOME/$IMAGE_DIR where $HOME is ccam $USER home
     # TODO: formalize ccam config data model
     ccam_config = config.get("ccam", None)
     if ccam_config is not None:
-        if nf_profile == "gcloud" or nf_profile == "sherlock":
-            raise RuntimeError(
-                "Cannot set both CCAM and Google Cloud or CCAM and Sherlock options in the input JSON."
-            )
         nf_profile = "ccam"
+
+        # TODO: find out if the warning below is also valid for CCAM
+        # Suggest that users turn off background thread for Parquet emitter
+        # if config["emitter"] == "parquet" and config["emitter_arg"].get(
+        #         "threaded", True
+        # ):
+        #     warnings.warn(
+        #         "Using a background thread in the Parquet emitter may degrade "
+        #         "performance on Sherlock, where each simulation is allocated a "
+        #         "single CPU core. Consider setting 'threaded' to False "
+        #         "under 'emitter_arg'."
+        #     )
+
+        # --- start a new thread to forward output of submitted jobs to stdout --- #
+        thread_executor = ThreadPoolExecutor(max_workers=1)
+        container_image = ccam_config.get("container_image", None)
+        if container_image is None:
+            raise RuntimeError("Must supply name for container image.")
+        image_dir = os.path.abspath(os.path.dirname(container_image))
+        if not os.path.exists(image_dir):
+            warnings.warn(
+                f"Container image directory does not exist, creating: {image_dir}."
+            )
+            os.makedirs(image_dir, exist_ok=True)
+
+        # --- build image (if applicable) -- #
+        if ccam_config.get("build_image", False):
+            image_cmd = " ".join(build_image_cmd(container_image, True))
+            image_build_script = os.path.join(local_outdir, "container.sh")
+            log_file = os.path.join(local_outdir, "build-image.out")
+            # TODO: do we want to clean up the build image outdir?
+            # NOTE: "outdir" here refers to whatever has been specified in the config JSON
+            # ccam_env_path = pathlib.Path(__file__).parent.parent / ".ccam.env"
+            # _ = dotenv.load_dotenv(ccam_env_path)
+            # slurm_job_log_file = pathlib.Path(os.getenv('SLURM_LOG_BASE_PATH')) / log_filename
+            with open(image_build_script, "w") as f:
+                f.write(textwrap.dedent(f""" \
+                    #!/bin/bash
+                    #SBATCH --job-name="build-image-{experiment_id}"
+                    #SBATCH --time=30:00
+                    #SBATCH --cpus-per-task 2
+                    #SBATCH --mem=8GB
+                    #SBATCH --partition=vivarium
+                    #SBATCH --wait
+                    #SBATCH --output={log_file}
+                    {image_cmd}
+                """))
+            # Create empty log file for thread to stream from
+            log_path = pathlib.Path(log_file)
+            log_path.touch(exist_ok=True)
+            thread_executor.submit(stream_log, log_file)
+            try:
+                subprocess.run(["sbatch", image_build_script], check=True)
+            finally:
+                # Always delete log file to stop streaming thread
+                log_path.unlink()
+        nf_config = nf_config.replace("IMAGE_NAME", container_image)
+    # ========================================================================================================= #
+
+    # =========================================== aws_cdk init ====================================================== #
+    # NOTE: this is what will run on the HPC, thus os.getcwd() == $HOME/$IMAGE_DIR where $HOME is ccam $USER home
+    # TODO: formalize ccam config data model
+    aws_cdk_config = config.get("aws_cdk", None)
+    if aws_cdk_config is not None:
+        nf_profile = "aws_cdk"
 
         # TODO: find out if the warning below is also valid for CCAM
         # Suggest that users turn off background thread for Parquet emitter
@@ -735,37 +796,39 @@ def main():
         else:
             subprocess.run(["sbatch", batch_script], check=True)
 
-    # ============================================ execute ccam ===================================================== #
+    # ============================================ ccam run ===================================================== #
     # NOTE: remember that the following logic is relative to the IMAGE (which we possibly build above) itself
     if nf_profile == "ccam":
         batch_script = os.path.join(local_outdir, "nextflow_job.sh")
         # NOTE: "outdir" here refers to whatever has been specified in the config JSON
-        nf_slurm_output = os.path.join(outdir, f"{experiment_id}_slurm.out")
-        slurm_job_name = f"nf-{experiment_id}"
-        ccam_env_path = pathlib.Path(__file__).parent.parent / ".ccam.env"
-        _ = dotenv.load_dotenv(ccam_env_path)
         slurm_log_base_path = os.getenv('SLURM_LOG_BASE_PATH')
         if not slurm_log_base_path:
             raise OSError(
                 '''For now, you must provide a SLURM_LOG_BASE_PATH environment variable if using the ccam profile'''
             )
-        slurm_job_outfile = pathlib.Path(slurm_log_base_path) / slurm_job_name
-
+        slurm_job_name = f"nf-{experiment_id}"
         slurm_qos = os.getenv('SLURM_QOS', '')
         qos_clause = f"#SBATCH --qos={slurm_qos}"
+        slurm_job_outfile = pathlib.Path(slurm_log_base_path) / f"{slurm_job_name}.out"
+        slurm_job_errfile = pathlib.Path(slurm_log_base_path) / f"{slurm_job_name}.err"
+
         slurm_node_list = os.getenv('SLURM_NODE_LIST', '')
         nodelist_clause = f"#SBATCH --nodelist={slurm_node_list}"
+
         with open(batch_script, "w") as f:
             script = textwrap.dedent(f"""\
                 #!/bin/bash
                 #SBATCH --job-name={slurm_job_name}
-                #SBATCH --time=7-00:00:00
+                #SBATCH --time=07:00
                 #SBATCH --cpus-per-task 1
                 #SBATCH --mem=4GB
                 #SBATCH --partition=vivarium
                 {qos_clause}
-                #SBATCH --output={slurm_job_outfile!s}
+                #SBATCH --mail-type=ALL
                 {nodelist_clause}
+                #SBATCH -o {slurm_job_outfile!s}
+                #SBATCH -e {slurm_job_errfile!s}
+                
                 ### {"#SBATCH --wait" if ccam_config.get("wait", False) else ""}
                 set -e
                 ### TODO: do we need shutdown on failure or interruption? If so:
@@ -794,6 +857,69 @@ def main():
         #     subprocess.run(["sbatch", batch_script], check=True)
         subprocess.run(["sbatch", batch_script], check=True)
     # =============================================================================================================== #
+
+
+    # ============================================ aws_cdk run ===================================================== #
+    # NOTE: remember that the following logic is relative to the IMAGE (which we possibly build above) itself
+    if nf_profile == "ccam":
+        batch_script = os.path.join(local_outdir, "nextflow_job.sh")
+        # NOTE: "outdir" here refers to whatever has been specified in the config JSON
+        slurm_log_base_path = os.getenv('SLURM_LOG_BASE_PATH')
+        if not slurm_log_base_path:
+            raise OSError(
+                '''For now, you must provide a SLURM_LOG_BASE_PATH environment variable if using the aws_cdk profile'''
+            )
+        slurm_job_name = f"nf-{experiment_id}"
+        slurm_qos = os.getenv('SLURM_QOS', '')
+        qos_clause = f"#SBATCH --qos={slurm_qos}"
+        slurm_job_outfile = pathlib.Path(slurm_log_base_path) / f"{slurm_job_name}.out"
+        slurm_job_errfile = pathlib.Path(slurm_log_base_path) / f"{slurm_job_name}.err"
+        slurm_node_list = os.getenv('SLURM_NODE_LIST', '')
+        nodelist_clause = f"#SBATCH --nodelist={slurm_node_list}"
+        with open(batch_script, "w") as f:
+            script = textwrap.dedent(f"""\
+                #!/bin/bash
+                #SBATCH --job-name={slurm_job_name}
+                #SBATCH --time=07:00
+                #SBATCH --cpus-per-task 1
+                #SBATCH --mem=4GB
+                #SBATCH --partition=vivarium
+                {qos_clause}
+                #SBATCH --mail-type=ALL
+                {nodelist_clause}
+                #SBATCH -o {slurm_job_outfile!s}
+                #SBATCH -e {slurm_job_errfile!s}
+
+                ### {"#SBATCH --wait" if ccam_config.get("wait", False) else ""}
+                set -e
+                ### TODO: do we need shutdown on failure or interruption? If so:
+                ### trap ...
+                export JAVA_HOME=$HOME/.local/bin/java-22
+                export PATH=$JAVA_HOME/bin:$HOME/.local/bin:$PATH
+                nextflow -C {config_path} run {workflow_path} -profile {nf_profile} \
+                    -with-report {report_path} -work-dir {workdir} {"-resume" if args.resume is not None else ""}
+            """)
+            f.write(script)
+        copy_to_filesystem(
+            batch_script, os.path.join(outdir, "nextflow_job.sh"), filesystem
+        )
+        # if ccam_config.get("wait", False):
+        #     # Create empty log file for thread to stream from
+        #     log_path = pathlib.Path(nf_slurm_output)
+        #     log_path.touch(exist_ok=True)
+        #     thread_executor.submit(stream_log, nf_slurm_output)
+        #     print(f'Batch script:\n>>>>>>>>>>>>>>>>>\n{pp(batch_script)}')
+        #     try:
+        #         subprocess.run(["sbatch", batch_script], check=True)
+        #     finally:
+        #         # Always delete log file to stop streaming thread
+        #         log_path.unlink()
+        # else:
+        #     subprocess.run(["sbatch", batch_script], check=True)
+        subprocess.run(["sbatch", batch_script], check=True)
+    # =============================================================================================================== #
+
+
     shutil.rmtree(local_outdir)
 
 
