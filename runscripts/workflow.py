@@ -1,3 +1,4 @@
+from dotenv.main import load_dotenv
 import argparse
 import json
 import os
@@ -549,11 +550,16 @@ def main():
                 log_path.unlink()
         nf_config = nf_config.replace("IMAGE_NAME", container_image)
 
+    _ = load_dotenv(".hpc_env")
     # =========================================== ccam init ====================================================== #
     # NOTE: this is what will run on the HPC, thus os.getcwd() == $HOME/$IMAGE_DIR where $HOME is ccam $USER home
     # TODO: formalize ccam config data model
+
     ccam_config = config.get("ccam", None)
     if ccam_config is not None:
+        slurm_partition = os.getenv("SLURM_PARTITION")
+        if slurm_partition is None:
+            raise RuntimeError("You must set a slurm partition for the ccam profile")
         nf_profile = "ccam"
 
         # TODO: find out if the warning below is also valid for CCAM
@@ -590,6 +596,7 @@ def main():
             # ccam_env_path = pathlib.Path(__file__).parent.parent / ".ccam.env"
             # _ = dotenv.load_dotenv(ccam_env_path)
             # slurm_job_log_file = pathlib.Path(os.getenv('SLURM_LOG_BASE_PATH')) / log_filename
+
             with open(image_build_script, "w") as f:
                 f.write(textwrap.dedent(f""" \
                     #!/bin/bash
@@ -597,7 +604,7 @@ def main():
                     #SBATCH --time=30:00
                     #SBATCH --cpus-per-task 2
                     #SBATCH --mem=8GB
-                    #SBATCH --partition=vivarium
+                    #SBATCH --partition={slurm_partition}
                     #SBATCH --wait
                     #SBATCH --output={log_file}
                     {image_cmd}
@@ -619,6 +626,9 @@ def main():
     # TODO: formalize ccam config data model
     aws_cdk_config = config.get("aws_cdk", None)
     if aws_cdk_config is not None:
+        slurm_partition = os.getenv("SLURM_PARTITION")
+        if slurm_partition is None:
+            raise RuntimeError("You must set a slurm partition for the aws_cdk profile")
         nf_profile = "aws_cdk"
 
         # TODO: find out if the warning below is also valid for CCAM
@@ -662,7 +672,7 @@ def main():
                     #SBATCH --time=30:00
                     #SBATCH --cpus-per-task 2
                     #SBATCH --mem=8GB
-                    #SBATCH --partition=vivarium
+                    #SBATCH --partition={slurm_partition}
                     #SBATCH --wait
                     #SBATCH --output={log_file}
                     {image_cmd}
@@ -799,6 +809,16 @@ def main():
     # ============================================ ccam run ===================================================== #
     # NOTE: remember that the following logic is relative to the IMAGE (which we possibly build above) itself
     if nf_profile == "ccam":
+        slurm_partition = os.getenv("SLURM_PARTITION")
+        slurm_qos = os.getenv("SLURM_QOS")
+        slurm_node_list = os.getenv("SLURM_NODE_LIST")
+
+        if slurm_partition is None or slurm_qos is None or slurm_node_list is None:
+            raise RuntimeError("You must set the following environment variables for the ccam profile: SLURM_PARTITION, SLURM_QOS, SLURM_NODE_LIST")
+        else:
+            qos_clause = f"#SBATCH --qos={slurm_qos}"
+            nodelist_clause = f"#SBATCH --nodelist={slurm_node_list}"
+
         batch_script = os.path.join(local_outdir, "nextflow_job.sh")
         # NOTE: "outdir" here refers to whatever has been specified in the config JSON
         slurm_log_base_path = os.getenv('SLURM_LOG_BASE_PATH')
@@ -808,12 +828,9 @@ def main():
             )
         slurm_job_name = f"nf-{experiment_id}"
         slurm_qos = os.getenv('SLURM_QOS', '')
-        qos_clause = f"#SBATCH --qos={slurm_qos}"
+
         slurm_job_outfile = pathlib.Path(slurm_log_base_path) / f"{slurm_job_name}.out"
         slurm_job_errfile = pathlib.Path(slurm_log_base_path) / f"{slurm_job_name}.err"
-
-        slurm_node_list = os.getenv('SLURM_NODE_LIST', '')
-        nodelist_clause = f"#SBATCH --nodelist={slurm_node_list}"
 
         with open(batch_script, "w") as f:
             script = textwrap.dedent(f"""\
@@ -822,7 +839,7 @@ def main():
                 #SBATCH --time=07:00
                 #SBATCH --cpus-per-task 1
                 #SBATCH --mem=4GB
-                #SBATCH --partition=vivarium
+                #SBATCH --partition={slurm_partition}
                 {qos_clause}
                 #SBATCH --mail-type=ALL
                 {nodelist_clause}
@@ -861,7 +878,11 @@ def main():
 
     # ============================================ aws_cdk run ===================================================== #
     # NOTE: remember that the following logic is relative to the IMAGE (which we possibly build above) itself
-    if nf_profile == "ccam":
+    if nf_profile == "aws_cdk":
+        slurm_partition = os.getenv("SLURM_PARTITION")
+        if slurm_partition is None:
+            raise RuntimeError(
+                "You must set the following environment variables for the aws_cdk profile: SLURM_PARTITION")
         batch_script = os.path.join(local_outdir, "nextflow_job.sh")
         # NOTE: "outdir" here refers to whatever has been specified in the config JSON
         slurm_log_base_path = os.getenv('SLURM_LOG_BASE_PATH')
@@ -870,12 +891,9 @@ def main():
                 '''For now, you must provide a SLURM_LOG_BASE_PATH environment variable if using the aws_cdk profile'''
             )
         slurm_job_name = f"nf-{experiment_id}"
-        slurm_qos = os.getenv('SLURM_QOS', '')
-        qos_clause = f"#SBATCH --qos={slurm_qos}"
         slurm_job_outfile = pathlib.Path(slurm_log_base_path) / f"{slurm_job_name}.out"
         slurm_job_errfile = pathlib.Path(slurm_log_base_path) / f"{slurm_job_name}.err"
-        slurm_node_list = os.getenv('SLURM_NODE_LIST', '')
-        nodelist_clause = f"#SBATCH --nodelist={slurm_node_list}"
+
         with open(batch_script, "w") as f:
             script = textwrap.dedent(f"""\
                 #!/bin/bash
@@ -883,10 +901,7 @@ def main():
                 #SBATCH --time=07:00
                 #SBATCH --cpus-per-task 1
                 #SBATCH --mem=4GB
-                #SBATCH --partition=vivarium
-                {qos_clause}
-                #SBATCH --mail-type=ALL
-                {nodelist_clause}
+                #SBATCH --partition={slurm_partition}
                 #SBATCH -o {slurm_job_outfile!s}
                 #SBATCH -e {slurm_job_errfile!s}
 
@@ -903,19 +918,6 @@ def main():
         copy_to_filesystem(
             batch_script, os.path.join(outdir, "nextflow_job.sh"), filesystem
         )
-        # if ccam_config.get("wait", False):
-        #     # Create empty log file for thread to stream from
-        #     log_path = pathlib.Path(nf_slurm_output)
-        #     log_path.touch(exist_ok=True)
-        #     thread_executor.submit(stream_log, nf_slurm_output)
-        #     print(f'Batch script:\n>>>>>>>>>>>>>>>>>\n{pp(batch_script)}')
-        #     try:
-        #         subprocess.run(["sbatch", batch_script], check=True)
-        #     finally:
-        #         # Always delete log file to stop streaming thread
-        #         log_path.unlink()
-        # else:
-        #     subprocess.run(["sbatch", batch_script], check=True)
         subprocess.run(["sbatch", batch_script], check=True)
     # =============================================================================================================== #
 

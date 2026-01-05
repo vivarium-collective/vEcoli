@@ -72,3 +72,4 @@ test_sherlock/
 /configs/debug
 /reconstruction/sim_data
 .ccam.env
+.hpc_env
