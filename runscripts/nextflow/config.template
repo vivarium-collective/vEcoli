@@ -232,9 +232,8 @@ profiles {
         // Nextflow configuration for Slurm executor
         process {
             executor = 'slurm'
-            queue = 'vivarium'
-            qos = 'vivarium'
-            clusterOptions = '--nodelist=mantis-039'
+            queue = 'jobs-queue'
+            clusterOptions = ''
             time = '5m'
             cpus = 1
             memory = '512 MB'
