@@ -635,7 +635,7 @@ def main():
 
         # --- start a new thread to forward output of submitted jobs to stdout --- #
         thread_executor = ThreadPoolExecutor(max_workers=1)
-        container_image = ccam_config.get("container_image", None)
+        container_image = aws_cdk_config.get("container_image", None)
         if container_image is None:
             raise RuntimeError("Must supply name for container image.")
         image_dir = os.path.abspath(os.path.dirname(container_image))
@@ -646,7 +646,7 @@ def main():
             os.makedirs(image_dir, exist_ok=True)
 
         # --- build image (if applicable) -- #
-        if ccam_config.get("build_image", False):
+        if aws_cdk_config.get("build_image", False):
             image_cmd = " ".join(build_image_cmd(container_image, True))
             image_build_script = os.path.join(local_outdir, "container.sh")
             log_file = os.path.join(local_outdir, "build-image.out")
