@@ -107,18 +107,6 @@ def parse_variant_data_dir(
     return variant_metadata, sim_data_dict, variant_names
 
 
-def make_sim_data_dict(exp_id: str, variants: list[int], sim_data_path: list[str]):
-    if len(variants) == 0:
-        raise ValueError(
-            "Must specify variant or variant_range if not using variant_data_dir"
-        )
-    if len(sim_data_path) != len(variants):
-        raise ValueError(
-            "Must specify sim_data_path for each variant if not using variant_data_dir"
-        )
-    return {exp_id: dict(zip(variants, sim_data_path))}
-
-
 def test_main():
     parser = argparse.ArgumentParser()
     default_config = os.path.join(CONFIG_DIR_PATH, "default.json")
