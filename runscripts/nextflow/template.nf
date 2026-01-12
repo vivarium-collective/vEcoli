@@ -12,7 +12,7 @@ process runParca {
 
     script:
     """
-    python ${params.projectRoot}/runscripts/parca.py --config "$config" -o "\$(pwd)"
+    uv run ${params.projectRoot}/runscripts/parca.py --config "$config" -o "\$(pwd)"
     """
 
     stub:
@@ -39,7 +39,7 @@ process analysisParca {
 
     script:
     """
-    python ${params.projectRoot}/runscripts/analysis.py --config "$config" \
+    uv run ${params.projectRoot}/runscripts/analysis.py --config "$config" \
         --sim_data_path="$kb/simData.cPickle" \
         --validation_data_path="$kb/validationData.cPickle" \
         -o "\$(pwd)/plots" \
@@ -69,7 +69,7 @@ process createVariants {
 
     script:
     """
-    python ${params.projectRoot}/runscripts/create_variants.py \
+    uv run ${params.projectRoot}/runscripts/create_variants.py \
         --config "$config" --kb "$kb" -o "\$(pwd)"
     """
 
