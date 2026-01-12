@@ -29,9 +29,8 @@ submit_simulation() {
   add_json_key "$config_path" ccam \
     "{\"build_image\": false, \"container_image\": \"$container_image\"}"
   rm -rf /projects/SMS/sms_api/dev/sims/sms_ccam \
-    && cd "/projects/SMS/sms_api/dev/repos/${SIMULATOR_HASH}/vEcoli" \
     && uv run --env-file /projects/SMS/sms_api/dev/.hpc_env runscripts/workflow.py --config configs/sms_ccam.json
 }
 
-
+submit_simulation "$SIMULATOR_HASH"
 
