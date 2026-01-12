@@ -206,4 +206,48 @@ profiles {
             errorStrategy = 'ignore'
         }
     }
+    ccam {
+        // Nextflow configuration for Slurm executor
+        process {
+            executor = 'slurm'
+            queue = 'vivarium'
+            qos = 'vivarium'
+            clusterOptions = '--nodelist=mantis-039'
+            time = '5m'
+            cpus = 1
+            memory = '512 MB'
+            container = params.container_image
+            containerOptions = "-B ${params.publishDir}:${params.publishDir} -B ${launchDir}:${launchDir}"
+        }
+
+        // Disable container by default (processes run natively)
+        docker.enabled = false
+        singularity.enabled = false
+
+        // Work directory configuration
+        // workDir = 'WORK_DIR_PLACEHOLDER'
+
+        params.projectRoot = "${launchDir}"
+        workflow.failOnIgnore = true
+    }
+    aws_cdk {
+        // Nextflow configuration for Slurm executor
+        process {
+            executor = 'slurm'
+            queue = 'jobs-queue'
+            clusterOptions = ''
+            time = '5m'
+            cpus = 1
+            memory = '512 MB'
+            container = params.container_image
+            containerOptions = "-B ${params.publishDir}:${params.publishDir} -B ${launchDir}:${launchDir}"
+        }
+        // Disable container by default (processes run natively)
+        docker.enabled = false
+        singularity.enabled = false
+        // Work directory configuration
+        // workDir = 'WORK_DIR_PLACEHOLDER'
+        params.projectRoot = '/vEcoli'
+        workflow.failOnIgnore = true
+    }
 }
