@@ -216,6 +216,8 @@ profiles {
             time = '5m'
             cpus = 1
             memory = '512 MB'
+            container = params.container_image
+            containerOptions = "-B ${params.publishDir}:${params.publishDir} -B ${launchDir}:${launchDir}"
         }
 
         // Disable container by default (processes run natively)
@@ -237,6 +239,8 @@ profiles {
             time = '5m'
             cpus = 1
             memory = '512 MB'
+            container = params.container_image
+            containerOptions = "-B ${params.publishDir}:${params.publishDir} -B ${launchDir}:${launchDir}"
         }
         // Disable container by default (processes run natively)
         docker.enabled = false
