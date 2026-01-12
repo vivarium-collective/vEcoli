@@ -3,7 +3,7 @@
   "suffix_time": false,
   "parca_options": {
     "cpus": 5,
-    "outdir": "/projects/SMS/sms_api/alex/sims",
+    "outdir": "/projects/SMS/sms_api/dev/sims",
     "operons": true,
     "ribosome_fitting": true,
     "rnapoly_fitting": true,
@@ -27,7 +27,7 @@
   "single_daughters": true,
   "emitter": "parquet",
   "emitter_arg": {
-    "out_dir": "/projects/SMS/sms_api/alex/sims"
+    "out_dir": "/projects/SMS/sms_api/dev/sims"
   },
   "analysis_options": {
     "cpus": 3,
@@ -68,7 +68,6 @@
   },
   "ccam": {
     "build_image": false,
-    "container_image": null,
-    "wait": false
+    "container_image": null
   }
 }
