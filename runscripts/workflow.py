@@ -366,6 +366,13 @@ def main():
              "match the supplied configuration file and if suffix_time was used, must "
              "contain the full time suffix (suffix_time will not be applied again).",
     )
+    parser.add_argument(
+        "--build-only",
+        action="store_true",
+        default=False,
+        help="Only build workflow files (main.nf, nextflow.config, workflow_config.json) "
+        "without executing the workflow. Temp files are preserved for inspection.",
+    )
     args = parser.parse_args()
     with open(config_file, "r") as f:
         config = json.load(f)
@@ -716,6 +723,15 @@ def main():
         copy_to_filesystem(
             local_config, os.path.join(outdir, "nextflow.config"), filesystem
         )
+
+    # If build-only mode, skip execution and preserve temp files
+    if args.build_only:
+        print(f"Build-only mode: files generated in {local_outdir}")
+        print(f"  - main.nf")
+        print(f"  - nextflow.config")
+        print(f"  - workflow_config.json")
+        print(f"Output directory: {outdir}")
+        return local_outdir
 
     # Start nextflow workflow
     report_path = os.path.join(
