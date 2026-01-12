@@ -3,7 +3,7 @@
   "suffix_time": false,
   "parca_options": {
     "cpus": 5,
-    "outdir": "/home/FCAM/svc_vivarium/workspace/api_outputs",
+    "outdir": "/projects/SMS/sms_api/alex/sims",
     "operons": true,
     "ribosome_fitting": true,
     "rnapoly_fitting": true,
@@ -21,13 +21,13 @@
   "initial_global_time": 0.0,
   "time_step": 1.0,
   "fail_at_max_duration": true,
-  "sim_data_path": "/home/FCAM/svc_vivarium/workspace/parameters/registry/default/simData.cPickle",
+  "sim_data_path": null,
   "generations": 5,
   "n_init_sims": 35,
   "single_daughters": true,
   "emitter": "parquet",
   "emitter_arg": {
-    "out_dir": "/home/FCAM/svc_vivarium/workspace/api_outputs"
+    "out_dir": "/projects/SMS/sms_api/alex/sims"
   },
   "analysis_options": {
     "cpus": 3,
@@ -67,8 +67,8 @@
     }
   },
   "ccam": {
-    "build_image": false,
-    "container_image": "/home/FCAM/svc_vivarium/workspace/images/vecoli-079c43c.sif",
+    "build_image": true,
+    "container_image": null,
     "wait": false
   }
 }
