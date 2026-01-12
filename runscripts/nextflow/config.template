@@ -227,7 +227,7 @@ profiles {
         // Work directory configuration
         // workDir = 'WORK_DIR_PLACEHOLDER'
 
-        params.projectRoot = '/vEcoli'
+        params.projectRoot = "${launchDir}"
         workflow.failOnIgnore = true
     }
     aws_cdk {
