@@ -209,25 +209,54 @@ profiles {
     ccam {
         // Nextflow configuration for Slurm executor
         process {
+            withLabel: parca {
+                cpus = params.parca_cpus
+                memory = params.parca_cpus * 2.GB
+                time = {
+                    if ( task.exitStatus == 140 ) {
+                        1.h * task.attempt
+                    } else {
+                        1.h
+                    }
+                }
+            }
             executor = 'slurm'
-            queue = 'vivarium'
-            qos = 'vivarium'
-            clusterOptions = '--nodelist=mantis-039'
-            time = '5m'
+            queue = 'SLURM_QUEUE'
+            qos = 'SLURM_QOS'
+            clusterOptions = 'SLURM_CLUSTER_OPTIONS'
             cpus = 1
-            memory = '512 MB'
+            memory = {
+                if ( task.exitStatus in [137, 140] ) {
+                    4.GB * task.attempt
+                } else {
+                    4.GB
+                }
+            }
+            time = {
+                if ( task.exitStatus == 140 ) {
+                    4.h * task.attempt
+                } else {
+                    4.h
+                }
+            }
+            errorStrategy = {
+                // Codes: 137(OOM), 140 (SLURM job limits), 143 (SLURM preemption)
+                ((task.exitStatus in [137, 140, 143, Integer.MAX_VALUE])
+                && (task.attempt <= process.maxRetries)) ? 'retry' : 'ignore'
+            }
+            maxRetries = 3
             container = params.container_image
             containerOptions = "-B ${params.publishDir}:${params.publishDir} -B ${launchDir}:${launchDir}"
         }
 
-        // Disable container by default (processes run natively)
-        docker.enabled = false
-        singularity.enabled = false
+        apptainer.enabled = true
+        params.projectRoot = '/vEcoli'
 
-        // Work directory configuration
-        // workDir = 'WORK_DIR_PLACEHOLDER'
+        // Avoid getting queue status too frequently
+        executor.queueStatInterval = '2 min'
+        executor.pollInterval = '30 sec'
+        executor.exitReadTimeout = '10 min'
 
-        params.projectRoot = "${launchDir}"
         workflow.failOnIgnore = true
     }
     aws_cdk {

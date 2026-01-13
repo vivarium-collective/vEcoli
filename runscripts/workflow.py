@@ -626,6 +626,14 @@ def main():
                 # Always delete log file to stop streaming thread
                 log_path.unlink()
         nf_config = nf_config.replace("IMAGE_NAME", container_image)
+
+        # Replace SLURM placeholders for ccam profile
+        slurm_qos = os.getenv("SLURM_QOS", slurm_partition)
+        slurm_node_list = os.getenv("SLURM_NODE_LIST", "")
+        cluster_options = f"--nodelist={slurm_node_list}" if slurm_node_list else ""
+        nf_config = nf_config.replace("SLURM_QUEUE", slurm_partition)
+        nf_config = nf_config.replace("SLURM_QOS", slurm_qos)
+        nf_config = nf_config.replace("SLURM_CLUSTER_OPTIONS", cluster_options)
     # ========================================================================================================= #
 
     # =========================================== aws_cdk init ====================================================== #
