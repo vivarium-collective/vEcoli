@@ -52,6 +52,8 @@ dependencies = [
     "xmltodict",
     # Required to save Altair charts as PNG
     "vl-convert-python",
+    # Required for workflow.py to load environment variables
+    "python-dotenv",
 ]
 
 [project.optional-dependencies]
