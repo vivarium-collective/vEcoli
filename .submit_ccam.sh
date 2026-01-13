@@ -29,7 +29,7 @@ submit_simulation() {
   add_json_key "$config_path" ccam \
     "{\"build_image\": false, \"wait\": false, \"container_image\": \"$container_image\"}"
   rm -rf /projects/SMS/sms_api/dev/sims/sms_ccam \
-    && uv run --env-file /projects/SMS/sms_api/dev/.hpc_env runscripts/workflow.py --config configs/sms_ccam.json
+    && uv run --no-cache --env-file /projects/SMS/sms_api/dev/.hpc_env runscripts/workflow.py --config configs/sms_ccam.json
 }
 
 submit_simulation "$SIMULATOR_HASH"

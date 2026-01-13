@@ -222,7 +222,7 @@ profiles {
 
         // Disable container by default (processes run natively)
         docker.enabled = false
-        singularity.enabled = false
+        singularity.enabled = true
 
         // Work directory configuration
         // workDir = 'WORK_DIR_PLACEHOLDER'
@@ -244,10 +244,11 @@ profiles {
         }
         // Disable container by default (processes run natively)
         docker.enabled = false
-        singularity.enabled = false
+        singularity.enabled = true
+
         // Work directory configuration
         // workDir = 'WORK_DIR_PLACEHOLDER'
-        params.projectRoot = '/vEcoli'
+        params.projectRoot = "${launchDir}"
         workflow.failOnIgnore = true
     }
 }
