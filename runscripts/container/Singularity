@@ -33,3 +33,8 @@ From: ghcr.io/astral-sh/uv@sha256:cda8422643a3d47dd5d457639dce8f5fbd130ef158ff4a
     apt-get update && apt-get install -y gcc procps nano curl
     cd /vEcoli
     UV_CACHE_DIR="/vEcoli/.uv_cache" UV_COMPILE_BYTECODE=1 uv sync --frozen
+    # Create python symlinks in .venv/bin (uv doesn't create these by default)
+    # This allows processes to use bare 'python' command without 'uv run'
+    PYTHON_HOME=$(grep "^home" /vEcoli/.venv/pyvenv.cfg | cut -d' ' -f3)
+    ln -sf "$PYTHON_HOME/python3" /vEcoli/.venv/bin/python
+    ln -sf "$PYTHON_HOME/python3" /vEcoli/.venv/bin/python3
