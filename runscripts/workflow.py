@@ -876,20 +876,30 @@ def main():
         copy_to_filesystem(
             batch_script, os.path.join(outdir, "nextflow_job.sh"), filesystem
         )
-        # if ccam_config.get("wait", False):
-        #     # Create empty log file for thread to stream from
-        #     log_path = pathlib.Path(nf_slurm_output)
-        #     log_path.touch(exist_ok=True)
-        #     thread_executor.submit(stream_log, nf_slurm_output)
-        #     print(f'Batch script:\n>>>>>>>>>>>>>>>>>\n{pp(batch_script)}')
-        #     try:
-        #         subprocess.run(["sbatch", batch_script], check=True)
-        #     finally:
-        #         # Always delete log file to stop streaming thread
-        #         log_path.unlink()
-        # else:
-        #     subprocess.run(["sbatch", batch_script], check=True)
-        subprocess.run(["sbatch", batch_script], check=True)
+
+        # If direct mode, run Nextflow directly (useful when already inside a SLURM job)
+        if ccam_config.get("direct", False):
+            print("Running Nextflow directly (direct mode)...")
+            # Set up environment
+            java_home = os.path.expanduser("~/.local/bin/java-22")
+            env = os.environ.copy()
+            env["JAVA_HOME"] = java_home
+            env["PATH"] = f"{java_home}/bin:{os.path.expanduser('~/.local/bin')}:{env.get('PATH', '')}"
+
+            # Build nextflow command
+            nf_cmd = [
+                "nextflow", "-C", config_path, "run", workflow_path,
+                "-profile", nf_profile,
+                "-with-report", report_path,
+                "-work-dir", workdir
+            ]
+            if args.resume is not None:
+                nf_cmd.append("-resume")
+
+            print(f"Nextflow command: {' '.join(nf_cmd)}")
+            subprocess.run(nf_cmd, check=True, env=env)
+        else:
+            subprocess.run(["sbatch", batch_script], check=True)
     # =============================================================================================================== #
 
     # ============================================ aws_cdk run ===================================================== #
