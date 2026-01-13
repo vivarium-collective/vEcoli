@@ -249,7 +249,8 @@ profiles {
             containerOptions = "-B ${params.publishDir}:${params.publishDir} -B ${launchDir}:${launchDir}"
         }
 
-        apptainer.enabled = true
+        // Use singularity (not apptainer) - apptainer is only a shell function on this cluster
+        singularity.enabled = true
         params.projectRoot = '/vEcoli'
 
         // Avoid getting queue status too frequently
