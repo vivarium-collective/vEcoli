@@ -207,27 +207,71 @@ profiles {
         }
     }
     ccam {
-        // Nextflow configuration for Slurm executor
+        // Nextflow configuration for SLURM executor
         process {
+            // ParCa-specific settings (needs more resources)
+            withLabel: parca {
+                cpus = params.parca_cpus
+                memory = params.parca_cpus * 2.GB
+                time = {
+                    if ( task.exitStatus == 140 ) {
+                        1.h * task.attempt
+                    } else {
+                        1.h
+                    }
+                }
+            }
             executor = 'slurm'
             queue = 'vivarium'
             qos = 'vivarium'
             clusterOptions = '--nodelist=mantis-039'
-            time = '5m'
-            cpus = 1
-            memory = '512 MB'
             container = params.container_image
             containerOptions = "-B ${params.publishDir}:${params.publishDir} -B ${launchDir}:${launchDir}"
+            cpus = 1
+            memory = {
+                if ( task.exitStatus in [137, 140] ) {
+                    4.GB * task.attempt
+                } else {
+                    4.GB
+                }
+            }
+            time = {
+                if ( task.exitStatus == 140 ) {
+                    4.h * task.attempt
+                } else {
+                    4.h
+                }
+            }
+            errorStrategy = {
+                // Codes: 137(OOM), 140 (SLURM job limits), 143 (SLURM preemption)
+                // Default value for exitStatus is max integer value, this
+                // is a catch-all for errors that leave no exit code
+                ((task.exitStatus in [137, 140, 143, Integer.MAX_VALUE])
+                && (task.attempt <= process.maxRetries)) ? 'retry' : 'ignore'
+            }
+            maxRetries = 3
         }
-
-        // Disable container by default (processes run natively)
         docker.enabled = false
         singularity.enabled = true
-
-        // Work directory configuration
-        // workDir = 'WORK_DIR_PLACEHOLDER'
-
-        params.projectRoot = "${launchDir}"
+        // Use /vEcoli when running inside container
+        params.projectRoot = '/vEcoli'
+        // Avoid getting queue status too frequently (can cause job status mixups)
+        executor.queueStatInterval = '2 min'
+        // Check for terminated jobs and submit new ones fairly frequently
+        // to minimize downtime between dependent jobs
+        executor.pollInterval = '30 sec'
+        // Retry all jobs that fail to submit (different from fail during runtime)
+        executor.submit.retry.reason = '.*'
+        // Retry failed submissions with delay longer than the time to
+        // get latest queue status (avoid job status mixups)
+        executor.retry.delay = '3 min'
+        executor.retry.maxDelay = '5 min'
+        // Throttle submission rate to avoid overwhelming scheduler
+        executor.submitRateLimit = '20/min'
+        // Raise limit for concurrent jobs
+        executor.queueSize = 2000
+        // Give NFS time to update and sync before raising errors
+        executor.exitReadTimeout = '10 min'
         workflow.failOnIgnore = true
     }
     aws_cdk {
