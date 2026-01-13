@@ -846,7 +846,6 @@ def main():
         slurm_qos = os.getenv('SLURM_QOS', '')
 
         slurm_job_outfile = pathlib.Path(slurm_log_base_path) / f"{slurm_job_name}.out"
-        slurm_job_errfile = pathlib.Path(slurm_log_base_path) / f"{slurm_job_name}.err"
 
         with open(batch_script, "w") as f:
             script = textwrap.dedent(f"""\
@@ -860,7 +859,7 @@ def main():
                 #SBATCH --mail-type=ALL
                 {nodelist_clause}
                 #SBATCH -o {slurm_job_outfile!s}
-                #SBATCH -e {slurm_job_errfile!s}
+                #SBATCH -e {slurm_job_outfile!s}
                 
                 ### {"#SBATCH --wait" if ccam_config.get("wait", False) else ""}
                 set -e
@@ -908,7 +907,6 @@ def main():
             )
         slurm_job_name = f"nf-{experiment_id}"
         slurm_job_outfile = pathlib.Path(slurm_log_base_path) / f"{slurm_job_name}.out"
-        slurm_job_errfile = pathlib.Path(slurm_log_base_path) / f"{slurm_job_name}.err"
 
         with open(batch_script, "w") as f:
             script = textwrap.dedent(f"""\
@@ -919,7 +917,7 @@ def main():
                 #SBATCH --mem=4GB
                 #SBATCH --partition={slurm_partition}
                 #SBATCH -o {slurm_job_outfile!s}
-                #SBATCH -e {slurm_job_errfile!s}
+                #SBATCH -e {slurm_job_outfile!s}
 
                 ### {"#SBATCH --wait" if ccam_config.get("wait", False) else ""}
                 set -e
