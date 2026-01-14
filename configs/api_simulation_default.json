@@ -15,9 +15,6 @@
     "variable_elongation_transcription": true,
     "variable_elongation_translation": false
   },
-  "analysis_options": {
-    "cpus": 3
-  },
   "sim_data_path": null,
   "suffix_time": false,
   "generations": 1,
@@ -29,5 +26,42 @@
   "emitter": "parquet",
   "emitter_arg": {
     "out_dir": "HPC_SIM_BASE_PATH_PLACEHOLDER"
+  },
+  "analysis_options": {
+    "cpus": 3,
+    "multiseed": {
+      "ptools_rxns": {
+        "n_tp": 10
+      },
+      "ptools_rna": {
+        "n_tp": 10
+      },
+      "ptools_proteins": {
+        "n_tp": 10
+      }
+    },
+    "multigeneration": {
+      "ptools_rxns": {
+        "n_tp": 10
+      },
+      "ptools_rna": {
+        "n_tp": 10
+      },
+      "ptools_proteins": {
+        "n_tp": 10
+      }
+    },
+    "single": {
+      "mass_fraction_summary": {},
+      "ptools_rxns": {
+        "n_tp": 10
+      },
+      "ptools_rna": {
+        "n_tp": 10
+      },
+      "ptools_proteins": {
+        "n_tp": 10
+      }
+    }
   }
 }
