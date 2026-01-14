@@ -5,7 +5,8 @@ from duckdb import DuckDBPyConnection
 import numpy as np
 import pandas as pd
 
-from ecoli.library.analyses import read_outputs
+from ecoli.library.parquet_emitter import read_outputs
+from ecoli.library.sim_data import LoadSimData
 
 
 def build_query(
