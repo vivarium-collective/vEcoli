@@ -106,7 +106,10 @@ def plot(
 
     wd_top = os.getcwd().split("/out/")[0]
 
-    wd_raw = os.path.join(wd_top, "reconstruction", "ecoli", "flat")
+    import reconstruction
+    from pathlib import Path 
+    wd_raw = str(Path(reconstruction.__file__).parent / "ecoli" / "flat")
+    # wd_raw = os.path.join(wd_top, "reconstruction", "ecoli", "flat")
 
     sim_data_path = list(sim_data_paths[exp_id].values())[0]
 

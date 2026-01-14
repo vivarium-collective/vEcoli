@@ -13,35 +13,35 @@
       "cpus": 3,
       "multiseed": {
         "ptools_rxns": {
-          "n_tp": 1
+          "n_tp": 3
         },
         "ptools_rna": {
-          "n_tp": 1
+          "n_tp": 3
         },
         "ptools_proteins": {
-          "n_tp": 1
+          "n_tp": 3
         }
       },
       "multigeneration": {
         "ptools_rxns": {
-          "n_tp": 1
+          "n_tp": 3
         },
         "ptools_rna": {
-          "n_tp": 1
+          "n_tp": 3
         },
         "ptools_proteins": {
-          "n_tp": 1
+          "n_tp": 3
         }
       },
       "single": {
         "ptools_rxns": {
-          "n_tp": 1
+          "n_tp": 3
         },
         "ptools_rna": {
-          "n_tp": 1
+          "n_tp": 3
         },
         "ptools_proteins": {
-          "n_tp": 1
+          "n_tp": 3
         }
       }
     },
