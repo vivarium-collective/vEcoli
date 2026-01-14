@@ -5,7 +5,6 @@ from duckdb import DuckDBPyConnection
 import numpy as np
 import pandas as pd
 
-from ecoli.library.parquet_emitter import read_outputs
 from ecoli.library.sim_data import LoadSimData
 
 
@@ -18,6 +17,21 @@ def build_query(
     """
 
     return query_sql
+
+
+def read_outputs(
+    history_sql: str,
+    conn: DuckDBPyConnection,
+    columns=["bulk", "listeners__rna_counts__full_mRNA_counts"],
+):
+    # retrieves specifc columns from parquet outputs and returns a dataframe
+    query_sql = build_query(columns, history_sql)
+
+    outputs_df = conn.sql(query_sql).df()
+
+    outputs_df = outputs_df.groupby("time", as_index=False).sum()
+
+    return outputs_df
 
 
 def get_bulk_ids(sim_data):
@@ -190,7 +204,7 @@ def plot(
         tp_checkpoints = tp_checkpoints / 60
         tp_checkpoints = [round(x) for x in tp_checkpoints]
 
-    tp_columns = ["t = " + str(i) for i in tp_checkpoints]
+    tp_columns = [str(i) + params["time_unit"][0] for i in tp_checkpoints]
 
     ptools_proteins = pd.DataFrame(
         data=proteomics_bulksum.transpose(), index=protein_labels, columns=tp_columns
