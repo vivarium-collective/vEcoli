@@ -861,7 +861,7 @@ def main():
             script = textwrap.dedent(f"""\
                 #!/bin/bash
                 #SBATCH --job-name={slurm_job_name}
-                #SBATCH --time=07:00
+                #SBATCH --time=7-00:00:00
                 #SBATCH --cpus-per-task 1
                 #SBATCH --mem=4GB
                 #SBATCH --partition={slurm_partition}
@@ -932,14 +932,14 @@ def main():
             script = textwrap.dedent(f"""\
                 #!/bin/bash
                 #SBATCH --job-name={slurm_job_name}
-                #SBATCH --time=07:00
+                #SBATCH --time=7-00:00:00
                 #SBATCH --cpus-per-task 1
                 #SBATCH --mem=4GB
                 #SBATCH --partition={slurm_partition}
                 #SBATCH -o {slurm_job_outfile!s}
                 #SBATCH -e {slurm_job_errfile!s}
 
-                ### {"#SBATCH --wait" if ccam_config.get("wait", False) else ""}
+                ### {"#SBATCH --wait" if aws_cdk_config.get("wait", False) else ""}
                 set -e
                 ### TODO: do we need shutdown on failure or interruption? If so:
                 ### trap ...

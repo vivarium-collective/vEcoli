@@ -263,21 +263,48 @@ profiles {
     aws_cdk {
         // Nextflow configuration for Slurm executor
         process {
+            withLabel: parca {
+                cpus = params.parca_cpus
+                memory = params.parca_cpus * 2.GB
+                time = {
+                    if ( task.exitStatus == 140 ) {
+                        1.h * task.attempt
+                    } else {
+                        1.h
+                    }
+                }
+            }
             executor = 'slurm'
             queue = 'jobs-queue'
             clusterOptions = ''
-            time = '5m'
             cpus = 1
-            memory = '512 MB'
+            memory = {
+                if ( task.exitStatus in [137, 140] ) {
+                    4.GB * task.attempt
+                } else {
+                    4.GB
+                }
+            }
+            time = {
+                if ( task.exitStatus == 140 ) {
+                    4.h * task.attempt
+                } else {
+                    4.h
+                }
+            }
+            errorStrategy = {
+                ((task.exitStatus in [137, 140, 143, Integer.MAX_VALUE])
+                && (task.attempt <= process.maxRetries)) ? 'retry' : 'ignore'
+            }
+            maxRetries = 3
             container = params.container_image
             containerOptions = "-B ${params.publishDir}:${params.publishDir} -B ${launchDir}:${launchDir}"
         }
-        // Disable container by default (processes run natively)
-        docker.enabled = false
-        singularity.enabled = false
-        // Work directory configuration
-        // workDir = 'WORK_DIR_PLACEHOLDER'
+        singularity.enabled = true
         params.projectRoot = '/vEcoli'
+        executor.queueStatInterval = '2 min'
+        executor.pollInterval = '30 sec'
+        executor.exitReadTimeout = '10 min'
         workflow.failOnIgnore = true
     }
 }
