@@ -364,22 +364,23 @@ The Singularity image (`vecoli-*.sif`) contains:
 - Pre-built virtual environment at `/vEcoli/.venv`
 - All simulation code and data files
 
-## Container-Based Workflow Execution
+## Container-Based Workflow Execution (Recommended)
 
-This approach runs `workflow.py` inside the Singularity container, eliminating the need for a Python virtual environment on the submit node. This is the recommended method for automated/service integration.
+This approach runs `workflow.py` inside the Singularity container and creates a fully self-contained output directory. This is the recommended method for automated/service integration.
+
+### Why This Approach?
+
+- **No Python dependencies on submit node**: Only Java/Nextflow needed on host
+- **Self-contained output**: All Nextflow files copied to output directory
+- **No host repo dependency**: Uses container's bundled code at runtime
+- **Portable**: Output directory can be archived/moved independently
 
 ### Overview
 
 The container-based approach involves three steps:
 1. Run `workflow.py --build-only` inside the container to generate Nextflow files
-2. Post-process generated files to fix paths
+2. Copy Nextflow module files from container and update include paths
 3. Submit Nextflow job via SLURM
-
-### Why This Approach?
-
-- **No Python dependencies on submit node**: Only Java/Nextflow needed on host
-- **Consistent environment**: Same container used for workflow generation and execution
-- **Simpler deployment**: No need to maintain `.venv` on submit node
 
 ### Configuration Requirements
 
@@ -445,28 +446,25 @@ This generates files in `{out_dir}/{experiment_id}/nextflow/`:
 - `nextflow.config` - Nextflow configuration
 - `workflow_config.json` - Full merged config
 
-### Step 2: Fix Paths
+### Step 2: Copy Modules and Fix Include Paths
 
-The generated files contain `/vEcoli` paths (container paths). These must be replaced with host paths for:
-- Nextflow `include` statements (run on host)
-- Python script paths (need host repo bind-mounted)
+Copy Nextflow module files from the container to the output directory and update includes to use relative paths:
 
 ```bash
-HOST_REPO=/mnt/fsx/home/svc_vivarium/sms_api/prod/repos/{commit}/vEcoli
 NEXTFLOW_DIR=/mnt/fsx/home/svc_vivarium/sms_api/prod/my_output/{experiment_id}/nextflow
 
-# Replace /vEcoli with host repo path
-sed -i "s|/vEcoli|${HOST_REPO}|g" ${NEXTFLOW_DIR}/main.nf
-sed -i "s|/vEcoli|${HOST_REPO}|g" ${NEXTFLOW_DIR}/nextflow.config
-sed -i "s|/vEcoli|${HOST_REPO}|g" ${NEXTFLOW_DIR}/workflow_config.json
+# Copy Nextflow module files from container
+singularity exec -B /mnt/fsx:/mnt/fsx ${CONTAINER_IMAGE} \
+    cp /vEcoli/runscripts/nextflow/sim.nf ${NEXTFLOW_DIR}/
+singularity exec -B /mnt/fsx:/mnt/fsx ${CONTAINER_IMAGE} \
+    cp /vEcoli/runscripts/nextflow/analysis.nf ${NEXTFLOW_DIR}/
+
+# Update includes to use relative paths (same directory as main.nf)
+sed -i "s|from '/vEcoli/runscripts/nextflow/sim'|from './sim'|g" ${NEXTFLOW_DIR}/main.nf
+sed -i "s|from '/vEcoli/runscripts/nextflow/analysis'|from './analysis'|g" ${NEXTFLOW_DIR}/main.nf
 ```
 
-**Also add host repo bind mount** to `containerOptions` in `nextflow.config`:
-
-```bash
-# Add bind mount for host repo so Python scripts can find dependencies
-sed -i "s|containerOptions = \"-B|containerOptions = \"-B ${HOST_REPO}:${HOST_REPO} -B|g" ${NEXTFLOW_DIR}/nextflow.config
-```
+**Note**: The `projectRoot` parameter in `nextflow.config` stays as `/vEcoli` - this is correct because Python scripts run inside the container where `/vEcoli` exists. No additional bind mounts are needed.
 
 ### Step 3: Submit Nextflow Job
 
@@ -510,7 +508,6 @@ OUTPUT_DIR="/mnt/fsx/home/svc_vivarium/sms_api/prod/my_output"
 SLURM_LOG_PATH="${OUTPUT_DIR}/slurm_logs"
 
 CONTAINER_IMAGE="/mnt/fsx/home/svc_vivarium/sms_api/prod/images/vecoli-${COMMIT_SHA}.sif"
-HOST_REPO="/mnt/fsx/home/svc_vivarium/sms_api/prod/repos/${COMMIT_SHA}/vEcoli"
 
 # Environment
 export SLURM_PARTITION=jobs-queue
@@ -549,11 +546,14 @@ singularity exec \
 
 NEXTFLOW_DIR="${OUTPUT_DIR}/${EXPERIMENT_ID}/nextflow"
 
-# Step 2: Fix paths
-sed -i "s|/vEcoli|${HOST_REPO}|g" ${NEXTFLOW_DIR}/main.nf
-sed -i "s|/vEcoli|${HOST_REPO}|g" ${NEXTFLOW_DIR}/nextflow.config
-sed -i "s|/vEcoli|${HOST_REPO}|g" ${NEXTFLOW_DIR}/workflow_config.json
-sed -i "s|containerOptions = \"-B|containerOptions = \"-B ${HOST_REPO}:${HOST_REPO} -B|g" ${NEXTFLOW_DIR}/nextflow.config
+# Step 2: Copy modules and fix include paths
+singularity exec -B /mnt/fsx:/mnt/fsx ${CONTAINER_IMAGE} \
+    cp /vEcoli/runscripts/nextflow/sim.nf ${NEXTFLOW_DIR}/
+singularity exec -B /mnt/fsx:/mnt/fsx ${CONTAINER_IMAGE} \
+    cp /vEcoli/runscripts/nextflow/analysis.nf ${NEXTFLOW_DIR}/
+
+sed -i "s|from '/vEcoli/runscripts/nextflow/sim'|from './sim'|g" ${NEXTFLOW_DIR}/main.nf
+sed -i "s|from '/vEcoli/runscripts/nextflow/analysis'|from './analysis'|g" ${NEXTFLOW_DIR}/main.nf
 
 # Step 3: Create and submit SLURM job
 cat > /tmp/nf_job.sh << SCRIPT
@@ -580,13 +580,27 @@ SCRIPT
 sbatch /tmp/nf_job.sh
 ```
 
+### Output Directory Structure
+
+After running the automation script, the output directory is fully self-contained:
+
+```
+{output_dir}/{experiment_id}/nextflow/
+├── main.nf                 # Generated workflow
+├── sim.nf                  # Copied from container
+├── analysis.nf             # Copied from container
+├── nextflow.config         # Nextflow configuration
+├── workflow_config.json    # Full merged config
+└── nextflow_workdirs/      # Task working directories (created at runtime)
+```
+
 ### Known Limitations and Future Improvements
 
-1. **Path replacement is fragile**: The `sed` replacement of `/vEcoli` to host paths is a workaround. A cleaner solution would be to modify `workflow.py` to accept a `--project-root` parameter.
+1. **Cached kb detection**: When `sim_data_path` is not explicitly set to `null`, workflow.py may skip ParCa if it finds cached kb files. Always set `sim_data_path: null` for fresh runs.
 
-2. **Cached kb detection**: When `sim_data_path` is not explicitly set to `null`, workflow.py may skip ParCa if it finds cached kb files. Always set `sim_data_path: null` for fresh runs.
+2. **Submit node requirements**: Still requires Java 22 and Nextflow on the submit node.
 
-3. **Submit node requirements**: Still requires Java 22 and Nextflow on the submit node. These could potentially be containerized as well.
+3. **Module file copying**: Currently copies `sim.nf` and `analysis.nf` explicitly. If new modules are added, the automation script needs updating.
 
 ## Integration Notes
 
@@ -595,8 +609,8 @@ For service integration, the key touchpoints are:
 1. **Config Generation**: Create JSON config with experiment parameters (include `sim_data_path: null`)
 2. **Environment Setup**: Set `SLURM_PARTITION` and `SLURM_LOG_BASE_PATH`
 3. **Container Execution**: Run `workflow.py --build-only` inside Singularity container
-4. **Path Fixup**: Replace `/vEcoli` paths and add host repo bind mount
+4. **Module Copy**: Copy `sim.nf` and `analysis.nf` from container, fix includes to relative paths
 5. **Job Submission**: Submit Nextflow via sbatch
 6. **Job Tracking**: Parse "Submitted batch job {id}" from stdout
 7. **Status Monitoring**: Use `squeue`/`scontrol` or check SLURM logs
-8. **Output Retrieval**: Read from `out/{experiment_id}/` after completion
+8. **Output Retrieval**: Read from `{output_dir}/{experiment_id}/` after completion
