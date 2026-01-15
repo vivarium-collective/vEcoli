@@ -52,7 +52,6 @@
       }
     },
     "single": {
-      "mass_fraction_summary": {},
       "ptools_rxns": {
         "n_tp": 10
       },
@@ -63,5 +62,9 @@
         "n_tp": 10
       }
     }
+  },
+  "ccam": {
+    "build_image": false,
+    "container_image": "SIMULATOR_IMAGE_PATH_PLACEHOLDER"
   }
 }

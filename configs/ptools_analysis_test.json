@@ -47,5 +47,9 @@
     },
     "emitter_arg": {
       "out_dir": "out"
+    },
+    "ccam": {
+      "build_image": false,
+      "container_image": "SIMULATOR_IMAGE_PATH_PLACEHOLDER"
     }
 }

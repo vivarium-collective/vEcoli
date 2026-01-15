@@ -47,5 +47,9 @@
     },
     "emitter_arg": {
         "out_dir": "HPC_SIM_BASE_PATH_PLACEHOLDER"
+    },
+    "ccam": {
+      "build_image": false,
+      "container_image": "SIMULATOR_IMAGE_PATH_PLACEHOLDER"
     }
 }
