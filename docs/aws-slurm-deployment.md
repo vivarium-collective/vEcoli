@@ -28,16 +28,17 @@ jobs-queue  up     infinite   4      idle  jobs-[1-4]
 ```
 /mnt/fsx/home/svc_vivarium/sms_api/prod/
 ├── repos/
-│   └── 1c2d69f/
+│   └── {commit}/                      # e.g., d080742
 │       └── vEcoli/                    # Repository root
-│           ├── .venv/                 # Python virtual environment
-│           ├── .hpc_env               # SLURM environment variables
+│           ├── .venv/                 # Python virtual environment (optional for container-based)
 │           ├── configs/               # Workflow configurations
 │           ├── runscripts/            # Workflow scripts
-│           ├── slurm_logs/            # SLURM job output logs
-│           └── out/                   # Workflow output directory
-└── images/
-    └── vecoli-1c2d69f.sif             # Singularity container image
+│           └── out/                   # Default workflow output (can be overridden)
+├── images/
+│   └── vecoli-{commit}.sif            # Singularity container image
+└── my_output/                         # Custom output directory (recommended)
+    ├── slurm_logs/                    # SLURM job logs
+    └── {experiment_id}/               # Workflow output per experiment
 ```
 
 ## Environment Variables
@@ -363,13 +364,239 @@ The Singularity image (`vecoli-*.sif`) contains:
 - Pre-built virtual environment at `/vEcoli/.venv`
 - All simulation code and data files
 
+## Container-Based Workflow Execution
+
+This approach runs `workflow.py` inside the Singularity container, eliminating the need for a Python virtual environment on the submit node. This is the recommended method for automated/service integration.
+
+### Overview
+
+The container-based approach involves three steps:
+1. Run `workflow.py --build-only` inside the container to generate Nextflow files
+2. Post-process generated files to fix paths
+3. Submit Nextflow job via SLURM
+
+### Why This Approach?
+
+- **No Python dependencies on submit node**: Only Java/Nextflow needed on host
+- **Consistent environment**: Same container used for workflow generation and execution
+- **Simpler deployment**: No need to maintain `.venv` on submit node
+
+### Configuration Requirements
+
+**Critical**: Set `sim_data_path: null` to force ParCa to run (otherwise workflow.py looks for cached kb files):
+
+```json
+{
+  "experiment_id": "my-experiment",
+  "suffix_time": false,
+  "sim_data_path": null,
+  "parca_options": {
+    "cpus": 2,
+    "load_intermediate": null
+  },
+  "generations": 1,
+  "n_init_sims": 1,
+  "single_daughters": true,
+  "emitter": "parquet",
+  "emitter_arg": {
+    "out_dir": "/mnt/fsx/home/svc_vivarium/sms_api/prod/my_output"
+  },
+  "aws_cdk": {
+    "container_image": "/mnt/fsx/home/svc_vivarium/sms_api/prod/images/vecoli-{commit}.sif",
+    "build_image": false
+  },
+  "analysis_options": {
+    "single": {
+      "mass_fraction_summary": {}
+    }
+  }
+}
+```
+
+### Step 1: Generate Nextflow Files
+
+Run `workflow.py --build-only` inside the container:
+
+```bash
+CONTAINER_IMAGE=/mnt/fsx/home/svc_vivarium/sms_api/prod/images/vecoli-{commit}.sif
+CONFIG_PATH=/tmp/workflow_config.json
+
+export SLURM_PARTITION=jobs-queue
+export SLURM_LOG_BASE_PATH=/mnt/fsx/home/svc_vivarium/sms_api/prod/my_output/slurm_logs
+mkdir -p $SLURM_LOG_BASE_PATH
+
+singularity exec \
+    --writable-tmpfs \
+    --pwd /vEcoli \
+    -B /mnt/fsx:/mnt/fsx \
+    ${CONTAINER_IMAGE} \
+    python /vEcoli/runscripts/workflow.py \
+        --config ${CONFIG_PATH} \
+        --build-only
+```
+
+**Important flags:**
+- `--writable-tmpfs`: Allows writing to container filesystem (for temp files)
+- `--pwd /vEcoli`: Sets working directory inside container
+- `-B /mnt/fsx:/mnt/fsx`: Bind mounts shared filesystem
+
+This generates files in `{out_dir}/{experiment_id}/nextflow/`:
+- `main.nf` - Nextflow workflow
+- `nextflow.config` - Nextflow configuration
+- `workflow_config.json` - Full merged config
+
+### Step 2: Fix Paths
+
+The generated files contain `/vEcoli` paths (container paths). These must be replaced with host paths for:
+- Nextflow `include` statements (run on host)
+- Python script paths (need host repo bind-mounted)
+
+```bash
+HOST_REPO=/mnt/fsx/home/svc_vivarium/sms_api/prod/repos/{commit}/vEcoli
+NEXTFLOW_DIR=/mnt/fsx/home/svc_vivarium/sms_api/prod/my_output/{experiment_id}/nextflow
+
+# Replace /vEcoli with host repo path
+sed -i "s|/vEcoli|${HOST_REPO}|g" ${NEXTFLOW_DIR}/main.nf
+sed -i "s|/vEcoli|${HOST_REPO}|g" ${NEXTFLOW_DIR}/nextflow.config
+sed -i "s|/vEcoli|${HOST_REPO}|g" ${NEXTFLOW_DIR}/workflow_config.json
+```
+
+**Also add host repo bind mount** to `containerOptions` in `nextflow.config`:
+
+```bash
+# Add bind mount for host repo so Python scripts can find dependencies
+sed -i "s|containerOptions = \"-B|containerOptions = \"-B ${HOST_REPO}:${HOST_REPO} -B|g" ${NEXTFLOW_DIR}/nextflow.config
+```
+
+### Step 3: Submit Nextflow Job
+
+Create and submit the SLURM batch script:
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=nf-{experiment_id}
+#SBATCH --time=7-00:00:00
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=4GB
+#SBATCH --partition=jobs-queue
+#SBATCH -o {slurm_log_path}/nf-{experiment_id}.out
+#SBATCH -e {slurm_log_path}/nf-{experiment_id}.err
+
+set -e
+export JAVA_HOME=$HOME/.local/bin/java-22
+export PATH=$JAVA_HOME/bin:$HOME/.local/bin:$PATH
+
+NEXTFLOW_DIR={output_dir}/{experiment_id}/nextflow
+
+cd ${NEXTFLOW_DIR}
+nextflow -C ${NEXTFLOW_DIR}/nextflow.config run ${NEXTFLOW_DIR}/main.nf \
+    -profile aws_cdk \
+    -with-report ${NEXTFLOW_DIR}/{experiment_id}_report.html \
+    -work-dir ${NEXTFLOW_DIR}/nextflow_workdirs
+```
+
+### Complete Automation Script
+
+Here's a complete bash script that performs all steps:
+
+```bash
+#!/bin/bash
+set -e
+
+# Configuration
+COMMIT_SHA="d080742"
+EXPERIMENT_ID="my-experiment"
+OUTPUT_DIR="/mnt/fsx/home/svc_vivarium/sms_api/prod/my_output"
+SLURM_LOG_PATH="${OUTPUT_DIR}/slurm_logs"
+
+CONTAINER_IMAGE="/mnt/fsx/home/svc_vivarium/sms_api/prod/images/vecoli-${COMMIT_SHA}.sif"
+HOST_REPO="/mnt/fsx/home/svc_vivarium/sms_api/prod/repos/${COMMIT_SHA}/vEcoli"
+
+# Environment
+export SLURM_PARTITION=jobs-queue
+export SLURM_LOG_BASE_PATH=${SLURM_LOG_PATH}
+mkdir -p ${SLURM_LOG_PATH}
+
+# Create config
+cat > /tmp/workflow_config.json << EOF
+{
+  "experiment_id": "${EXPERIMENT_ID}",
+  "suffix_time": false,
+  "sim_data_path": null,
+  "parca_options": {"cpus": 2, "load_intermediate": null},
+  "generations": 1,
+  "n_init_sims": 1,
+  "single_daughters": true,
+  "emitter": "parquet",
+  "emitter_arg": {"out_dir": "${OUTPUT_DIR}"},
+  "aws_cdk": {
+    "container_image": "${CONTAINER_IMAGE}",
+    "build_image": false
+  },
+  "analysis_options": {"single": {"mass_fraction_summary": {}}}
+}
+EOF
+
+# Step 1: Generate Nextflow files
+singularity exec \
+    --writable-tmpfs \
+    --pwd /vEcoli \
+    -B /mnt/fsx:/mnt/fsx \
+    ${CONTAINER_IMAGE} \
+    python /vEcoli/runscripts/workflow.py \
+        --config /tmp/workflow_config.json \
+        --build-only
+
+NEXTFLOW_DIR="${OUTPUT_DIR}/${EXPERIMENT_ID}/nextflow"
+
+# Step 2: Fix paths
+sed -i "s|/vEcoli|${HOST_REPO}|g" ${NEXTFLOW_DIR}/main.nf
+sed -i "s|/vEcoli|${HOST_REPO}|g" ${NEXTFLOW_DIR}/nextflow.config
+sed -i "s|/vEcoli|${HOST_REPO}|g" ${NEXTFLOW_DIR}/workflow_config.json
+sed -i "s|containerOptions = \"-B|containerOptions = \"-B ${HOST_REPO}:${HOST_REPO} -B|g" ${NEXTFLOW_DIR}/nextflow.config
+
+# Step 3: Create and submit SLURM job
+cat > /tmp/nf_job.sh << SCRIPT
+#!/bin/bash
+#SBATCH --job-name=nf-${EXPERIMENT_ID}
+#SBATCH --time=7-00:00:00
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=4GB
+#SBATCH --partition=jobs-queue
+#SBATCH -o ${SLURM_LOG_PATH}/nf-${EXPERIMENT_ID}.out
+#SBATCH -e ${SLURM_LOG_PATH}/nf-${EXPERIMENT_ID}.err
+
+set -e
+export JAVA_HOME=\$HOME/.local/bin/java-22
+export PATH=\$JAVA_HOME/bin:\$HOME/.local/bin:\$PATH
+
+cd ${NEXTFLOW_DIR}
+nextflow -C ${NEXTFLOW_DIR}/nextflow.config run ${NEXTFLOW_DIR}/main.nf \\
+    -profile aws_cdk \\
+    -with-report ${NEXTFLOW_DIR}/${EXPERIMENT_ID}_report.html \\
+    -work-dir ${NEXTFLOW_DIR}/nextflow_workdirs
+SCRIPT
+
+sbatch /tmp/nf_job.sh
+```
+
+### Known Limitations and Future Improvements
+
+1. **Path replacement is fragile**: The `sed` replacement of `/vEcoli` to host paths is a workaround. A cleaner solution would be to modify `workflow.py` to accept a `--project-root` parameter.
+
+2. **Cached kb detection**: When `sim_data_path` is not explicitly set to `null`, workflow.py may skip ParCa if it finds cached kb files. Always set `sim_data_path: null` for fresh runs.
+
+3. **Submit node requirements**: Still requires Java 22 and Nextflow on the submit node. These could potentially be containerized as well.
+
 ## Integration Notes
 
 For service integration, the key touchpoints are:
 
-1. **Config Generation**: Create JSON config with experiment parameters
+1. **Config Generation**: Create JSON config with experiment parameters (include `sim_data_path: null`)
 2. **Environment Setup**: Set `SLURM_PARTITION` and `SLURM_LOG_BASE_PATH`
-3. **Workflow Trigger**: Execute `python runscripts/workflow.py --config <path>`
-4. **Job Tracking**: Parse "Submitted batch job {id}" from stdout
-5. **Status Monitoring**: Use `squeue`/`scontrol` or check SLURM logs
-6. **Output Retrieval**: Read from `out/{experiment_id}/` after completion
+3. **Container Execution**: Run `workflow.py --build-only` inside Singularity container
+4. **Path Fixup**: Replace `/vEcoli` paths and add host repo bind mount
+5. **Job Submission**: Submit Nextflow via sbatch
+6. **Job Tracking**: Parse "Submitted batch job {id}" from stdout
+7. **Status Monitoring**: Use `squeue`/`scontrol` or check SLURM logs
+8. **Output Retrieval**: Read from `out/{experiment_id}/` after completion
