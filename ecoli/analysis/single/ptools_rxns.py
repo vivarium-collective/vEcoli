@@ -2,63 +2,11 @@ import os
 from typing import Any
 
 from duckdb import DuckDBPyConnection
-import numpy as np
-import pandas as pd
+import polars as pl
 
-from ecoli.library.sim_data import LoadSimData
+from ecoli.library.parquet_emitter import field_metadata
 
-
-def build_query(
-    columns, history_sql
-):  # generates sql query for user specified parquet columns
-    query_sql = f"""
-        SELECT {",".join(columns)}, time FROM ({history_sql})
-        ORDER BY time
-    """
-
-    return query_sql
-
-
-def read_outputs(
-    history_sql: str,
-    conn: DuckDBPyConnection,
-    columns=["bulk", "listeners__rna_counts__full_mRNA_counts"],
-):
-    # retrieves specifc columns from parquet outputs and returns a dataframe
-    query_sql = build_query(columns, history_sql)
-
-    outputs_df = conn.sql(query_sql).df()
-
-    outputs_df = outputs_df.groupby("time", as_index=False).sum()
-
-    return outputs_df
-
-
-def consolidate_timepoints(state_mtx, n_tp, normalized=False):
-    # generate consolidated relative time points
-    checkpoints = np.linspace(0, np.shape(state_mtx)[0] - 1, n_tp, dtype=int)
-
-    if normalized:
-        denom = [
-            len(state_mtx[checkpoints[i] : checkpoints[i + 1]])
-            for i in range(len(checkpoints) - 1)
-        ]
-
-        block_sums = [
-            state_mtx[checkpoints[i] : checkpoints[i + 1]].sum(axis=0) / denom[i]
-            for i in range(len(checkpoints) - 1)
-        ]
-
-    else:
-        block_sums = [
-            state_mtx[checkpoints[i] : checkpoints[i + 1]].sum(axis=0)
-            for i in range(len(checkpoints) - 1)
-        ]
-
-    block_sums = np.stack(block_sums, axis=0)
-    block_sums_final = np.insert(block_sums, 0, state_mtx[0], axis=0)
-
-    return block_sums_final, checkpoints
+from ecoli.analysis.single.ptools_rna import build_query
 
 
 def plot(
@@ -73,49 +21,45 @@ def plot(
     variant_metadata: dict[str, dict[int, Any]],
     variant_names: dict[str, str],
 ):
-    exp_id = list(sim_data_paths.keys())[0]
+    rxn_ids = field_metadata(
+        conn, config_sql, "listeners__fba_results__base_reaction_fluxes"
+    )
+    rxns_query = build_query(
+        {"listeners__fba_results__base_reaction_fluxes": "reaction_fluxes"},
+        {},
+        history_sql,
+        params.get("n_tp", 5),
+    )
+    data = conn.sql(rxns_query).pl()
 
-    sim_data_path = list(sim_data_paths[exp_id].values())[0]
+    time_unit = params.get("time_unit", "seconds")
+    if time_unit not in ["seconds", "minutes"]:
+        time_unit = "seconds"
 
-    sim_data = LoadSimData(sim_data_path).sim_data
+    if time_unit == "minutes":
+        data = data.with_columns(
+            [
+                (pl.col("bin_start") / 60).alias("bin_start"),
+                (pl.col("bin_end") / 60).alias("bin_end"),
+            ]
+        )
 
-    time_units = ["minutes", "seconds"]
+    timepoint_cols = [
+        str(int(start_time)) for start_time in data["bin_start"].to_list()
+    ]
+    counts_df = data.select(
+        pl.col("reaction_fluxes").list.to_struct(fields=rxn_ids)
+    ).unnest("reaction_fluxes")
 
-    if not params.get("time_unit"):
-        params["time_unit"] = "minutes"
-    elif params["time_unit"] not in time_units:
-        params["time_unit"] = "minutes"
-
-    output_columns = ["bulk", "listeners__fba_results__base_reaction_fluxes"]
-
-    output_df = read_outputs(history_sql, conn, output_columns)
-
-    rxn_mtx = np.stack(output_df["listeners__fba_results__base_reaction_fluxes"].values)
-
-    rxn_ids_base = sim_data.process.metabolism.base_reaction_ids
-
-    n_tp = params["n_tp"]
-
-    rxn_blocksum, tp_idx = consolidate_timepoints(rxn_mtx, n_tp, normalized=True)
-
-    tp_checkpoints = output_df["time"].values[tp_idx]
-
-    if params["time_unit"] == "minutes":
-        tp_checkpoints = tp_checkpoints / 60
-        tp_checkpoints = [round(x) for x in tp_checkpoints]
-
-    tp_columns = [str(i) + params["time_unit"][0] for i in tp_checkpoints]
-
-    ptools_rxns = pd.DataFrame(
-        data=np.abs(rxn_blocksum.transpose()), index=rxn_ids_base, columns=tp_columns
+    wide_table = counts_df.transpose(
+        include_header=True,
+        header_name="reaction_id",
+        column_names=timepoint_cols,
     )
 
-    ptools_rxns.index.name = "$"
-
-    ptools_rxns.to_csv(
+    wide_table.write_csv(
         os.path.join(outdir, "ptools_rxns.txt"),
-        sep="\t",
-        index=True,
-        header=True,
-        float_format="%.4f",
+        separator="\t",
+        include_header=True,
+        float_precision=4,
     )

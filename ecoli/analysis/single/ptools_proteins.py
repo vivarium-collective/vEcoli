@@ -1,93 +1,18 @@
 import os
-from typing import Any
+from typing import Any, cast
 
 from duckdb import DuckDBPyConnection
-import numpy as np
-import pandas as pd
+import polars as pl
+import pickle
 
-from ecoli.library.sim_data import LoadSimData
+from ecoli.library.parquet_emitter import (
+    field_metadata,
+    open_arbitrary_sim_data,
+    read_stacked_columns,
+)
 
-
-def build_query(
-    columns, history_sql
-):  # generates sql query for user specified parquet columns
-    query_sql = f"""
-        SELECT {",".join(columns)}, time FROM ({history_sql})
-        ORDER BY time
-    """
-
-    return query_sql
-
-
-def read_outputs(
-    history_sql: str,
-    conn: DuckDBPyConnection,
-    columns=["bulk", "listeners__rna_counts__full_mRNA_counts"],
-):
-    # retrieves specifc columns from parquet outputs and returns a dataframe
-    query_sql = build_query(columns, history_sql)
-
-    outputs_df = conn.sql(query_sql).df()
-
-    outputs_df = outputs_df.groupby("time", as_index=False).sum()
-
-    return outputs_df
-
-
-def get_bulk_ids(sim_data):
-    bulk_ids = sim_data.internal_state.bulk_molecules.bulk_data["id"].tolist()
-    return bulk_ids
-
-
-def build_bulk2monomers_matrix(sim_data):
-    # decomplexes bulk species into monomers
-
-    bulk_ids = sim_data.internal_state.bulk_molecules.bulk_data["id"].tolist()
-    get_monomers = sim_data.process.complexation.get_monomers
-    all_monomers = [list(get_monomers(bulk_id)["subunitIds"]) for bulk_id in bulk_ids]
-    all_monomers = [item for sublist in all_monomers for item in sublist]
-    all_monomers = list(np.unique(all_monomers))
-
-    bulk2monomers = np.zeros((len(bulk_ids), len(all_monomers)))
-
-    for idx, bulk_id in enumerate(bulk_ids):
-        monomer_mapping = get_monomers(bulk_id)
-        subunits = monomer_mapping["subunitIds"]
-        stoich_coeffs = monomer_mapping["subunitStoich"]
-
-        for j in range(len(subunits)):
-            subunit = subunits[j]
-            monomer_idx = all_monomers.index(subunit)
-            bulk2monomers[idx, monomer_idx] = stoich_coeffs[j]
-
-    return bulk2monomers, all_monomers
-
-
-def consolidate_timepoints(state_mtx, n_tp, normalized=False):
-    # generate consolidated relative time points
-    checkpoints = np.linspace(0, np.shape(state_mtx)[0] - 1, n_tp, dtype=int)
-
-    if normalized:
-        denom = [
-            len(state_mtx[checkpoints[i] : checkpoints[i + 1]])
-            for i in range(len(checkpoints) - 1)
-        ]
-
-        block_sums = [
-            state_mtx[checkpoints[i] : checkpoints[i + 1]].sum(axis=0) / denom[i]
-            for i in range(len(checkpoints) - 1)
-        ]
-
-    else:
-        block_sums = [
-            state_mtx[checkpoints[i] : checkpoints[i + 1]].sum(axis=0)
-            for i in range(len(checkpoints) - 1)
-        ]
-
-    block_sums = np.stack(block_sums, axis=0)
-    block_sums_final = np.insert(block_sums, 0, state_mtx[0], axis=0)
-
-    return block_sums_final, checkpoints
+from ecoli.analysis.single.ptools_rna import build_query
+from reconstruction.ecoli.simulation_data import SimulationDataEcoli
 
 
 def plot(
@@ -102,123 +27,69 @@ def plot(
     variant_metadata: dict[str, dict[int, Any]],
     variant_names: dict[str, str],
 ):
-    exp_id = list(sim_data_paths.keys())[0]
-
-    wd_top = os.getcwd().split("/out/")[0]
-
-    import reconstruction
-    from pathlib import Path 
-    wd_raw = str(Path(reconstruction.__file__).parent / "ecoli" / "flat")
-    # wd_raw = os.path.join(wd_top, "reconstruction", "ecoli", "flat")
-
-    sim_data_path = list(sim_data_paths[exp_id].values())[0]
-
-    sim_data = LoadSimData(sim_data_path).sim_data
-
-    bulk_ids = get_bulk_ids(sim_data)
-
-    time_units = ["minutes", "seconds"]
-
-    if not params.get("time_unit"):
-        params["time_unit"] = "minutes"
-    elif params["time_unit"] not in time_units:
+    if not params.get("time_unit") or params["time_unit"] not in ["minutes", "seconds"]:
         params["time_unit"] = "minutes"
 
-    genes_input_raw = pd.read_csv(
-        os.path.join(wd_raw, "genes.tsv"), sep="\t", header=5, index_col=0
+    with open_arbitrary_sim_data(sim_data_paths) as f:
+        sim_data: "SimulationDataEcoli" = pickle.load(f)
+    monomer_ids = field_metadata(conn, config_sql, "listeners__monomer_counts")
+    monomer_subquery = cast(
+        str,
+        read_stacked_columns(
+            history_sql,
+            ["listeners__monomer_counts"],
+            remove_first=True,
+            order_results=False,
+        ),
     )
+    monomer_sql = build_query(
+        {"listeners__monomer_counts": "monomer_counts"},
+        {},
+        monomer_subquery,
+        params.get("n_tp", 5),
+    )
+    data = conn.sql(monomer_sql).pl()
+    cistron_id_to_gene_id = {
+        cistron["id"]: cistron["gene_id"]
+        for cistron in sim_data.process.transcription.cistron_data
+    }
+    monomer_sim_data = sim_data.process.translation.monomer_data.struct_array
+    monomer_to_gene_id = cast(
+        dict[str, str],
+        {
+            monomer_id: cistron_id_to_gene_id[cistron_id]
+            for cistron_id, monomer_id in zip(
+                monomer_sim_data["cistron_id"], monomer_sim_data["id"]
+            )
+        },
+    )
+    gene_ids = [monomer_to_gene_id[monomer_id] for monomer_id in monomer_ids]
 
-    output_columns = [
-        "bulk",
-        "listeners__unique_molecule_counts__oriC",
-        "listeners__unique_molecule_counts__active_RNAP",
-        "listeners__unique_molecule_counts__active_ribosome",
+    time_unit = params["time_unit"]
+    if time_unit == "minutes":
+        data = data.with_columns(
+            [
+                (pl.col("bin_start") / 60).alias("bin_start"),
+                (pl.col("bin_end") / 60).alias("bin_end"),
+            ]
+        )
+
+    timepoint_cols = [
+        str(int(start_time)) for start_time in data["bin_start"].to_list()
     ]
-    translation_module = sim_data.process.translation.monomer_data.fullArray()
+    counts_df = data.select(
+        pl.col("monomer_counts").list.to_struct(fields=gene_ids)
+    ).unnest("monomer_counts")
 
-    replisome_monomer_subunits = sim_data.molecule_groups.replisome_monomer_subunits
-    replisome_trimer_subunits = sim_data.molecule_groups.replisome_trimer_subunits
-    riboproteins = [
-        sim_data.molecule_ids.s30_full_complex,
-        sim_data.molecule_ids.s50_full_complex,
-    ]
-    rnap_id = sim_data.molecule_ids.full_RNAP
-
-    output_df = read_outputs(history_sql, conn, output_columns)
-
-    bulk_mtx = np.stack(output_df["bulk"].values)
-
-    for bulk_id in replisome_monomer_subunits:
-        unique_complex = output_df["listeners__unique_molecule_counts__oriC"].values
-        add_bulk = unique_complex * 2
-        bulk_idx = bulk_ids.index(bulk_id)
-        bulk_mtx[:, bulk_idx] = bulk_mtx[:, bulk_idx] + add_bulk
-
-    for bulk_id in replisome_trimer_subunits:
-        unique_complex = output_df["listeners__unique_molecule_counts__oriC"].values
-        add_bulk = unique_complex * 6
-        bulk_idx = bulk_ids.index(bulk_id)
-        bulk_mtx[:, bulk_idx] = bulk_mtx[:, bulk_idx] + add_bulk
-
-    for bulk_id in riboproteins:
-        unique_complex = output_df[
-            "listeners__unique_molecule_counts__active_ribosome"
-        ].values
-        add_bulk = unique_complex
-        bulk_idx = bulk_ids.index(bulk_id)
-        bulk_mtx[:, bulk_idx] = bulk_mtx[:, bulk_idx] + add_bulk
-
-    rnap_counts = output_df["listeners__unique_molecule_counts__active_RNAP"].values
-    rnap_idx = bulk_ids.index(rnap_id)
-    bulk_mtx[:, rnap_idx] = bulk_mtx[:, rnap_idx] + rnap_counts
-
-    bulk2monomers, all_monomers = build_bulk2monomers_matrix(sim_data)
-
-    rna2genes = {}
-
-    for gene_id in genes_input_raw.index:
-        rna_id = genes_input_raw.loc[gene_id, "rna_ids"][2:-2]
-        rna2genes[rna_id] = gene_id
-
-    protein_monomers = translation_module["id"]
-
-    protein_monomer_idxs = np.array(
-        [all_monomers.index(protein) for protein in protein_monomers]
+    wide_table = counts_df.transpose(
+        include_header=True,
+        header_name="gene_id",
+        column_names=timepoint_cols,
     )
 
-    bulk2protein_monomers = bulk2monomers[:, protein_monomer_idxs]
-
-    protein_labels = []
-
-    for protein_idx, protein in enumerate(protein_monomers):
-        protein_labels.append(protein[:-3])
-
-    proteomics = np.matmul(bulk_mtx, bulk2protein_monomers)
-
-    n_tp = int(params["n_tp"])
-
-    proteomics_bulksum, tp_idx = consolidate_timepoints(
-        proteomics, n_tp, normalized=True
-    )
-
-    tp_checkpoints = output_df["time"].values[tp_idx]
-
-    if params["time_unit"] == "minutes":
-        tp_checkpoints = tp_checkpoints / 60
-        tp_checkpoints = [round(x) for x in tp_checkpoints]
-
-    tp_columns = [str(i) + params["time_unit"][0] for i in tp_checkpoints]
-
-    ptools_proteins = pd.DataFrame(
-        data=proteomics_bulksum.transpose(), index=protein_labels, columns=tp_columns
-    )
-
-    ptools_proteins.index.name = "$"
-
-    ptools_proteins.to_csv(
+    wide_table.write_csv(
         os.path.join(outdir, "ptools_proteins.txt"),
-        sep="\t",
-        index=True,
-        header=True,
-        float_format="%.4f",
+        separator="\t",
+        include_header=True,
+        float_precision=4,
     )

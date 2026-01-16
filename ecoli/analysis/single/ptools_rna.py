@@ -1,139 +1,125 @@
 import os
-from typing import Any
+from typing import Any, cast
 
 from duckdb import DuckDBPyConnection
-import numpy as np
-import pandas as pd
+import polars as pl
+import pickle
 
-from ecoli.library.sim_data import LoadSimData
+from ecoli.library.parquet_emitter import (
+    field_metadata,
+    open_arbitrary_sim_data,
+    read_stacked_columns,
+)
+from reconstruction.ecoli.simulation_data import SimulationDataEcoli
+
+
+RNAS_SQL = """
+-- Create RNA counts list of mRNAs, tRNAs, and rRNAs (in order)
+(
+    -- mRNA
+    h.listeners__rna_counts__mRNA_cistron_counts +
+    -- tRNA = charged + uncharged
+    [
+        trna[1] + trna[2]
+        FOR trna IN list_zip(charged_tRNAs, uncharged_tRNAs)
+    ] +
+    -- First rRNA = bulk + active ribosome + small subunit
+    [
+        rRNAs[1] + 
+        h.listeners__unique_molecule_counts__active_ribosome +
+        ribo_subunits[1]
+    ] +
+    -- Remaining rRNAs = bulk + active ribosome + large subunit
+    [
+        rrna_count +
+        h.listeners__unique_molecule_counts__active_ribosome +
+        ribo_subunits[2]
+        FOR rrna_count IN rRNAs[2:]
+    ]
+)
+"""
 
 
 def build_query(
-    columns, history_sql
-):  # generates sql query for user specified parquet columns
+    list_col: dict[str, str],
+    add_cols: dict[str, str],
+    history_sql: str,
+    time_bins: int = 5,
+):
+    """
+    Builds an SQL query to aggregate simulation history data into time bins.
+
+    Args:
+        list_col: Dictionary mapping from list column name (ONLY ONE) to desired output name.
+        add_cols: Dictionary mapping additional columns to their desired output names.
+        history_sql: SQL string to retrieve the simulation history data.
+        time_bins: Number of time bins to aggregate data into.
+    """
+    assert len(list_col) == 1, "Only one list column can be processed at a time."
+    list_col_name = list(list_col.keys())[0]
+    list_col_output_name = list_col[list_col_name]
+    retrieve_other_cols = ", ".join(
+        [f"h.{col} AS {alias}" for col, alias in add_cols.items()]
+    )
+    avg_other_cols = ", ".join(
+        [f"AVG({alias}) AS {alias}" for alias in add_cols.values()]
+    )
     query_sql = f"""
-        SELECT {",".join(columns)}, time FROM ({history_sql})
-        ORDER BY time
+        WITH history AS ({history_sql}),
+        limits AS (
+        SELECT min(time) AS min_t, max(time) AS max_t FROM history
+        ),
+        windows AS (
+        SELECT
+            r.bin_idx,
+            min_t + r.bin_idx * ((max_t - min_t) / {time_bins}) AS bin_start,
+            min_t + (r.bin_idx + 1) * ((max_t - min_t) / {time_bins}) AS bin_end
+        FROM limits
+        CROSS JOIN range({time_bins}) AS r(bin_idx)
+        ),
+        exploded AS (
+        SELECT
+            w.bin_idx,
+            w.bin_start,
+            w.bin_end,
+            generate_subscripts(h.{list_col_name}, 1) AS list_idx,
+            unnest(h.{list_col_name}) AS list_val,
+            {retrieve_other_cols}
+        FROM history h, windows w
+        WHERE h.time >= w.bin_start AND h.time < w.bin_end
+        ),
+        agg AS (
+        SELECT
+            bin_idx,
+            list_idx,
+            AVG(bin_start) AS bin_start,
+            AVG(bin_end) AS bin_end,
+            AVG(list_val) AS list_avg,
+            {avg_other_cols}
+        FROM exploded
+        GROUP BY bin_idx, list_idx
+        ),
+        rebuilt AS (
+        SELECT
+            bin_idx,
+            AVG(bin_start) AS bin_start,
+            AVG(bin_end) AS bin_end,
+            list(list_avg ORDER BY list_idx) AS list_avg,
+            {avg_other_cols}
+        FROM agg
+        GROUP BY bin_idx
+        )
+        SELECT
+        bin_idx,
+        bin_start,
+        bin_end,
+        list_avg AS {list_col_output_name},
+        {", ".join(add_cols.values())}
+        FROM rebuilt
+        ORDER BY bin_idx;
     """
 
     return query_sql
-
-
-def read_outputs(
-    history_sql: str,
-    conn: DuckDBPyConnection,
-    columns=["bulk", "listeners__rna_counts__full_mRNA_counts"],
-):
-    # retrieves specifc columns from parquet outputs and returns a dataframe
-    query_sql = build_query(columns, history_sql)
-
-    outputs_df = conn.sql(query_sql).df()
-
-    outputs_df = outputs_df.groupby("time", as_index=False).sum()
-
-    return outputs_df
-
-
-def retrieve_tu_source(wd_raw):
-    # reads and combines transcription units raw data
-
-    tu_source_1 = pd.read_csv(
-        os.path.join(wd_raw, "transcription_units.tsv"), sep="\t", header=5, index_col=0
-    )
-    tu_source_2 = pd.read_csv(
-        os.path.join(wd_raw, "transcription_units_added.tsv"),
-        sep="\t",
-        header=0,
-        index_col=0,
-    )
-    tu_source_2 = tu_source_2.drop("_comments", axis=1)
-
-    tu_source = pd.concat([tu_source_1, tu_source_2], axis=0)
-    return tu_source
-
-
-def tu2gene_mapping(tu_ids, tu_source):
-    # creates a mapping between transcription units and individual genes
-
-    tu_ids_model = tu_ids
-
-    tu_ids_source = [id[:-3] for id in tu_ids]
-
-    tu_id2genes = []
-    tu_id_missing = []
-
-    for i in range(len(tu_ids_source)):
-        try:
-            tu_id_genes = tu_source["genes"][tu_ids_source[i]]
-        except KeyError:
-            tu_id_genes = f"[{tu_ids_source[i].replace('_RNA', '')}]"
-            tu_id_missing.append(tu_ids_source[i])
-
-        tu_id_genes = tu_id_genes[1:-1].replace('"', "").split(", ")
-        tu_id2genes.append(tu_id_genes)
-
-    tu_id2genes = dict(zip(tu_ids_model, tu_id2genes))
-    genes_tu_all = np.unique(
-        [gene for genes in list(tu_id2genes.values()) for gene in genes]
-    ).tolist()
-
-    return tu_id2genes, genes_tu_all
-
-
-def get_bulk_ids(sim_data):
-    bulk_ids = sim_data.internal_state.bulk_molecules.bulk_data["id"].tolist()
-    return bulk_ids
-
-
-def build_bulk2monomers_matrix(sim_data):
-    # decomplexes bulk species into monomers
-
-    bulk_ids = sim_data.internal_state.bulk_molecules.bulk_data["id"].tolist()
-    get_monomers = sim_data.process.complexation.get_monomers
-    all_monomers = [list(get_monomers(bulk_id)["subunitIds"]) for bulk_id in bulk_ids]
-    all_monomers = [item for sublist in all_monomers for item in sublist]
-    all_monomers = list(np.unique(all_monomers))
-
-    bulk2monomers = np.zeros((len(bulk_ids), len(all_monomers)))
-
-    for idx, bulk_id in enumerate(bulk_ids):
-        monomer_mapping = get_monomers(bulk_id)
-        subunits = monomer_mapping["subunitIds"]
-        stoich_coeffs = monomer_mapping["subunitStoich"]
-
-        for j in range(len(subunits)):
-            subunit = subunits[j]
-            monomer_idx = all_monomers.index(subunit)
-            bulk2monomers[idx, monomer_idx] = stoich_coeffs[j]
-
-    return bulk2monomers, all_monomers
-
-
-def consolidate_timepoints(state_mtx, n_tp, normalized=False):
-    # generate consolidated relative time points
-    checkpoints = np.linspace(0, np.shape(state_mtx)[0] - 1, n_tp, dtype=int)
-
-    if normalized:
-        denom = [
-            len(state_mtx[checkpoints[i] : checkpoints[i + 1]])
-            for i in range(len(checkpoints) - 1)
-        ]
-
-        block_sums = [
-            state_mtx[checkpoints[i] : checkpoints[i + 1]].sum(axis=0) / denom[i]
-            for i in range(len(checkpoints) - 1)
-        ]
-
-    else:
-        block_sums = [
-            state_mtx[checkpoints[i] : checkpoints[i + 1]].sum(axis=0)
-            for i in range(len(checkpoints) - 1)
-        ]
-
-    block_sums = np.stack(block_sums, axis=0)
-    block_sums_final = np.insert(block_sums, 0, state_mtx[0], axis=0)
-
-    return block_sums_final, checkpoints
 
 
 def plot(
@@ -148,247 +134,102 @@ def plot(
     variant_metadata: dict[str, dict[int, Any]],
     variant_names: dict[str, str],
 ):
-    exp_id = list(sim_data_paths.keys())[0]
-
-    wd_top = os.getcwd().split("/out/")[0]
-
-    import reconstruction
-    from pathlib import Path 
-    wd_raw = str(Path(reconstruction.__file__).parent / "ecoli" / "flat")
-    # wd_raw = os.path.join(wd_top, "reconstruction", "ecoli", "flat")
-
-    sim_data_path = list(sim_data_paths[exp_id].values())[0]
-
-    sim_data = LoadSimData(sim_data_path).sim_data
-
-    rna_data = sim_data.process.transcription.rna_data
-
-    tu_source = retrieve_tu_source(wd_raw)
-
-    time_units = ["minutes", "seconds"]
-
     if not params.get("time_unit"):
         params["time_unit"] = "minutes"
-    elif params["time_unit"] not in time_units:
+    elif params["time_unit"] not in ["minutes", "seconds"]:
         params["time_unit"] = "minutes"
 
-    bulk_ids = get_bulk_ids(sim_data)
+    # Load tables and attributes for mRNAs
+    mRNA_ids = field_metadata(
+        conn, config_sql, "listeners__rna_counts__mRNA_cistron_counts"
+    )
 
+    with open_arbitrary_sim_data(sim_data_paths) as f:
+        sim_data: "SimulationDataEcoli" = pickle.load(f)
+
+    # Load tables and attributes for tRNAs and rRNAs
+    bulk_ids = field_metadata(conn, config_sql, "bulk")
+    bulk_id_to_idx = {bulk_id: i + 1 for i, bulk_id in enumerate(bulk_ids)}
+    uncharged_tRNA_ids = sim_data.process.transcription.uncharged_trna_names
+    uncharged_tRNA_idx = [bulk_id_to_idx[trna] for trna in uncharged_tRNA_ids]
+    charged_tRNA_ids = sim_data.process.transcription.charged_trna_names
+    charged_tRNA_idx = [bulk_id_to_idx[trna] for trna in charged_tRNA_ids]
+    tRNA_cistron_ids = [tRNA_id[:-3] for tRNA_id in uncharged_tRNA_ids]
+    rRNA_ids = [
+        sim_data.molecule_groups.s30_16s_rRNA[0],
+        sim_data.molecule_groups.s50_23s_rRNA[0],
+        sim_data.molecule_groups.s50_5s_rRNA[0],
+    ]
+    rRNA_idx = [bulk_id_to_idx[trna] for trna in rRNA_ids]
+    rRNA_cistron_ids = [rRNA_id[:-3] for rRNA_id in rRNA_ids]
+    ribosomal_subunit_ids = [
+        sim_data.molecule_ids.s30_full_complex,
+        sim_data.molecule_ids.s50_full_complex,
+    ]
+    ribo_subunit_idx = [bulk_id_to_idx[ribo] for ribo in ribosomal_subunit_ids]
+    # Filter out first timestep for each cell because counts_to_molar is 0
+    rna_subquery = cast(
+        str,
+        read_stacked_columns(
+            history_sql,
+            [
+                # Extract only necessary bulk counts to reduce RAM usage
+                f"list_select(bulk, {charged_tRNA_idx}) AS charged_tRNAs, "
+                f"list_select(bulk, {uncharged_tRNA_idx}) AS uncharged_tRNAs, "
+                f"list_select(bulk, {rRNA_idx}) AS rRNAs, "
+                f"list_select(bulk, {ribo_subunit_idx}) AS ribo_subunits",
+                "listeners__unique_molecule_counts__active_ribosome",
+                "listeners__rna_counts__mRNA_cistron_counts as mrna_counts",
+            ],
+            remove_first=False,
+            order_results=False,
+        ),
+    )
     # specify parquet columns
-    output_columns = [
-        "bulk",
-        "listeners__rna_counts__full_mRNA_counts",
-        "listeners__unique_molecule_counts__active_ribosome",
+    list_col = {"mrna_counts": "mrna_counts"}
+    query_sql = build_query(list_col, {}, rna_subquery)
+    data = conn.sql(query_sql).pl()
+
+    # Retrieve gene copy numbers in order of RNA counts
+    cistron_id_to_gene_id: dict[str, str] = cast(
+        dict[str, str],
+        {
+            cistron["id"]: cistron["gene_id"]
+            for cistron in sim_data.process.transcription.cistron_data
+        },
+    )
+    gene_ids = [
+        cistron_id_to_gene_id[rna_id]
+        for rna_id in mRNA_ids + tRNA_cistron_ids + rRNA_cistron_ids
     ]
 
-    output_df = read_outputs(history_sql, conn, output_columns)
-
-    bulk_mtx = np.stack(output_df["bulk"].values)
-
-    # retrieve mrnas
-    mrna_mtx = np.stack(
-        output_df["listeners__rna_counts__full_mRNA_counts"].values
-    ).astype(int)
-
-    mrna_tu_ids = rna_data["id"][rna_data["is_mRNA"]].tolist()
-
-    tu2gene_mapping_mrna, genes_tu_mrna = tu2gene_mapping(
-        tu_ids=mrna_tu_ids, tu_source=tu_source
-    )
-
-    tu_mrna_dict = {}
-
-    for idx, mrna_tu_id in enumerate(mrna_tu_ids):
-        tu_mrna_dict[mrna_tu_id] = mrna_mtx[:, idx]
-
-    # retrieve processed rnas (trnas, rrnas)
-
-    rna_ids_unprocessed = rna_data["id"][rna_data["is_unprocessed"]]
-    rna_ids_mature = sim_data.process.transcription.mature_rna_data["id"]
-
-    # retrieve processed trnas
-
-    uncharged_trna_ids = sim_data.process.transcription.uncharged_trna_names
-    charged_trna_ids = sim_data.process.transcription.charged_trna_names
-
-    uncharged_trna_bulk_idxs = [bulk_ids.index(i) for i in uncharged_trna_ids]
-    charged_trna_bulk_idxs = [bulk_ids.index(i) for i in charged_trna_ids]
-
-    trna_total = (
-        bulk_mtx[:, charged_trna_bulk_idxs] + bulk_mtx[:, uncharged_trna_bulk_idxs]
-    )
-
-    trna_processed_ids = list(filter(lambda x: x in rna_ids_mature, uncharged_trna_ids))
-
-    trna_processed_idx = [uncharged_trna_ids.index(i) for i in trna_processed_ids]
-
-    trna_processed_total = trna_total[:, trna_processed_idx]
-
-    rna_processed_total = {}
-
-    for trna_idx, trna_id in enumerate(trna_processed_ids):
-        rna_processed_total[trna_id] = trna_processed_total[:, trna_idx]
-
-    # add rrna to rna_processed total
-
-    active_ribosome = output_df[
-        "listeners__unique_molecule_counts__active_ribosome"
-    ].values
-
-    processed_rrna_ids = [
-        sim_data.molecule_groups.s50_23s_rRNA,
-        sim_data.molecule_groups.s30_16s_rRNA,
-        sim_data.molecule_groups.s50_5s_rRNA,
+    # Pivot aggregated counts into gene-by-time matrix via Polars operations
+    time_unit = params.get("time_unit", "seconds")
+    if time_unit not in ["seconds", "minutes"]:
+        time_unit = "seconds"
+    if time_unit == "minutes":
+        data = data.with_columns(
+            [
+                (pl.col("bin_start") / 60).alias("bin_start"),
+                (pl.col("bin_end") / 60).alias("bin_end"),
+            ]
+        )
+    timepoint_cols = [
+        str(int(start_time)) for start_time in data["bin_start"].to_list()
     ]
-    processed_rrna_ids = [item for sublist in processed_rrna_ids for item in sublist]
+    counts_df = data.select(
+        pl.col("mrna_counts").list.to_struct(fields=gene_ids)
+    ).unnest("mrna_counts")
 
-    processed_rrna_idxs = [bulk_ids.index(i) for i in processed_rrna_ids]
-
-    bulk2monomers, all_monomers = build_bulk2monomers_matrix(sim_data)
-
-    riboprotein_cplxs_ids = ["CPLX0-3953[c]", "CPLX0-3962[c]"]
-    riboprotein_cplxs_idxs = [bulk_ids.index(i) for i in riboprotein_cplxs_ids]
-
-    bulk_mtx_riboprotein_cplx = bulk_mtx[:, riboprotein_cplxs_idxs]
-
-    bulk_total_riboprotein_cplx = np.array(
-        [
-            bulk_mtx_riboprotein_cplx[tp] + active_ribosome[tp]
-            for tp in range(len(active_ribosome))
-        ]
+    wide_table = counts_df.transpose(
+        include_header=True,
+        header_name="gene_id",
+        column_names=timepoint_cols,
     )
 
-    bulk_total_riboprotein_monomers = np.matmul(
-        bulk_total_riboprotein_cplx, bulk2monomers[riboprotein_cplxs_idxs]
-    )
-
-    riboprotein_monomers_idx_rrna = [
-        list(all_monomers).index(i) for i in processed_rrna_ids
-    ]
-
-    bulk_total_riboprotein_rrna = bulk_total_riboprotein_monomers[
-        :, riboprotein_monomers_idx_rrna
-    ]
-
-    bulk_total_rrna = bulk_total_riboprotein_rrna + bulk_mtx[:, processed_rrna_idxs]
-
-    for rrna_idx, rrna_id in enumerate(processed_rrna_ids):
-        rna_processed_total[rrna_id] = bulk_total_rrna[:, rrna_idx]
-
-    # reorder processed rrnas for rna maturaiton mtx
-    rna_processed = {}
-
-    for rna_id in rna_ids_mature.tolist():
-        rna_processed[rna_id] = rna_processed_total[rna_id]
-
-    rna_processed = np.stack(list(rna_processed.values())).transpose()
-
-    rna_maturation_stoich_mtx = (
-        sim_data.process.transcription.rna_maturation_stoich_matrix.toarray()
-    )
-
-    rna_processed_tu = np.matmul(rna_processed, rna_maturation_stoich_mtx)
-
-    rna_processed_tu_dict = {}
-
-    for rna_tu_idx, rna_tu in enumerate(rna_ids_unprocessed.tolist()):
-        rna_processed_tu_dict[rna_tu] = rna_processed_tu[:, rna_tu_idx]
-
-    rna_processed_tu_ids = list(rna_processed_tu_dict.keys())
-
-    tu2gene_mapping_processed, genes_processed = tu2gene_mapping(
-        rna_processed_tu_ids, tu_source
-    )
-
-    # add missing trna
-
-    tu_idx_trna = np.where(rna_data.fullArray()["is_tRNA"])[0]
-
-    tu_idx_not_unprocessed = np.where(~rna_data.fullArray()["is_unprocessed"])[0]
-
-    trna_not_unprocessed_idx = np.intersect1d(tu_idx_trna, tu_idx_not_unprocessed)
-
-    tu_id_trna_missing = rna_data["id"][trna_not_unprocessed_idx].tolist()
-
-    missing_trna_genes = [trna_tu[:4] for trna_tu in tu_id_trna_missing]
-
-    genes_input_raw = pd.read_csv(
-        os.path.join(wd_raw, "genes.tsv"), sep="\t", header=5, index_col=0
-    )
-
-    missing_trna_gene_ids = {}
-
-    missing_trna_genes_biocyc = []
-
-    for idx, trna_gene in enumerate(missing_trna_genes):
-        gene_id = genes_input_raw.index[genes_input_raw["symbol"] == trna_gene][0]
-        missing_trna_gene_ids[tu_id_trna_missing[idx]] = [gene_id]
-        missing_trna_genes_biocyc.append(gene_id)
-
-    trna_missing_idx = [uncharged_trna_ids.index(i) for i in tu_id_trna_missing]
-
-    trna_missing_counts = trna_total[:, trna_missing_idx]
-
-    trna_missing_tu = {}
-
-    for idx, trna_id in enumerate(tu_id_trna_missing):
-        trna_missing_tu[trna_id] = trna_missing_counts[:, idx]
-
-    tu_dict_full = {}
-    tu_gene_mapping_full = {}
-    for key in tu_mrna_dict.keys():
-        tu_dict_full[key] = tu_mrna_dict[key]
-        tu_gene_mapping_full[key] = tu2gene_mapping_mrna[key]
-
-    for key in rna_processed_tu_dict.keys():
-        tu_dict_full[key] = rna_processed_tu_dict[key]
-        tu_gene_mapping_full[key] = tu2gene_mapping_processed[key]
-
-    for key in trna_missing_tu.keys():
-        tu_dict_full[key] = trna_missing_tu[key]
-        tu_gene_mapping_full[key] = missing_trna_gene_ids[key]
-
-    tu_genes_all = np.unique(
-        genes_tu_mrna + genes_processed + missing_trna_genes_biocyc
-    ).tolist()
-
-    tu_gene_mtx = np.zeros([len(tu_dict_full), len(tu_genes_all)])
-
-    for tu_idx, key in enumerate(tu_gene_mapping_full.keys()):
-        genes_tu = tu_gene_mapping_full[key]
-        genes_tu_idx = [tu_genes_all.index(g) for g in genes_tu]
-        tu_gene_mtx[tu_idx, genes_tu_idx] = 1
-
-    tu_counts_mtx = np.stack(list(tu_dict_full.values())).transpose()
-
-    rna_counts_gene = np.matmul(tu_counts_mtx, tu_gene_mtx)
-
-    n_tp = int(params["n_tp"])
-
-    rna_counts_gene_blocksum, tp_idx = consolidate_timepoints(
-        rna_counts_gene, n_tp, normalized=True
-    )
-
-    tp_checkpoints = output_df["time"].values[tp_idx]
-
-    if params["time_unit"] == "minutes":
-        tp_checkpoints = tp_checkpoints / 60
-        tp_checkpoints = [round(x) for x in tp_checkpoints]
-
-    tp_columns = [str(i) + params["time_unit"][0] for i in tp_checkpoints]
-
-    ptools_rna = pd.DataFrame(
-        data=rna_counts_gene_blocksum.transpose(),
-        columns=tp_columns,
-        index=tu_genes_all,
-    )
-
-    ptools_rna.index.name = "$"
-
-    ptools_rna.to_csv(
+    wide_table.write_csv(
         os.path.join(outdir, "ptools_rna.txt"),
-        sep="\t",
-        index=True,
-        header=True,
-        float_format="%.4f",
+        separator="\t",
+        include_header=True,
+        float_precision=4,
     )
