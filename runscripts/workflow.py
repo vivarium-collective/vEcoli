@@ -1,9 +1,7 @@
-from dotenv.main import load_dotenv
 import argparse
 import json
 import os
 import pathlib
-from pprint import pp
 import random
 import shutil
 import subprocess
@@ -12,10 +10,8 @@ import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from urllib import parse
 from typing import Optional
-
-import dotenv
+from urllib import parse
 
 # Try to import fsspec, but make it optional
 try:
@@ -77,6 +73,76 @@ MULTIVARIANT_CHANNEL = """
 """
 
 
+def load_config_with_inheritance(config_path: str) -> dict:
+    """
+    Load a config file and recursively resolve all inheritance chains.
+
+    Priority order: Current config > First inherited > ... > Last inherited
+    If config A inherits from [B, D] and B inherits from [C]:
+    Priority is A > B > C > D
+
+    Args:
+        config_path: Path to the configuration file
+
+    Returns:
+        Fully resolved configuration dictionary
+    """
+    with open(config_path, "r") as f:
+        config = json.load(f)
+
+    if "inherit_from" not in config:
+        return config
+
+    # Build inheritance chain in reverse priority order (lowest to highest)
+    inherit_chain = []
+    for inherit_path in reversed(config["inherit_from"]):
+        # Recursively load inherited config
+        inherited = load_config_with_inheritance(
+            os.path.join(CONFIG_DIR_PATH, inherit_path)
+        )
+        inherit_chain.append(inherited)
+
+    # Start with empty base and apply configs from lowest to highest priority
+    result: dict = {}
+    for inherited_config in inherit_chain:
+        _merge_configs(result, inherited_config)
+
+    # Finally apply current config (highest priority)
+    _merge_configs(result, config)
+
+    return result
+
+
+def _merge_configs(base_config: dict, overlay_config: dict):
+    """
+    Merge overlay_config into base_config, with overlay taking priority.
+    Mutates base_config in place.
+
+    Args:
+        base_config: Configuration to update (lower priority)
+        overlay_config: Configuration to merge in (higher priority)
+    """
+    for key, value in overlay_config.items():
+        if key in LIST_KEYS_TO_MERGE:
+            # For list keys, concatenate and deduplicate
+            base_config.setdefault(key, [])
+            base_config[key].extend(value)
+            if key == "engine_process_reports":
+                base_config[key] = [tuple(path) for path in base_config[key]]
+            # Remove duplicates and sort
+            base_config[key] = sorted(list(set(base_config[key])))
+        elif (
+            isinstance(value, dict)
+            and key in base_config
+            and isinstance(base_config[key], dict)
+        ):
+            # Recursively merge nested dictionaries
+            _merge_configs(base_config[key], value)
+        else:
+            # Overlay value takes priority
+            base_config[key] = value
+
+
 def parse_uri(uri: str) -> tuple[Optional["AbstractFileSystem"], str]:
     """
     Parse URI and return appropriate filesystem and path.
@@ -115,11 +181,11 @@ def generate_colony(seeds: int):
 
 
 def generate_lineage(
-        seed: int,
-        n_init_sims: int,
-        generations: int,
-        single_daughters: bool,
-        analysis_config: dict[str, dict[str, dict]],
+    seed: int,
+    n_init_sims: int,
+    generations: int,
+    single_daughters: bool,
+    analysis_config: dict[str, dict[str, dict]],
 ):
     """
     Create strings to import and compose Nextflow processes for lineage sims:
@@ -193,7 +259,7 @@ def generate_lineage(
     else:
         sim_workflow.append(f"\t{all_sim_tasks[0]}.set {{ simCh }}")
 
-    sims_per_seed = generations if single_daughters else 2 ** generations - 1
+    sims_per_seed = generations if single_daughters else 2**generations - 1
 
     if analysis_config.get("multivariant", False):
         # Channel that groups all sim tasks
@@ -233,7 +299,7 @@ def generate_lineage(
         # Channel that groups sim tasks by variant sim_data, initial seed, and generation
         # When simulating both daughters, will have >1 cell for generation >1
         gen_size = (
-                "[" + ", ".join([f"{g + 1}: {2 ** g}" for g in range(generations)]) + "]"
+            "[" + ", ".join([f"{g + 1}: {2**g}" for g in range(generations)]) + "]"
         )
         sim_workflow.append(MULTIDAUGHTER_CHANNEL.format(gen_size=gen_size))
         sim_workflow.append(
@@ -300,7 +366,7 @@ def build_image_cmd(image_name, apptainer=False) -> list[str]:
 
 
 def copy_to_filesystem(
-        source: str, dest: str, filesystem: Optional["AbstractFileSystem"] = None
+    source: str, dest: str, filesystem: Optional["AbstractFileSystem"] = None
 ):
     """
     Robustly copy the contents of a local source file to a destination path.
@@ -363,34 +429,21 @@ def main():
         type=str,
         default=None,
         help="Resume workflow with given experiment ID. The experiment ID must "
-             "match the supplied configuration file and if suffix_time was used, must "
-             "contain the full time suffix (suffix_time will not be applied again).",
+        "match the supplied configuration file and if suffix_time was used, must "
+        "contain the full time suffix (suffix_time will not be applied again).",
     )
     parser.add_argument(
         "--build-only",
         action="store_true",
         default=False,
         help="Only build workflow files (main.nf, nextflow.config, workflow_config.json) "
-             "without executing the workflow. Temp files are preserved for inspection.",
+        "without executing the workflow. Temp files are preserved for inspection.",
     )
     args = parser.parse_args()
-    with open(config_file, "r") as f:
-        config = json.load(f)
-    if args.config is not None:
-        config_file = args.config
-        with open(args.config, "r") as f:
-            user_config = json.load(f)
-            for key in LIST_KEYS_TO_MERGE:
-                user_config.setdefault(key, [])
-                user_config[key].extend(config.get(key, []))
-                if key == "engine_process_reports":
-                    user_config[key] = [tuple(path) for path in user_config[key]]
-                # Ensures there are no duplicates in d2
-                user_config[key] = list(set(user_config[key]))
-                user_config[key].sort()
-            merge_dicts(config, user_config)
+    config = load_config_with_inheritance(config_file)
+    user_config = load_config_with_inheritance(args.config)
+    _merge_configs(config, user_config)
 
-    # >> parse config ((entrypoint args))
     experiment_id = config["experiment_id"]
     if experiment_id is None:
         raise RuntimeError("No experiment ID was provided.")
@@ -431,9 +484,8 @@ def main():
     if config["sim_data_path"] is not None:
         config["sim_data_path"] = os.path.abspath(config["sim_data_path"])
     # Use random seed for Jenkins CI runs
-    if config.get("sherlock", {}).get("jenkins", False) \
-            or config.get("ccam", {}).get("wait", False):
-        config["lineage_seed"] = random.randint(0, 2 ** 31 - 1)
+    if config.get("sherlock", {}).get("jenkins", False):
+        config["lineage_seed"] = random.randint(0, 2**31 - 1)
     filesystem, outdir = parse_uri(out_uri)
     outdir = os.path.join(outdir, experiment_id, "nextflow")
     exp_outdir = os.path.dirname(outdir)
@@ -476,13 +528,17 @@ def main():
         "PUBLISH_DIR", os.path.dirname(os.path.dirname(out_uri))
     )
     nf_config = nf_config.replace("PARCA_CPUS", str(config["parca_options"]["cpus"]))
+    nf_config = nf_config.replace(
+        "ANALYSIS_CPUS", str(config["analysis_options"]["cpus"])
+    )
+    nf_config = nf_config.replace(
+        "ANALYSIS_MEM", str(config["analysis_options"]["memory_gb"])
+    )
 
-    # >> set nextflow profile ((config))
     # By default, assume running on local device
     nf_profile = "standard"
     # If not running on a local device, build container images according
     # to options under gcloud or sherlock configuration keys
-    # gcloud config
     cloud_config = config.get("gcloud", None)
     if cloud_config is not None:
         nf_profile = "gcloud"
@@ -502,7 +558,6 @@ def main():
             image_cmd = build_image_cmd(container_image)
             subprocess.run(image_cmd, check=True)
         nf_config = nf_config.replace("IMAGE_NAME", image_prefix + container_image)
-    # sherlock config
     sherlock_config = config.get("sherlock", None)
     if sherlock_config is not None:
         if nf_profile == "gcloud":
@@ -512,7 +567,7 @@ def main():
         nf_profile = "sherlock"
         # Suggest that users turn off background thread for Parquet emitter
         if config["emitter"] == "parquet" and config["emitter_arg"].get(
-                "threaded", True
+            "threaded", True
         ):
             warnings.warn(
                 "Using a background thread in the Parquet emitter may degrade "
@@ -557,7 +612,6 @@ def main():
                 log_path.unlink()
         nf_config = nf_config.replace("IMAGE_NAME", container_image)
 
-    _ = load_dotenv(".hpc_env")
     # =========================================== ccam init ====================================================== #
     # NOTE: this is what will run on the HPC, thus os.getcwd() == $HOME/$IMAGE_DIR where $HOME is ccam $USER home
     # TODO: formalize ccam config data model
@@ -605,7 +659,8 @@ def main():
             # slurm_job_log_file = pathlib.Path(os.getenv('SLURM_LOG_BASE_PATH')) / log_filename
 
             with open(image_build_script, "w") as f:
-                f.write(textwrap.dedent(f""" \
+                f.write(
+                    textwrap.dedent(f""" \
                     #!/bin/bash
                     #SBATCH --job-name="build-image-{experiment_id}"
                     #SBATCH --time=30:00
@@ -615,7 +670,8 @@ def main():
                     #SBATCH --wait
                     #SBATCH --output={log_file}
                     {image_cmd}
-                """))
+                """)
+                )
             # Create empty log file for thread to stream from
             log_path = pathlib.Path(log_file)
             log_path.touch(exist_ok=True)
@@ -681,7 +737,8 @@ def main():
             # _ = dotenv.load_dotenv(ccam_env_path)
             # slurm_job_log_file = pathlib.Path(os.getenv('SLURM_LOG_BASE_PATH')) / log_filename
             with open(image_build_script, "w") as f:
-                f.write(textwrap.dedent(f""" \
+                f.write(
+                    textwrap.dedent(f""" \
                     #!/bin/bash
                     #SBATCH --job-name="build-image-{experiment_id}"
                     #SBATCH --time=30:00
@@ -691,7 +748,8 @@ def main():
                     #SBATCH --wait
                     #SBATCH --output={log_file}
                     {image_cmd}
-                """))
+                """)
+                )
             # Create empty log file for thread to stream from
             log_path = pathlib.Path(log_file)
             log_path.touch(exist_ok=True)
@@ -735,10 +793,10 @@ def main():
     # If build-only mode, skip execution and preserve temp files
     if args.build_only:
         print(f"Build-only mode: files generated in {local_outdir}")
-        print(f"  - main.nf")
-        print(f"  - nextflow.config")
-        print(f"  - workflow_config.json")
-        print(f"Output directory: {outdir}")
+        print("  - main.nf")
+        print("  - nextflow.config")
+        print("  - workflow_config.json")
+        print("Output directory: {outdir}")
         return local_outdir
 
     # Start nextflow workflow
@@ -759,7 +817,6 @@ def main():
                 "Please move, delete, or rename it, then run with --resume again."
             )
     workdir = os.path.join(out_uri, "nextflow_workdirs")
-    # execute standard (no explicit config) or gcloud
     if nf_profile == "standard" or nf_profile == "gcloud":
         subprocess.run(
             [
@@ -778,41 +835,40 @@ def main():
             ],
             check=True,
         )
-    # execute sherlock
     elif nf_profile == "sherlock":
         batch_script = os.path.join(local_outdir, "nextflow_job.sh")
         hyperqueue_init = ""
         hyperqueue_exit = ""
         if sherlock_config.get("hyperqueue", False):
             nf_profile = "sherlock_hq"
-            hyperqueue_init = textwrap.dedent(""" \
-                # Set the directory which HyperQueue will use 
-                export HQ_SERVER_DIR={os.path.join(outdir, ".hq-server")}
-                mkdir -p ${{HQ_SERVER_DIR}}
+            hyperqueue_init = f"""
+# Set the directory which HyperQueue will use 
+export HQ_SERVER_DIR={os.path.join(outdir, ".hq-server")}
+mkdir -p ${{HQ_SERVER_DIR}}
 
-                # Start the server in the background (&) and wait until it has started
-                hq server start --journal {os.path.join(outdir, ".hq-server/journal")} &
-                until hq job list &>/dev/null ; do sleep 1 ; done
-            """)
+# Start the server in the background (&) and wait until it has started
+hq server start --journal {os.path.join(outdir, ".hq-server/journal")} &
+until hq job list &>/dev/null ; do sleep 1 ; done
+
+"""
             hyperqueue_exit = "hq job wait all; hq worker stop all; hq server stop"
         nf_slurm_output = os.path.join(outdir, f"{experiment_id}_slurm.out")
         with open(batch_script, "w") as f:
-            f.write(textwrap.dedent(f""" \
-                #!/bin/bash
-                #SBATCH --job-name="nf-{experiment_id}"
-                #SBATCH --time=7-00:00:00
-                #SBATCH --cpus-per-task 1
-                #SBATCH --mem=4GB
-                #SBATCH --partition=mcovert
-                #SBATCH --output={nf_slurm_output}
-                {"#SBATCH --wait" if sherlock_config.get("jenkins", False) else ""}
-                set -e
-                # Ensure HyperQueue shutdown on failure or interruption
-                trap 'exitcode=$?; {hyperqueue_exit}' EXIT
-                {hyperqueue_init}
-                nextflow -C {config_path} run {workflow_path} -profile {nf_profile} \
-                    -with-report {report_path} -work-dir {workdir} {"-resume" if args.resume is not None else ""}
-            """))
+            f.write(f"""#!/bin/bash
+#SBATCH --job-name="nf-{experiment_id}"
+#SBATCH --time=7-00:00:00
+#SBATCH --cpus-per-task 1
+#SBATCH --mem=4GB
+#SBATCH --partition=mcovert
+#SBATCH --output={nf_slurm_output}
+{"#SBATCH --wait" if sherlock_config.get("jenkins", False) else ""}
+set -e
+# Ensure HyperQueue shutdown on failure or interruption
+trap 'exitcode=$?; {hyperqueue_exit}' EXIT
+{hyperqueue_init}
+nextflow -C {config_path} run {workflow_path} -profile {nf_profile} \
+    -with-report {report_path} -work-dir {workdir} {"-resume" if args.resume is not None else ""}
+""")
         copy_to_filesystem(
             batch_script, os.path.join(outdir, "nextflow_job.sh"), filesystem
         )
@@ -839,20 +895,21 @@ def main():
 
         if slurm_partition is None or slurm_qos is None or slurm_node_list is None:
             raise RuntimeError(
-                "You must set the following environment variables for the ccam profile: SLURM_PARTITION, SLURM_QOS, SLURM_NODE_LIST")
+                "You must set the following environment variables for the ccam profile: SLURM_PARTITION, SLURM_QOS, SLURM_NODE_LIST"
+            )
         else:
             qos_clause = f"#SBATCH --qos={slurm_qos}"
             nodelist_clause = f"#SBATCH --nodelist={slurm_node_list}"
 
         batch_script = os.path.join(local_outdir, "nextflow_job.sh")
         # NOTE: "outdir" here refers to whatever has been specified in the config JSON
-        slurm_log_base_path = os.getenv('SLURM_LOG_BASE_PATH')
+        slurm_log_base_path = os.getenv("SLURM_LOG_BASE_PATH")
         if not slurm_log_base_path:
             raise OSError(
-                '''For now, you must provide a SLURM_LOG_BASE_PATH environment variable if using the ccam profile'''
+                """For now, you must provide a SLURM_LOG_BASE_PATH environment variable if using the ccam profile"""
             )
         slurm_job_name = f"nf-{experiment_id}"
-        slurm_qos = os.getenv('SLURM_QOS', '')
+        slurm_qos = os.getenv("SLURM_QOS", "")
 
         slurm_job_outfile = pathlib.Path(slurm_log_base_path) / f"{slurm_job_name}.out"
         slurm_job_errfile = pathlib.Path(slurm_log_base_path) / f"{slurm_job_name}.err"
@@ -884,30 +941,7 @@ def main():
         copy_to_filesystem(
             batch_script, os.path.join(outdir, "nextflow_job.sh"), filesystem
         )
-
-        # If direct mode, run Nextflow directly (useful when already inside a SLURM job)
-        if ccam_config.get("direct", False):
-            print("Running Nextflow directly (direct mode)...")
-            # Set up environment
-            java_home = os.path.expanduser("~/.local/bin/java-22")
-            env = os.environ.copy()
-            env["JAVA_HOME"] = java_home
-            env["PATH"] = f"{java_home}/bin:{os.path.expanduser('~/.local/bin')}:{env.get('PATH', '')}"
-
-            # Build nextflow command
-            nf_cmd = [
-                "nextflow", "-C", config_path, "run", workflow_path,
-                "-profile", nf_profile,
-                "-with-report", report_path,
-                "-work-dir", workdir
-            ]
-            if args.resume is not None:
-                nf_cmd.append("-resume")
-
-            print(f"Nextflow command: {' '.join(nf_cmd)}")
-            subprocess.run(nf_cmd, check=True, env=env)
-        else:
-            subprocess.run(["sbatch", batch_script], check=True)
+        subprocess.run(["sbatch", batch_script], check=True)
     # =============================================================================================================== #
 
     # ============================================ aws_cdk run ===================================================== #
@@ -916,13 +950,14 @@ def main():
         slurm_partition = os.getenv("SLURM_PARTITION")
         if slurm_partition is None:
             raise RuntimeError(
-                "You must set the following environment variables for the aws_cdk profile: SLURM_PARTITION")
+                "You must set the following environment variables for the aws_cdk profile: SLURM_PARTITION"
+            )
         batch_script = os.path.join(local_outdir, "nextflow_job.sh")
         # NOTE: "outdir" here refers to whatever has been specified in the config JSON
-        slurm_log_base_path = os.getenv('SLURM_LOG_BASE_PATH')
+        slurm_log_base_path = os.getenv("SLURM_LOG_BASE_PATH")
         if not slurm_log_base_path:
             raise OSError(
-                '''For now, you must provide a SLURM_LOG_BASE_PATH environment variable if using the aws_cdk profile'''
+                """For now, you must provide a SLURM_LOG_BASE_PATH environment variable if using the aws_cdk profile"""
             )
         slurm_job_name = f"nf-{experiment_id}"
         slurm_job_outfile = pathlib.Path(slurm_log_base_path) / f"{slurm_job_name}.out"
