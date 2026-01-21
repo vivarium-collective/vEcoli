@@ -27,7 +27,7 @@ process simGen0 {
     touch daughter_state_1.json
     touch division_time.sh
     # Use 1 Polars thread to avoid oversubscription on HPC/cloud
-    POLARS_MAX_THREADS=1 python ${params.projectRoot}/ecoli/experiments/ecoli_master_sim.py \\
+    PYTHONUNBUFFERED=1 POLARS_MAX_THREADS=1 python ${params.projectRoot}/ecoli/experiments/ecoli_master_sim.py \\
         --config $config \\
         --sim_data_path $sim_data \\
         --daughter_outdir "\$(pwd)" \\
@@ -77,7 +77,7 @@ process sim {
     touch daughter_state_1.json
     touch division_time.sh
     # Use 1 Polars thread to avoid oversubscription on HPC/cloud
-    POLARS_MAX_THREADS=1 python ${params.projectRoot}/ecoli/experiments/ecoli_master_sim.py \\
+    PYTHONUNBUFFERED=1 POLARS_MAX_THREADS=1 python ${params.projectRoot}/ecoli/experiments/ecoli_master_sim.py \\
         --config $config \\
         --sim_data_path $sim_data \\
         --initial_state_file ${initial_state.getBaseName()} \\

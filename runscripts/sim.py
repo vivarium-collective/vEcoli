@@ -1,4 +1,5 @@
 import os
+import signal
 import sys
 import subprocess
 
@@ -17,7 +18,12 @@ def main():
     cmd = [sys.executable, script_path] + sys.argv[1:]
     # Execute and forward exit code
     proc = subprocess.Popen(cmd)
-    proc.wait()
+    try:
+        proc.wait()
+    # Ensure emits are finalized even if wrapper is interrupted
+    finally:
+        proc.send_signal(signal.SIGINT)
+        proc.wait()
     return proc.returncode
 
 

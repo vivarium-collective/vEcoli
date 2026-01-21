@@ -3,6 +3,8 @@ params {
     experimentId = 'EXPERIMENT_ID'
     config = 'CONFIG_FILE'
     parca_cpus = PARCA_CPUS
+    analysis_cpus = ANALYSIS_CPUS
+    analysis_mem = ANALYSIS_MEM
     publishDir = 'PUBLISH_DIR'
     container_image = 'IMAGE_NAME'
     hyperqueue = false
@@ -18,20 +20,36 @@ trace.file = "trace--${params.experimentId}--" + new java.text.SimpleDateFormat(
 profiles {
     gcloud {
         process {
+            // T2D standard VMs only come in powers of 2 multiples of 1 CPU / 4 GB RAM
             withLabel: parca {
                 cpus = params.parca_cpus
                 memory = params.parca_cpus * 2.GB
             }
+            withLabel: analysis {
+                cpus = params.analysis_cpus
+                memory = {
+                    if ( task.exitStatus == 137 ) {
+                        1.GB * params.analysis_mem * task.attempt
+                    } else {
+                        1.GB * params.analysis_mem
+                    }
+                }
+            }
             errorStrategy = {
-                // Codes: 50001 - 50006 (Google Batch task fail:
+                // Codes: 137 (out-of-memory), 50001 - 50006 (Google Batch task fail:
                 // https://cloud.google.com/batch/docs/troubleshooting#reserved-exit-codes)
-                ((task.exitStatus >= 50001 && task.exitStatus <= 50006)
+                (((task.exitStatus == 137) || (task.exitStatus >= 50001 && task.exitStatus <= 50006))
                 && (task.attempt <= process.maxRetries)) ? 'retry' : 'ignore'
             }
-            memory = 4.GB
-            maxRetries = 1
-            // Using single core is slightly slower but much cheaper
-            cpus = 1
+            // VM scaling with retries:
+            // Baseline: t2d-standard-1 (1 core, 4GB RAM)
+            // Retry 1: t2d-standard-2 (2 cores, 8GB RAM)
+            // Retry 2: t2d-standard-4 (4 cores, 16GB RAM)
+            //   - Only 3 cores, 12GB RAM requested
+            // Retry 3: t2d-standard-4 (4 cores, 16GB RAM)
+            memory = { 4.GB * task.attempt }
+            maxRetries = 3
+            cpus = { task.attempt }
             executor = 'google-batch'
             container = params.container_image
             // Necessary otherwise symlinks to other files in bucket can break
@@ -40,7 +58,7 @@ profiles {
             machineType = {
                 def cpus = task.cpus
                 def powerOf2 = 1
-                while (powerOf2 < cpus && powerOf2 < 64) {
+                while (((powerOf2 < cpus) || ((powerOf2 * 4).GB < task.memory)) && powerOf2 < 64) {
                     powerOf2 *= 2
                 }
                 return "t2d-standard-${powerOf2}"
@@ -79,6 +97,16 @@ profiles {
                         1.h * task.attempt
                     } else {
                         1.h
+                    }
+                }
+            }
+            withLabel: analysis {
+                cpus = params.analysis_cpus
+                memory = {
+                    if ( task.exitStatus in [137, 140] ) {
+                        1.GB * params.analysis_mem * task.attempt
+                    } else {
+                        1.GB * params.analysis_mem
                     }
                 }
             }
@@ -153,10 +181,22 @@ profiles {
             }
             // Creating variants happens before the HyperQueue workers
             // are allocated and requires a separate SLURM job
-            // Analyses do not hold up the workflow and can be
-            // scheduled on separate SLURM jobs to keep the HyperQueue
-            // workers fully focused on running simulations
             withLabel: slurm_submit {
+                executor = 'slurm'
+                queue = 'owners,normal'
+                clusterOptions = ''
+            }
+            // Schedule analyses on separate SLURM jobs to avoid
+            // stalling sims and allow custom resource requests
+            withLabel: analysis {
+                cpus = params.analysis_cpus
+                memory = {
+                    if ( task.exitStatus in [137, 140] ) {
+                        1.GB * params.analysis_mem * task.attempt
+                    } else {
+                        1.GB * params.analysis_mem
+                    }
+                }
                 executor = 'slurm'
                 queue = 'owners,normal'
                 clusterOptions = ''
@@ -202,6 +242,10 @@ profiles {
                 cpus = params.parca_cpus
                 memory = params.parca_cpus * 2.GB
             }
+            withLabel: analysis {
+                cpus = params.analysis_cpus
+                memory = params.analysis_mem * 1.GB
+            }
             executor = 'local'
             errorStrategy = 'ignore'
         }
@@ -217,6 +261,16 @@ profiles {
                         1.h * task.attempt
                     } else {
                         1.h
+                    }
+                }
+            }
+            withLabel: analysis {
+                cpus = params.analysis_cpus
+                memory = {
+                    if ( task.exitStatus in [137, 140] ) {
+                        1.GB * params.analysis_mem * task.attempt
+                    } else {
+                        1.GB * params.analysis_mem
                     }
                 }
             }
@@ -271,6 +325,16 @@ profiles {
                         1.h * task.attempt
                     } else {
                         1.h
+                    }
+                }
+            }
+            withLabel: analysis {
+                cpus = params.analysis_cpus
+                memory = {
+                    if ( task.exitStatus in [137, 140] ) {
+                        1.GB * params.analysis_mem * task.attempt
+                    } else {
+                        1.GB * params.analysis_mem
                     }
                 }
             }
