@@ -3,16 +3,13 @@ from typing import Any, cast
 
 from duckdb import DuckDBPyConnection
 import polars as pl
-import pickle
 
 from ecoli.library.parquet_emitter import (
     field_metadata,
-    open_arbitrary_sim_data,
     read_stacked_columns,
 )
 
 from ecoli.analysis.single.ptools_rna import build_query
-from reconstruction.ecoli.simulation_data import SimulationDataEcoli
 
 
 def plot(
@@ -27,18 +24,17 @@ def plot(
     variant_metadata: dict[str, dict[int, Any]],
     variant_names: dict[str, str],
 ):
-    if not params.get("time_unit") or params["time_unit"] not in ["minutes", "seconds"]:
-        params["time_unit"] = "minutes"
+    time_unit = params.get("time_unit", "minutes")
+    if time_unit not in ["seconds", "minutes"]:
+        time_unit = "minutes"
 
-    with open_arbitrary_sim_data(sim_data_paths) as f:
-        sim_data: "SimulationDataEcoli" = pickle.load(f)
     monomer_ids = field_metadata(conn, config_sql, "listeners__monomer_counts")
     monomer_subquery = cast(
         str,
         read_stacked_columns(
             history_sql,
             ["listeners__monomer_counts"],
-            remove_first=True,
+            remove_first=False,
             order_results=False,
         ),
     )
@@ -49,23 +45,7 @@ def plot(
         params.get("n_tp", 5),
     )
     data = conn.sql(monomer_sql).pl()
-    cistron_id_to_gene_id = {
-        cistron["id"]: cistron["gene_id"]
-        for cistron in sim_data.process.transcription.cistron_data
-    }
-    monomer_sim_data = sim_data.process.translation.monomer_data.struct_array
-    monomer_to_gene_id = cast(
-        dict[str, str],
-        {
-            monomer_id: cistron_id_to_gene_id[cistron_id]
-            for cistron_id, monomer_id in zip(
-                monomer_sim_data["cistron_id"], monomer_sim_data["id"]
-            )
-        },
-    )
-    gene_ids = [monomer_to_gene_id[monomer_id] for monomer_id in monomer_ids]
 
-    time_unit = params["time_unit"]
     if time_unit == "minutes":
         data = data.with_columns(
             [
@@ -77,18 +57,19 @@ def plot(
     timepoint_cols = [
         str(int(start_time)) for start_time in data["bin_start"].to_list()
     ]
+    protein_labels = [monomer[:-3] for monomer in monomer_ids]
     counts_df = data.select(
-        pl.col("monomer_counts").list.to_struct(fields=gene_ids)
+        pl.col("monomer_counts").list.to_struct(fields=protein_labels)
     ).unnest("monomer_counts")
 
     wide_table = counts_df.transpose(
         include_header=True,
-        header_name="gene_id",
+        header_name="$",
         column_names=timepoint_cols,
     )
 
     wide_table.write_csv(
-        os.path.join(outdir, "ptools_proteins.txt"),
+        os.path.join(outdir, "ptools_proteins.tsv"),
         separator="\t",
         include_header=True,
         float_precision=4,

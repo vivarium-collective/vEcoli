@@ -13,33 +13,6 @@ from ecoli.library.parquet_emitter import (
 from reconstruction.ecoli.simulation_data import SimulationDataEcoli
 
 
-RNAS_SQL = """
--- Create RNA counts list of mRNAs, tRNAs, and rRNAs (in order)
-(
-    -- mRNA
-    h.listeners__rna_counts__mRNA_cistron_counts +
-    -- tRNA = charged + uncharged
-    [
-        trna[1] + trna[2]
-        FOR trna IN list_zip(charged_tRNAs, uncharged_tRNAs)
-    ] +
-    -- First rRNA = bulk + active ribosome + small subunit
-    [
-        rRNAs[1] + 
-        h.listeners__unique_molecule_counts__active_ribosome +
-        ribo_subunits[1]
-    ] +
-    -- Remaining rRNAs = bulk + active ribosome + large subunit
-    [
-        rrna_count +
-        h.listeners__unique_molecule_counts__active_ribosome +
-        ribo_subunits[2]
-        FOR rrna_count IN rRNAs[2:]
-    ]
-)
-"""
-
-
 def build_query(
     list_col: dict[str, str],
     add_cols: dict[str, str],
@@ -134,11 +107,6 @@ def plot(
     variant_metadata: dict[str, dict[int, Any]],
     variant_names: dict[str, str],
 ):
-    if not params.get("time_unit"):
-        params["time_unit"] = "minutes"
-    elif params["time_unit"] not in ["minutes", "seconds"]:
-        params["time_unit"] = "minutes"
-
     # Load tables and attributes for mRNAs
     mRNA_ids = field_metadata(
         conn, config_sql, "listeners__rna_counts__mRNA_cistron_counts"
@@ -167,7 +135,6 @@ def plot(
         sim_data.molecule_ids.s50_full_complex,
     ]
     ribo_subunit_idx = [bulk_id_to_idx[ribo] for ribo in ribosomal_subunit_ids]
-    # Filter out first timestep for each cell because counts_to_molar is 0
     rna_subquery = cast(
         str,
         read_stacked_columns(
@@ -179,15 +146,41 @@ def plot(
                 f"list_select(bulk, {rRNA_idx}) AS rRNAs, "
                 f"list_select(bulk, {ribo_subunit_idx}) AS ribo_subunits",
                 "listeners__unique_molecule_counts__active_ribosome",
-                "listeners__rna_counts__mRNA_cistron_counts as mrna_counts",
+                "listeners__rna_counts__mRNA_cistron_counts",
             ],
             remove_first=False,
             order_results=False,
         ),
     )
+    rna_query = f"""SELECT
+        -- Create RNA counts list of mRNAs, tRNAs, and rRNAs (in order)
+        (
+            -- mRNA
+            listeners__rna_counts__mRNA_cistron_counts +
+            -- tRNA = charged + uncharged
+            [
+                trna[1] + trna[2]
+                FOR trna IN list_zip(charged_tRNAs, uncharged_tRNAs)
+            ] +
+            -- First rRNA = bulk + active ribosome + small subunit
+            [
+                rRNAs[1] +
+                listeners__unique_molecule_counts__active_ribosome +
+                ribo_subunits[1]
+            ] +
+            -- Remaining rRNAs = bulk + active ribosome + large subunit
+            [
+                rrna_count +
+                listeners__unique_molecule_counts__active_ribosome +
+                ribo_subunits[2]
+                FOR rrna_count IN rRNAs[2:]
+            ]
+        ) AS rna_counts, time
+        FROM ({rna_subquery})
+    """
     # specify parquet columns
-    list_col = {"mrna_counts": "mrna_counts"}
-    query_sql = build_query(list_col, {}, rna_subquery)
+    list_col = {"rna_counts": "rna_counts"}
+    query_sql = build_query(list_col, {}, rna_query, params.get("n_tp", 5))
     data = conn.sql(query_sql).pl()
 
     # Retrieve gene copy numbers in order of RNA counts
@@ -204,9 +197,9 @@ def plot(
     ]
 
     # Pivot aggregated counts into gene-by-time matrix via Polars operations
-    time_unit = params.get("time_unit", "seconds")
+    time_unit = params.get("time_unit", "minutes")
     if time_unit not in ["seconds", "minutes"]:
-        time_unit = "seconds"
+        time_unit = "minutes"
     if time_unit == "minutes":
         data = data.with_columns(
             [
@@ -218,17 +211,17 @@ def plot(
         str(int(start_time)) for start_time in data["bin_start"].to_list()
     ]
     counts_df = data.select(
-        pl.col("mrna_counts").list.to_struct(fields=gene_ids)
-    ).unnest("mrna_counts")
+        pl.col("rna_counts").list.to_struct(fields=gene_ids)
+    ).unnest("rna_counts")
 
     wide_table = counts_df.transpose(
         include_header=True,
-        header_name="gene_id",
+        header_name="$",
         column_names=timepoint_cols,
     )
 
     wide_table.write_csv(
-        os.path.join(outdir, "ptools_rna.txt"),
+        os.path.join(outdir, "ptools_rna.tsv"),
         separator="\t",
         include_header=True,
         float_precision=4,

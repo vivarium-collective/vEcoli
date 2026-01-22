@@ -21,6 +21,10 @@ def plot(
     variant_metadata: dict[str, dict[int, Any]],
     variant_names: dict[str, str],
 ):
+    time_unit = params.get("time_unit", "minutes")
+    if time_unit not in ["seconds", "minutes"]:
+        time_unit = "minutes"
+
     rxn_ids = field_metadata(
         conn, config_sql, "listeners__fba_results__base_reaction_fluxes"
     )
@@ -32,10 +36,6 @@ def plot(
     )
     data = conn.sql(rxns_query).pl()
 
-    time_unit = params.get("time_unit", "seconds")
-    if time_unit not in ["seconds", "minutes"]:
-        time_unit = "seconds"
-
     if time_unit == "minutes":
         data = data.with_columns(
             [
@@ -43,6 +43,10 @@ def plot(
                 (pl.col("bin_end") / 60).alias("bin_end"),
             ]
         )
+
+    data = data.with_columns(
+        pl.col("reaction_fluxes").list.eval(pl.element().abs()).alias("reaction_fluxes")
+    )
 
     timepoint_cols = [
         str(int(start_time)) for start_time in data["bin_start"].to_list()
@@ -53,12 +57,12 @@ def plot(
 
     wide_table = counts_df.transpose(
         include_header=True,
-        header_name="reaction_id",
+        header_name="$",
         column_names=timepoint_cols,
     )
 
     wide_table.write_csv(
-        os.path.join(outdir, "ptools_rxns.txt"),
+        os.path.join(outdir, "ptools_rxns.tsv"),
         separator="\t",
         include_header=True,
         float_precision=4,
