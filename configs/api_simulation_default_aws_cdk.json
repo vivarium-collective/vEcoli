@@ -1,0 +1,52 @@
+{
+    "experiment_id": "EXPERIMENT_ID_PLACEHOLDER",
+    "parca_options": {
+        "cpus": 6,
+        "outdir": "HPC_SIM_BASE_PATH_PLACEHOLDER",
+        "operons": true,
+        "ribosome_fitting": true,
+        "remove_rrna_operons": false,
+        "remove_rrff": false,
+        "stable_rrna": false,
+        "new_genes": "off",
+        "debug_parca": false,
+        "save_intermediates": false,
+        "intermediates_directory": "",
+        "variable_elongation_transcription": true,
+        "variable_elongation_translation": false
+    },
+    "sim_data_path": null,
+    "suffix_time": false,
+    "generations": 8,
+    "n_init_sims": 3,
+    "max_duration": 10800.0,
+    "initial_global_time": 0.0,
+    "time_step": 1.0,
+    "single_daughters": true,
+    "emitter": "parquet",
+    "emitter_arg": {
+        "out_dir": "HPC_SIM_BASE_PATH_PLACEHOLDER"
+    },
+    "analysis_options": {
+        "memory_gb": 8,
+        "multiseed": {
+            "ptools_rxns": {
+                "n_tp": 10
+            },
+            "ptools_rna": {
+                "n_tp": 10
+            },
+            "ptools_proteins": {
+                "n_tp": 10
+            },
+          "ecocyc_table": {},
+          "protein_counts_validation": {},
+          "ribosome_spacing": {},
+          "subgenerational_expression_table": {}
+        }
+    },
+    "aws_cdk": {
+        "build_image": false,
+        "container_image": "SIMULATOR_IMAGE_PATH_PLACEHOLDER"
+    }
+}
