@@ -28,6 +28,7 @@
         "out_dir": "HPC_SIM_BASE_PATH_PLACEHOLDER"
     },
     "analysis_options": {
+        "memory_gb": 8,
         "multiseed": {
             "ptools_rxns": {
                 "n_tp": 10
@@ -37,7 +38,11 @@
             },
             "ptools_proteins": {
                 "n_tp": 10
-            }
+            },
+          "ecocyc_table": {},
+          "protein_counts_validation": {},
+          "ribosome_spacing": {},
+          "subgenerational_expression_table": {}
         }
     },
     "ccam": {

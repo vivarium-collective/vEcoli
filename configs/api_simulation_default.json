@@ -28,6 +28,10 @@
         "out_dir": "HPC_SIM_BASE_PATH_PLACEHOLDER"
     },
     "analysis_options": {
+        "memory_gb": 8,
+        "single": {
+          "mass_fraction_summary": {}
+        },
         "multiseed": {
             "ptools_rxns": {
                 "n_tp": 10
