@@ -29,9 +29,6 @@
     },
     "analysis_options": {
         "memory_gb": 8,
-        "single": {
-          "mass_fraction_summary": {}
-        },
         "multiseed": {
             "ptools_rxns": {
                 "n_tp": 10
@@ -42,6 +39,32 @@
             "ptools_proteins": {
                 "n_tp": 10
             }
+        },
+        "multigeneration": {
+            "ptools_rxns": {
+                "n_tp": 10
+            },
+            "ptools_rna": {
+                "n_tp": 10
+            },
+            "ptools_proteins": {
+                "n_tp": 10
+            }
+        },
+        "single": {
+            "ptools_rxns": {
+                "n_tp": 10
+            },
+            "ptools_rna": {
+                "n_tp": 10
+            },
+            "ptools_proteins": {
+                "n_tp": 10
+            }
         }
-    }
+      },
+    "ccam": {
+        "build_image": false,
+        "container_image": "SIMULATOR_IMAGE_PATH_PLACEHOLDER"
+  }
 }
