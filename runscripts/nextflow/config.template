@@ -251,7 +251,7 @@ profiles {
         }
     }
     ccam {
-        // Nextflow configuration for Slurm executor
+        // Nextflow configuration for Slurm executor on CCAM HPC
         process {
             withLabel: parca {
                 cpus = params.parca_cpus
@@ -275,9 +275,9 @@ profiles {
                 }
             }
             executor = 'slurm'
-            queue = 'SLURM_QUEUE'
-            qos = 'SLURM_QOS'
-            clusterOptions = 'SLURM_CLUSTER_OPTIONS'
+            queue = 'vivarium'
+            qos = 'vivarium'
+            clusterOptions = ''
             cpus = 1
             memory = {
                 if ( task.exitStatus in [137, 140] ) {
@@ -303,15 +303,11 @@ profiles {
             containerOptions = "-B ${params.publishDir}:${params.publishDir} -B ${launchDir}:${launchDir}"
         }
 
-        // Use singularity (not apptainer) - apptainer is only a shell function on this cluster
         singularity.enabled = true
         params.projectRoot = '/vEcoli'
-
-        // Avoid getting queue status too frequently
         executor.queueStatInterval = '2 min'
         executor.pollInterval = '30 sec'
         executor.exitReadTimeout = '10 min'
-
         workflow.failOnIgnore = true
     }
     aws_cdk {
