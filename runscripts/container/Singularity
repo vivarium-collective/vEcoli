@@ -1,6 +1,5 @@
 Bootstrap: docker
-# From: ghcr.io/astral-sh/uv@sha256:1cc0392c8aad8026ef3922e3f997fff0f31e506b0ffe951afde2ba12728911b8
-From: ghcr.io/astral-sh/uv:python3.12-bookworm
+From: ghcr.io/astral-sh/uv@sha256:1cc0392c8aad8026ef3922e3f997fff0f31e506b0ffe951afde2ba12728911b8
 
 # Refer to Dockerfile for comments about build process. Apptainer does not
 # support layer caching which results in a much less interesting build file.
@@ -11,14 +10,6 @@ From: ghcr.io/astral-sh/uv:python3.12-bookworm
     export IMAGE_GIT_BRANCH="{{ git_branch }}"
     export IMAGE_TIMESTAMP="{{ timestamp }}"
     export UV_CACHE_DIR="/vEcoli/.uv_cache"
-    # Silence warning about cache and sync targets being on different filesystems
-    export UV_LINK_MODE="copy"
-    # Prevent uv dirs from being created in any locations that may overlap with
-    # host filesystems that Apptainer may automount
-    export UV_TOOL_DIR="/vEcoli/.uv_tools"
-    export UV_TOOL_BIN_DIR="/vEcoli/.uv_tools/bin"
-    export UV_PYTHON_INSTALL_DIR="/vEcoli/.uv_python"
-    export UV_PYTHON_BIN_DIR="/vEcoli/.uv_python/bin"
     # runscripts/container/build-image.sh has some custom logic to replace this
     # with the environment variables that are set in .env
     {{ dot_env_vars }}
@@ -41,12 +32,4 @@ From: ghcr.io/astral-sh/uv:python3.12-bookworm
     fi
     apt-get update && apt-get install -y gcc procps nano curl
     cd /vEcoli
-    # Silence warning about cache and sync targets being on different filesystems
-    export UV_LINK_MODE="copy"
-    # Prevent uv dirs from being created in any locations that may overlap with
-    # host filesystems that Apptainer may automount
-    export UV_TOOL_DIR="/vEcoli/.uv_tools"
-    export UV_TOOL_BIN_DIR="/vEcoli/.uv_tools/bin"
-    export UV_PYTHON_INSTALL_DIR="/vEcoli/.uv_python"
-    export UV_PYTHON_BIN_DIR="/vEcoli/.uv_python/bin"
-    UV_CACHE_DIR="/vEcoli/.uv_cache" UV_COMPILE_BYTECODE=1 uv sync --frozen
+    UV_CACHE_DIR="/vEcoli/.uv_cache" UV_COMPILE_BYTECODE=1 uv sync --frozen --no-cache
