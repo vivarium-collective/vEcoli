@@ -1,0 +1,28 @@
+{
+    "analysis_options": {
+        "experiment_id": [
+            "EXPERIMENT_ID_PLACEHOLDER"
+        ],
+        "variant_data_dir": [
+            "EXPERIMENT_OUTDIR_PLACEHOLDER/variant_sim_data"
+        ],
+        "validation_data_path": [
+            "EXPERIMENT_OUTDIR_PLACEHOLDER/parca/kb/validationData.cPickle"
+        ],
+        "outdir": "ANALYSIS_OUTDIR_PLACEHOLDER/ANALYSIS_NAME_PLACEHOLDER",
+        "multiseed": {
+            "ptools_rxns": {
+                "n_tp": 10
+            },
+            "ptools_rna": {
+                "n_tp": 10
+            },
+            "ptools_proteins": {
+                "n_tp": 10
+            }
+        }
+    },
+    "emitter_arg": {
+        "out_dir": "HPC_SIM_BASE_PATH_PLACEHOLDER"
+    }
+}
