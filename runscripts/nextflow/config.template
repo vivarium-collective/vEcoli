@@ -277,7 +277,7 @@ profiles {
             executor = 'slurm'
             queue = 'vivarium'
             qos = 'vivarium'
-            clusterOptions = ''
+            clusterOptions = '--constraint=cpu_amd'
             cpus = 1
             memory = {
                 if ( task.exitStatus in [137, 140] ) {
