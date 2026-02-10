@@ -27,42 +27,7 @@
     "emitter_arg": {
         "out_dir": "HPC_SIM_BASE_PATH_PLACEHOLDER"
     },
-    "analysis_options": {
-        "memory_gb": 8,
-        "multiseed": {
-            "ptools_rxns": {
-                "n_tp": 10
-            },
-            "ptools_rna": {
-                "n_tp": 10
-            },
-            "ptools_proteins": {
-                "n_tp": 10
-            }
-        },
-        "multigeneration": {
-            "ptools_rxns": {
-                "n_tp": 10
-            },
-            "ptools_rna": {
-                "n_tp": 10
-            },
-            "ptools_proteins": {
-                "n_tp": 10
-            }
-        },
-        "single": {
-            "ptools_rxns": {
-                "n_tp": 10
-            },
-            "ptools_rna": {
-                "n_tp": 10
-            },
-            "ptools_proteins": {
-                "n_tp": 10
-            }
-        }
-      },
+    "analysis_options": {},
     "ccam": {
         "build_image": false,
         "container_image": "SIMULATOR_IMAGE_PATH_PLACEHOLDER"
