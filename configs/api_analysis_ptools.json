@@ -9,18 +9,7 @@
         "validation_data_path": [
             "EXPERIMENT_OUTDIR_PLACEHOLDER/parca/kb/validationData.cPickle"
         ],
-        "outdir": "ANALYSIS_OUTDIR_PLACEHOLDER/ANALYSIS_NAME_PLACEHOLDER",
-        "multiseed": {
-            "ptools_rxns": {
-                "n_tp": 10
-            },
-            "ptools_rna": {
-                "n_tp": 10
-            },
-            "ptools_proteins": {
-                "n_tp": 10
-            }
-        }
+        "outdir": "ANALYSIS_OUTDIR_PLACEHOLDER/ANALYSIS_NAME_PLACEHOLDER"
     },
     "emitter_arg": {
         "out_dir": "HPC_SIM_BASE_PATH_PLACEHOLDER"
