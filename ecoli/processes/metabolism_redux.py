@@ -10,7 +10,7 @@ from unum import Unum
 import warnings
 from scipy.sparse import csr_matrix
 
-from vivarium.core.process import Step
+from ecoli.library.ecoli_step import EcoliStep as Step
 from vivarium.library.units import units as vivunits
 
 from ecoli.library.schema import numpy_schema, bulk_name_to_idx, listener_schema, counts
@@ -54,46 +54,107 @@ class MetabolismRedux(Step):
     name = NAME
     topology = TOPOLOGY
 
-    defaults = {
-        "stoich_dict": {},
-        "reaction_catalysts": {},
+    config_schema = {
+        'stoich_dict': 'map[list[string]]',
+        'reaction_catalysts': 'map[list[string]]',
         # TODO (Cyrus) -- get these passed in, subset of the stoichimetry
-        "kinetic_rates": [],
-        "media_id": "minimal",
-        "imports": {},
-        "concentration_updates": None,
-        "maintenance_reaction": {},
-        "nutrient_to_doubling_time": {},
-        "use_trna_charging": False,
-        "include_ppgpp": False,
-        "mechanistic_aa_transport": False,
-        "aa_targets_not_updated": set(),
-        "import_constraint_threshold": 0,
-        "exchange_molecules": [],
-        "non_growth_associated_maintenance": 8.39 * units.mmol / (units.g * units.h),
-        "avogadro": 6.02214076e23 / units.mol,
-        "cell_density": 1100 * units.g / units.L,
-        "dark_atp": 33.565052868380675 * units.mmol / units.g,
-        "cell_dry_mass_fraction": 0.3,
-        "get_biomass_as_concentrations": lambda doubling_time: {},
-        "ppgpp_id": "ppgpp",
-        "get_ppGpp_conc": lambda media: 0.0,
-        "exchange_data_from_media": lambda media: [],
-        "get_masses": lambda exchanges: [],
-        "doubling_time": 44.0 * units.min,
-        "amino_acid_ids": {},
-        "linked_metabolites": None,
-        "aa_exchange_names": [],
-        "removed_aa_uptake": [],
-        "seed": 0,
-        "base_reaction_ids": [],
-        "fba_reaction_ids_to_base_reaction_ids": [],
-        "constraints_to_disable": [],
-        "kinetic_objective_weight": 1e-7,
-        "kinetic_objective_weight_in_range": 1e-10,
-        "secretion_penalty_coeff": 1e-3,
-        "time_step": 1,
+        'kinetic_rates': {'_type': 'node', '_default': []},
+        'media_id': 'string{minimal}',
+        'imports': 'map[map[float]]',
+        'concentration_updates': {'_type': 'node', '_default': None},
+        'maintenance_reaction': 'map[float]',
+        'nutrient_to_doubling_time': 'map[unum]',
+        'use_trna_charging': 'boolean{false}',
+        'include_ppgpp': 'boolean{false}',
+        'mechanistic_aa_transport': 'boolean{false}',
+        'aa_targets_not_updated': {'_type': 'node', '_default': set()},
+        'import_constraint_threshold': 'integer{0}',
+        'exchange_molecules': 'list[string]',
+        'non_growth_associated_maintenance': {'_type': 'unum', '_default': 8.39 * units.mmol / (units.g * units.h)},
+        'avogadro': {'_type': 'unum', '_default': 6.02214076e23 / units.mol},
+        'cell_density': {'_type': 'unum', '_default': 1100 * units.g / units.L},
+        'dark_atp': {'_type': 'unum', '_default': 33.565052868380675 * units.mmol / units.g},
+        'cell_dry_mass_fraction': 'float{0.3}',
+        'get_biomass_as_concentrations': {'_type': 'method', '_default': lambda doubling_time: {}},
+        'ppgpp_id': 'string{ppgpp}',
+        'get_ppGpp_conc': {'_type': 'method', '_default': lambda media: 0.0},
+        'exchange_data_from_media': {'_type': 'method', '_default': lambda media: []},
+        'get_masses': {'_type': 'method', '_default': lambda exchanges: []},
+        'doubling_time': {'_type': 'unum', '_default': 44.0 * units.min},
+        'amino_acid_ids': 'map[string]',
+        'linked_metabolites': {'_type': 'node', '_default': None},
+        'aa_exchange_names': 'list[string]',
+        'removed_aa_uptake': 'list[string]',
+        'seed': 'integer{0}',
+        'base_reaction_ids': 'list[string]',
+        'fba_reaction_ids_to_base_reaction_ids': 'list[integer]',
+        'constraints_to_disable': 'list[string]',
+        'kinetic_objective_weight': 'float{1e-7}',
+        'kinetic_objective_weight_in_range': 'float{1e-10}',
+        'secretion_penalty_coeff': 'float{1e-3}',
+        'time_step': 'float{1.0}',
     }
+
+
+    def inputs(self):
+        return {
+            'bulk': 'bulk_array',
+            'bulk_total': 'bulk_array',
+            'environment': {
+                'media_id': 'string',
+                'exchange': 'map[integer]',
+                'exchange_data': {
+                    'constrained': 'map[float]',
+                    'unconstrained': 'list[string]',
+                },
+            },
+            'boundary': {
+                'external': 'map[float]',
+            },
+            'polypeptide_elongation': {
+                'aa_count_diff': 'list[float]',
+                'gtp_to_hydrolyze': 'integer',
+                'aa_exchange_rates': 'array[float]',
+            },
+            'listeners': {
+                'mass': {
+                    'cell_mass': 'float',
+                    'dry_mass': 'float',
+                    'rna_mass': 'float',
+                    'protein_mass': 'float',
+                },
+            },
+            'global_time': 'float',
+            'timestep': 'integer',
+            'next_update_time': 'float',
+        }
+
+    def outputs(self):
+        return {
+            'bulk': 'bulk_array',
+            'environment': {
+                'exchange': 'map[integer]',
+            },
+            'listeners': {
+                'fba_results': {
+                    'coefficient_values': 'list[float]',
+                    'reaction_fluxes': 'list[float]',
+                    'exchange_fluxes': 'map[float]',
+                    'objective_value': 'float',
+                    'shadow_prices': 'list[float]',
+                    'reduced_costs': 'list[float]',
+                    'target_kinetic_fluxes': 'list[float]',
+                    'actual_kinetic_fluxes': 'list[float]',
+                    'target_kinetic_bounds': 'list[float]',
+                },
+                'mass': {
+                    'cell_mass': 'float',
+                    'dry_mass': 'float',
+                },
+            },
+            'next_update_time': 'float',
+        }
+
 
     def __init__(self, parameters):
         super().__init__(parameters)
@@ -426,7 +487,7 @@ class MetabolismRedux(Step):
             return True
         return False
 
-    def next_update(self, timestep, states):
+    def update(self, states, interval=None):
         # Initialize indices
         if self.homeostatic_metabolite_idx is None:
             bulk_ids = states["bulk"]["id"]
@@ -572,7 +633,7 @@ class MetabolismRedux(Step):
             )
             aa_in_media[self.removed_aa_uptake] = False
             exchange_rates = (
-                states["polypeptide_elongation"]["aa_exchange_rates"] * timestep
+                states["polypeptide_elongation"]["aa_exchange_rates"] * self.timestep
             )
             aa_uptake_package = (
                 exchange_rates[aa_in_media],

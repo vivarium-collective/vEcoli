@@ -8,7 +8,7 @@ process priorities.
 """
 
 import numpy as np
-from vivarium.core.process import Step
+from ecoli.library.ecoli_step import EcoliStep as Step
 from typing import Any
 
 from ecoli.processes.registries import topology_registry
@@ -38,14 +38,42 @@ class NegativeCountsError(Exception):
 
 
 class Allocator(Step):
-    """Allocator Step"""
+    """Allocator Step
+
+    process-bigraph interface: reads request/bulk/allocator_rng,
+    writes allocate/request/listeners.
+    """
 
     name = NAME
     topology = TOPOLOGY
 
-    defaults: dict[str, Any] = {}
+    config_schema = {
+        'molecule_names': 'list[string]',
+        'process_names': 'list[string]',
+        'custom_priorities': 'map[integer]',
+        'seed': 'integer{0}',
+    }
 
     processes: dict[str, Any] = {}
+
+    def inputs(self):
+        return {
+            'request': 'map[map[list[integer]]]',
+            'bulk': 'bulk_array',
+            'allocator_rng': 'random_state',
+        }
+
+    def outputs(self):
+        return {
+            'allocate': 'map[map[list[integer]]]',
+            'request': 'map[map[list[integer]]]',
+            'listeners': {
+                'atp': {
+                    'atp_requested': 'list[integer]',
+                    'atp_allocated_initial': 'list[integer]',
+                },
+            },
+        }
 
     # Constructor
     def __init__(self, parameters=None):
@@ -119,7 +147,7 @@ class Allocator(Step):
         }
         return ports
 
-    def next_update(self, timestep, states):
+    def update(self, states, interval=None):
         if self.molecule_idx is None:
             self.molecule_idx = bulk_name_to_idx(
                 self.moleculeNames, states["bulk"]["id"]

@@ -1,6 +1,6 @@
 from scipy.constants import N_A
 
-from vivarium.core.process import Step
+from ecoli.library.ecoli_step import EcoliStep as Step
 from vivarium.library.units import units, Quantity
 from ecoli.library.schema import bulk_name_to_idx, numpy_schema, counts
 

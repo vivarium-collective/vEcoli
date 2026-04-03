@@ -9,7 +9,7 @@ Represents the total cellular mass.
 import numpy as np
 from numpy.lib import recfunctions as rfn
 
-from vivarium.core.process import Step
+from ecoli.library.ecoli_step import EcoliStep as Step
 from ecoli.library.schema import numpy_schema, counts, attrs, bulk_name_to_idx
 from ecoli.processes.registries import topology_registry
 from wholecell.utils import units
@@ -32,13 +32,13 @@ class MassListener(Step):
     name = NAME
     topology = TOPOLOGY
 
-    defaults = {
-        "cellDensity": 1100.0,
-        "bulk_ids": [],
-        "bulk_masses": np.zeros([1, 9]),
-        "unique_ids": [],
-        "unique_masses": np.zeros([1, 9]),
-        "submass_to_idx": {
+    config_schema = {
+        'cellDensity': {'_type': 'float', '_default': 1100.0},
+        'bulk_ids': 'list[string]',
+        'bulk_masses': {'_type': 'array[float]', '_default': None},
+        'unique_ids': 'list[string]',
+        'unique_masses': {'_type': 'array[float]', '_default': None},
+        'submass_to_idx': {'_type': 'map[integer]', '_default': {
             "rRNA": 0,
             "tRNA": 1,
             "mRNA": 2,
@@ -48,8 +48,8 @@ class MassListener(Step):
             "metabolite": 6,
             "water": 7,
             "DNA": 8,
-        },
-        "compartment_indices": {
+        }},
+        'compartment_indices': {'_type': 'map[list[integer]]', '_default': {
             "projection": [],
             "cytosol": [],
             "extracellular": [],
@@ -59,14 +59,69 @@ class MassListener(Step):
             "periplasm": [],
             "pilus": [],
             "inner_membrane": [],
-        },
-        "compartment_id_to_index": {},
-        "compartment_abbrev_to_index": {},
-        "n_avogadro": 6.0221409e23,  # 1/mol
-        "time_step": 1.0,
-        "emit_unique": False,
-        "match_wcecoli": False,
+        }},
+        'compartment_id_to_index': 'map[integer]',
+        'compartment_abbrev_to_index': 'map[integer]',
+        'n_avogadro': {'_type': 'unum', '_default': 6.0221409e23},
+        'time_step': {'_type': 'float', '_default': 1.0},
+        'emit_unique': {'_type': 'boolean', '_default': False},
+        'match_wcecoli': {'_type': 'boolean', '_default': False},
+        'condition': {'_type': 'string', '_default': ''},
+        'condition_to_doubling_time': 'map[unum]',
     }
+
+
+    def inputs(self):
+        return {
+            'bulk': 'bulk_array',
+            'unique': 'map[node]',
+            'listeners': {
+                'mass': {
+                    'dry_mass': 'float',
+                },
+            },
+            'global_time': 'float',
+            'timestep': 'float',
+        }
+
+    def outputs(self):
+        return {
+            'listeners': {
+                'mass': {
+                    'cell_mass': 'float',
+                    'water_mass': 'float',
+                    'dry_mass': 'float',
+                    'rna_mass': 'float',
+                    'rRna_mass': 'float',
+                    'tRna_mass': 'float',
+                    'mRna_mass': 'float',
+                    'dna_mass': 'float',
+                    'protein_mass': 'float',
+                    'smallMolecule_mass': 'float',
+                    'water_mass': 'float',
+                    'volume': 'float',
+                    'protein_mass_fraction': 'float',
+                    'rna_mass_fraction': 'float',
+                    'growth': 'float',
+                    'instantaneous_growth_rate': 'float',
+                    'dry_mass_fold_change': 'float',
+                    'protein_mass_fold_change': 'float',
+                    'rna_mass_fold_change': 'float',
+                    'small_molecule_fold_change': 'float',
+                    'projection_mass': 'float',
+                    'cytosol_mass': 'float',
+                    'extracellular_mass': 'float',
+                    'flagellum_mass': 'float',
+                    'membrane_mass': 'float',
+                    'outer_membrane_mass': 'float',
+                    'periplasm_mass': 'float',
+                    'pilus_mass': 'float',
+                    'inner_membrane_mass': 'float',
+                    'expected_mass_fold_change': 'float',
+                },
+            },
+        }
+
 
     def __init__(self, parameters=None):
         super().__init__(parameters)
@@ -74,8 +129,12 @@ class MassListener(Step):
         # molecule indexes and masses
         self.bulk_ids = self.parameters["bulk_ids"]
         self.bulk_masses = self.parameters["bulk_masses"]
+        if self.bulk_masses is None:
+            self.bulk_masses = np.zeros([1, 9])
         self.unique_ids = self.parameters["unique_ids"]
         self.unique_masses = self.parameters["unique_masses"]
+        if self.unique_masses is None:
+            self.unique_masses = np.zeros([1, 9])
 
         self.submass_listener_indices = {
             "rna": np.array(
@@ -226,7 +285,7 @@ class MassListener(Step):
     def update_condition(self, timestep, states):
         return (states["global_time"] % states["timestep"]) == 0
 
-    def next_update(self, timestep, states):
+    def update(self, states, interval=None):
         if self.bulk_idx is None:
             bulk_ids = states["bulk"]["id"]
             self.bulk_idx = bulk_name_to_idx(self.bulk_ids, bulk_ids)

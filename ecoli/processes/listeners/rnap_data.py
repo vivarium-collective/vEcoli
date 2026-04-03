@@ -7,7 +7,8 @@ RNAP Data Listener
 import numpy as np
 import warnings
 from ecoli.library.schema import numpy_schema, listener_schema, attrs
-from vivarium.core.process import Step
+from ecoli.library.schema_types import ACTIVE_RNAP_ARRAY, RNA_ARRAY, ACTIVE_RIBOSOME_ARRAY
+from ecoli.library.ecoli_step import EcoliStep as Step
 
 from ecoli.processes.registries import topology_registry
 from ecoli.processes.transcript_elongation import get_mapping_arrays
@@ -34,19 +35,53 @@ class RnapData(Step):
     name = NAME
     topology = TOPOLOGY
 
-    defaults = {
-        "stable_RNA_indexes": [],
-        "cistron_ids": [],
-        "cistron_tu_mapping_matrix": [],
-        "time_step": 1,
-        "emit_unique": False,
+    config_schema = {
+        'stable_RNA_indexes': 'array[integer]',
+        'cistron_ids': 'list[string]',
+        'cistron_tu_mapping_matrix': 'csr_matrix',
+        'time_step': 'float{1.0}',
+        'emit_unique': 'boolean{false}',
     }
+
+
+    def inputs(self):
+        return {
+            'listeners': {
+                'rnap_data': {
+                    'rna_init_event': f'array[{self.n_TUs},integer]',
+                },
+            },
+            'active_RNAPs': ACTIVE_RNAP_ARRAY,
+            'RNAs': RNA_ARRAY,
+            'active_ribosomes': ACTIVE_RIBOSOME_ARRAY,
+            'global_time': 'float',
+            'timestep': 'float',
+            'next_update_time': 'float',
+        }
+
+    def outputs(self):
+        return {
+            'listeners': {
+                'rnap_data': {
+                    'rna_init_event_per_cistron': f'array[{self.n_cistrons},integer]',
+                    'active_rnap_coordinates': 'array[integer]',
+                    'active_rnap_domain_indexes': 'array[integer]',
+                    'active_rnap_unique_indexes': 'array[integer]',
+                    'active_rnap_on_stable_RNA_indexes': 'array[integer]',
+                    'active_rnap_n_bound_ribosomes': 'array[integer]',
+                },
+            },
+            'next_update_time': 'float',
+        }
+
 
     def __init__(self, parameters=None):
         super().__init__(parameters)
         self.stable_RNA_indexes = self.parameters["stable_RNA_indexes"]
         self.cistron_ids = self.parameters["cistron_ids"]
         self.cistron_tu_mapping_matrix = self.parameters["cistron_tu_mapping_matrix"]
+        self.n_TUs = self.cistron_tu_mapping_matrix.shape[1]
+        self.n_cistrons = len(self.cistron_ids)
 
     def ports_schema(self):
         n_TUs = self.cistron_tu_mapping_matrix.shape[1]
@@ -100,7 +135,7 @@ class RnapData(Step):
             return True
         return False
 
-    def next_update(self, timestep, states):
+    def update(self, states, interval=None):
         # Read coordinates of all active RNAPs
         coordinates, domain_indexes, RNAP_unique_indexes = attrs(
             states["active_RNAPs"], ["coordinates", "domain_index", "unique_index"]

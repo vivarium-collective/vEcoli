@@ -7,10 +7,11 @@ binding back to DNA.
 import numpy as np
 import warnings
 
-from vivarium.core.process import Step
+from ecoli.library.ecoli_step import EcoliStep as Step
 
 from ecoli.processes.registries import topology_registry
 from ecoli.library.schema import bulk_name_to_idx, attrs, numpy_schema
+from ecoli.library.schema_types import PROMOTER_ARRAY
 
 # Register default topology for this process, associating it with process name
 NAME = "ecoli-tf-unbinding"
@@ -33,9 +34,32 @@ class TfUnbinding(Step):
     name = NAME
     topology = TOPOLOGY
 
-    defaults = {"time_step": 1, "emit_unique": False}
+    config_schema = {
+        'time_step': {'_type': 'integer', '_default': 1},
+        'emit_unique': {'_type': 'boolean', '_default': False},
+        'tf_ids': 'list[string]',
+        'submass_indices': 'map[integer]',
+        'active_tf_masses': {'_type': 'array[float]', '_default': None},
+    }
 
-    # Constructor
+
+    def inputs(self):
+        return {
+            'bulk': 'bulk_array',
+            'promoters': PROMOTER_ARRAY,
+            'global_time': 'float',
+            'timestep': 'integer',
+            'next_update_time': 'float',
+        }
+
+    def outputs(self):
+        return {
+            'bulk': 'bulk_array',
+            'promoters': PROMOTER_ARRAY,
+            'next_update_time': 'float',
+        }
+
+
     def __init__(self, parameters=None):
         super().__init__(parameters)
         self.tf_ids = self.parameters["tf_ids"]
@@ -74,7 +98,7 @@ class TfUnbinding(Step):
             return True
         return False
 
-    def next_update(self, timestep, states):
+    def update(self, states, interval=None):
         # At t=0, convert all strings to indices
         if self.active_tf_idx is None:
             self.active_tf_idx = bulk_name_to_idx(

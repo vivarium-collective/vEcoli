@@ -7,7 +7,8 @@ Ribosome Data Listener
 import numpy as np
 import warnings
 from ecoli.library.schema import numpy_schema, listener_schema, attrs, bulk_name_to_idx
-from vivarium.core.process import Step
+from ecoli.library.schema_types import ACTIVE_RIBOSOME_ARRAY, RNA_ARRAY
+from ecoli.library.ecoli_step import EcoliStep as Step
 
 from ecoli.processes.registries import topology_registry
 
@@ -32,15 +33,55 @@ class RibosomeData(Step):
     name = NAME
     topology = TOPOLOGY
 
-    defaults = {
-        "n_monomers": [],
-        "rRNA_cistron_tu_mapping_matrix": [],
-        "rRNA_is_5S": [],
-        "rRNA_is_16S": [],
-        "rRNA_is_23S": [],
-        "time_step": 1,
-        "emit_unique": False,
+    config_schema = {
+        'monomer_ids': 'list[string]',
+        'n_monomers': {'_type': 'integer', '_default': 0},
+        'rRNA_cistron_tu_mapping_matrix': 'csr_matrix',
+        'rRNA_is_5S': 'array[integer]',
+        'rRNA_is_16S': 'array[integer]',
+        'rRNA_is_23S': 'array[integer]',
+        'time_step': 'float{1.0}',
+        'emit_unique': 'boolean{false}',
     }
+
+
+    def inputs(self):
+        return {
+            'listeners': {
+                'ribosome_data': {
+                    'rRNA_initiated_TU': f'array[{self.n_rRNA_TUs},integer]',
+                    'rRNA_init_prob_TU': f'array[{self.n_rRNA_TUs},float]',
+                },
+            },
+            'active_ribosomes': ACTIVE_RIBOSOME_ARRAY,
+            'RNAs': RNA_ARRAY,
+            'global_time': 'float',
+            'timestep': 'float',
+            'next_update_time': 'float',
+        }
+
+    def outputs(self):
+        return {
+            'listeners': {
+                'ribosome_data': {
+                    'n_ribosomes_per_transcript': f'array[{self.n_monomers},integer]',
+                    'n_ribosomes_on_partial_mRNA_per_transcript': f'array[{self.n_monomers},integer]',
+                    'total_rRNA_initiated': 'integer',
+                    'total_rRNA_init_prob': 'float',
+                    'rRNA5S_initiated': 'integer',
+                    'rRNA16S_initiated': 'integer',
+                    'rRNA23S_initiated': 'integer',
+                    'rRNA5S_init_prob': 'float',
+                    'rRNA16S_init_prob': 'float',
+                    'rRNA23S_init_prob': 'float',
+                    'mRNA_TU_index': 'array[integer]',
+                    'n_ribosomes_on_each_mRNA': 'array[integer]',
+                    'protein_mass_on_polysomes': 'array[float]',
+                },
+            },
+            'next_update_time': 'float',
+        }
+
 
     def __init__(self, parameters=None):
         super().__init__(parameters)
@@ -52,6 +93,7 @@ class RibosomeData(Step):
         self.rRNA_is_5S = self.parameters["rRNA_is_5S"]
         self.rRNA_is_16S = self.parameters["rRNA_is_16S"]
         self.rRNA_is_23S = self.parameters["rRNA_is_23S"]
+        self.n_rRNA_TUs = self.rRNA_cistron_tu_mapping_matrix.shape[1]
 
     def ports_schema(self):
         n_rRNA_TUs = self.rRNA_cistron_tu_mapping_matrix.shape[1]
@@ -113,7 +155,7 @@ class RibosomeData(Step):
             return True
         return False
 
-    def next_update(self, timestep, states):
+    def update(self, states, interval=None):
         # Get attributes of RNAs and ribosomes
         (is_full_transcript_RNA, unique_index_RNA, can_translate, TU_index) = attrs(
             states["RNAs"],

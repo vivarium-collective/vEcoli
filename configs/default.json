@@ -5,6 +5,7 @@
     "description" : "",
     "progress_bar" : true,
     "sim_data_path": "out/kb/simData.cPickle",
+    "engine": "vivarium",
     "emitter" : "timeseries",
     "emitter_arg": {},
     "emit_topology" : false,

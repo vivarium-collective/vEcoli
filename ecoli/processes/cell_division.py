@@ -8,7 +8,7 @@ from typing import Any, Dict
 
 import binascii
 import numpy as np
-from vivarium.core.process import Process, Step
+from ecoli.library.ecoli_step import EcoliProcess as Process, EcoliStep as Step
 
 from ecoli.library.sim_data import RAND_MAX
 from ecoli.library.schema import attrs

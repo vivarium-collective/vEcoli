@@ -6,7 +6,7 @@ Unique Molecule Counts Listener
 Counts unique molecules
 """
 
-from vivarium.core.process import Step
+from ecoli.library.ecoli_step import EcoliStep as Step
 from ecoli.library.schema import numpy_schema, listener_schema
 from ecoli.processes.registries import topology_registry
 
@@ -27,10 +27,27 @@ class UniqueMoleculeCounts(Step):
     name = NAME
     topology = TOPOLOGY
 
-    defaults = {
-        "time_step": 1,
-        "emit_unique": False,
+    config_schema = {
+        'time_step': 'float{1.0}',
+        'emit_unique': 'boolean{false}',
+        'unique_ids': 'list[string]',
     }
+
+
+    def inputs(self):
+        return {
+            'unique': 'map[node]',
+            'global_time': 'float',
+            'timestep': 'float',
+        }
+
+    def outputs(self):
+        return {
+            'listeners': {
+                'unique_molecule_counts': 'map[integer]',
+            },
+        }
+
 
     def __init__(self, parameters=None):
         super().__init__(parameters)
@@ -68,7 +85,7 @@ class UniqueMoleculeCounts(Step):
     def update_condition(self, timestep, states):
         return (states["global_time"] % states["timestep"]) == 0
 
-    def next_update(self, timestep, states):
+    def update(self, states, interval=None):
         return {
             "listeners": {
                 "unique_molecule_counts": {

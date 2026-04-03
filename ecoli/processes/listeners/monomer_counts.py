@@ -6,7 +6,12 @@ Monomer Counts Listener
 
 import numpy as np
 from ecoli.library.schema import numpy_schema, counts, bulk_name_to_idx
-from vivarium.core.process import Step
+from ecoli.library.schema_types import (
+    ACTIVE_RIBOSOME_ARRAY,
+    ACTIVE_RNAP_ARRAY,
+    ACTIVE_REPLISOME_ARRAY,
+)
+from ecoli.library.ecoli_step import EcoliStep as Step
 
 from ecoli.processes.registries import topology_registry
 
@@ -30,27 +35,47 @@ class MonomerCounts(Step):
     name = NAME
     topology = TOPOLOGY
 
-    defaults = {
-        "bulk_molecule_ids": [],
-        "unique_ids": [],
-        "complexation_molecule_ids": [],
-        "complexation_complex_ids": [],
-        "equilibrium_molecule_ids": [],
-        "equilibrium_complex_ids": [],
-        "monomer_ids": [],
-        "two_component_system_molecule_ids": [],
-        "two_component_system_complex_ids": [],
-        "ribosome_50s_subunits": [],
-        "ribosome_30s_subunits": [],
-        "rnap_subunits": [],
-        "replisome_trimer_subunits": [],
-        "replisome_monomer_subunits": [],
-        "complexation_stoich": [],
-        "equilibrium_stoich": [],
-        "two_component_system_stoich": [],
-        "emit_unique": False,
-        "time_step": 1,
+    config_schema = {
+        'bulk_molecule_ids': 'list[string]',
+        'unique_ids': 'list[string]',
+        'complexation_molecule_ids': 'list[string]',
+        'complexation_complex_ids': 'list[string]',
+        'equilibrium_molecule_ids': 'list[string]',
+        'equilibrium_complex_ids': 'list[string]',
+        'monomer_ids': 'list[string]',
+        'two_component_system_molecule_ids': 'list[string]',
+        'two_component_system_complex_ids': 'list[string]',
+        'ribosome_50s_subunits': 'list[string]',
+        'ribosome_30s_subunits': 'list[string]',
+        'rnap_subunits': 'list[string]',
+        'replisome_trimer_subunits': 'list[string]',
+        'replisome_monomer_subunits': 'list[string]',
+        'complexation_stoich': 'csr_matrix',
+        'equilibrium_stoich': 'csr_matrix',
+        'two_component_system_stoich': 'csr_matrix',
+        'emit_unique': 'boolean{false}',
+        'time_step': 'float{1.0}',
     }
+
+
+    def inputs(self):
+        return {
+            'unique': {
+                'active_ribosome': ACTIVE_RIBOSOME_ARRAY,
+                'active_RNAP': ACTIVE_RNAP_ARRAY,
+                'active_replisome': ACTIVE_REPLISOME_ARRAY,
+            },
+            'global_time': 'float',
+            'timestep': 'float',
+        }
+
+    def outputs(self):
+        return {
+            'listeners': {
+                'monomer_counts': f'array[{self.n_monomers},integer]',
+            },
+        }
+
 
     def __init__(self, parameters=None):
         super().__init__(parameters)
@@ -64,6 +89,7 @@ class MonomerCounts(Step):
         self.equilibrium_molecule_ids = self.parameters["equilibrium_molecule_ids"]
         self.equilibrium_complex_ids = self.parameters["equilibrium_complex_ids"]
         self.monomer_ids = self.parameters["monomer_ids"]
+        self.n_monomers = len(self.monomer_ids)
 
         # Get IDs of complexed molecules monomers involved in two
         # component system
@@ -146,7 +172,7 @@ class MonomerCounts(Step):
     def update_condition(self, timestep, states):
         return (states["global_time"] % states["timestep"]) == 0
 
-    def next_update(self, timestep, states):
+    def update(self, states, interval=None):
         if self.monomer_idx is None:
             bulk_ids = states["bulk"]["id"]
             self.bulk_molecule_idx = bulk_name_to_idx(self.bulk_molecule_ids, bulk_ids)

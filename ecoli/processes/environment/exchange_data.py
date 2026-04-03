@@ -1,7 +1,5 @@
-from typing import Any
-
 from ecoli.processes.registries import topology_registry
-from vivarium.core.process import Step
+from ecoli.library.ecoli_step import EcoliStep as Step
 from vivarium.library.units import units
 
 NAME = "exchange_data"
@@ -19,12 +17,34 @@ class ExchangeData(Step):
 
     name = NAME
     topology = TOPOLOGY
-    defaults: dict[str, Any] = {
-        "external_state": None,
-        "environment_molecules": [],
-        "saved_media": {},
-        "time_step": 1,
+
+    config_schema = {
+        'external_state': {'_type': 'node', '_default': None},
+        'environment_molecules': 'list[string]',
+        'saved_media': 'map[string]',
+        'time_step': 'float{1.0}',
     }
+
+    def inputs(self):
+        return {
+            'boundary': {'external': 'map[float]'},
+            'environment': {
+                'exchange_data': {
+                    'constrained': 'map[float]',
+                    'unconstrained': 'list[string]',
+                },
+            },
+        }
+
+    def outputs(self):
+        return {
+            'environment': {
+                'exchange_data': {
+                    'constrained': 'map[float]',
+                    'unconstrained': 'list[string]',
+                },
+            },
+        }
 
     def __init__(self, parameters=None):
         super().__init__(parameters)
@@ -42,14 +62,12 @@ class ExchangeData(Step):
             },
         }
 
-    def next_update(self, timestep, states):
-        # Set exchange constraints for metabolism
+    def update(self, states, interval=None):
         env_concs = {
             mol: states["boundary"]["external"][mol]
             for mol in self.environment_molecules
         }
 
-        # Converting threshold is faster than converting all of env_concs
         self.external_state.import_constraint_threshold *= units.mM
         exchange_data = self.external_state.exchange_data_from_concentrations(env_concs)
         self.external_state.import_constraint_threshold = (

@@ -11,7 +11,7 @@ These variables are required to plug into a `Lattice Environment`
 import math
 
 from scipy.constants import N_A
-from vivarium.core.process import Step
+from ecoli.library.ecoli_step import EcoliStep as Step
 from vivarium.library.units import units, Quantity
 
 PI = math.pi

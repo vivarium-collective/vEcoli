@@ -832,6 +832,54 @@ class EcoliSim:
         if time_remaining:
             self.update_experiment(time_remaining)
 
+    def _run_composite(self):
+        """Run the simulation using the process-bigraph Composite engine."""
+        from ecoli.composites.ecoli_composite import (
+            migrate_composite, seed_port_defaults,
+            _seed_listeners, _make_arrays_writeable,
+        )
+        from ecoli.library.bigraph_types import ECOLI_TYPES
+        from process_bigraph import Composite
+        from bigraph_schema import allocate_core
+        import time as _time
+
+        core = allocate_core()
+        core.register_types(ECOLI_TYPES)
+
+        print("Migrating to process-bigraph composite...")
+        state = migrate_composite(core, self)
+
+        schema = {}
+
+        print("Creating composite (with realize)...", flush=True)
+        t0 = _time.time()
+        ecoli = Composite({'schema': schema, 'state': state}, core=core)
+        print(f"  Composite created in {_time.time()-t0:.2f}s", flush=True)
+
+        # Populate port defaults from process instances (simData shapes)
+        print("Seeding port defaults...", flush=True)
+        t0 = _time.time()
+        for path_key, substates in ecoli.state.items():
+            if isinstance(substates, dict) and path_key != 'global_time':
+                for subkey, cell in substates.items():
+                    if isinstance(cell, dict) and 'bulk' in cell:
+                        _make_arrays_writeable(cell)
+                        seed_port_defaults(cell)
+                        _seed_listeners(cell)
+                        break
+
+        print(f"  Seeded in {_time.time()-t0:.2f}s", flush=True)
+
+        self._composite = ecoli
+        self.generated_initial_state = None
+        self.ecoli = None
+
+        print(f"Running composite for {self.max_duration}s...", flush=True)
+        t0 = _time.time()
+        ecoli.run(float(self.max_duration))
+        elapsed = _time.time() - t0
+        print(f"Completed in {elapsed:.2f} seconds", flush=True)
+
     def run(self):
         """Create and run an EcoliSim experiment. If the simulation reaches
         the maximum duration specified by ``config['max_duration']``, it will
@@ -847,6 +895,10 @@ class EcoliSim:
                 "Build the composite by calling build_ecoli() \
                 before calling run()."
             )
+
+        if self.config.get("engine") == "composite":
+            self._run_composite()
+            return
 
         metadata = self.get_metadata()
         metadata["output_metadata"] = self.output_metadata()

@@ -6,7 +6,8 @@ RnaSynthProb Listener
 
 import numpy as np
 from ecoli.library.schema import numpy_schema, listener_schema, attrs
-from vivarium.core.process import Step
+from ecoli.library.schema_types import PROMOTER_ARRAY, GENE_ARRAY
+from ecoli.library.ecoli_step import EcoliStep as Step
 
 from ecoli.processes.registries import topology_registry
 
@@ -30,10 +31,46 @@ class RnaSynthProb(Step):
     name = NAME
     topology = TOPOLOGY
 
-    defaults = {
-        "time_step": 1,
-        "emit_unique": False,
+    config_schema = {
+        'time_step': 'float{1.0}',
+        'emit_unique': 'boolean{false}',
+        'rna_ids': 'list[string]',
+        'gene_ids': 'list[string]',
+        'tf_ids': 'list[string]',
+        'cistron_ids': 'list[string]',
+        'cistron_tu_mapping_matrix': 'csr_matrix',
     }
+
+
+    def inputs(self):
+        return {
+            'rna_synth_prob': {
+                'actual_rna_synth_prob': f'array[{self.n_TU},float]',
+                'target_rna_synth_prob': f'array[{self.n_TU},float]',
+                'n_bound_TF_per_TU': f'array[({self.n_TU}|{self.n_TF}),integer]',
+                'total_rna_init': 'integer',
+            },
+            'promoters': PROMOTER_ARRAY,
+            'genes': GENE_ARRAY,
+            'global_time': 'float',
+            'timestep': 'float',
+        }
+
+    def outputs(self):
+        return {
+            'rna_synth_prob': {
+                'promoter_copy_number': f'array[{self.n_TU},integer]',
+                'gene_copy_number': f'array[{self.n_cistron},integer]',
+                'bound_TF_indexes': 'array[integer]',
+                'bound_TF_coordinates': 'array[integer]',
+                'bound_TF_domains': 'array[integer]',
+                'expected_rna_init_per_cistron': f'array[{self.n_cistron},float]',
+                'actual_rna_synth_prob_per_cistron': f'array[{self.n_cistron},float]',
+                'target_rna_synth_prob_per_cistron': f'array[{self.n_cistron},float]',
+                'n_bound_TF_per_cistron': f'array[{self.n_cistron},integer]',
+            },
+        }
+
 
     def __init__(self, parameters=None):
         super().__init__(parameters)
@@ -51,7 +88,7 @@ class RnaSynthProb(Step):
             "rna_synth_prob": listener_schema(
                 {
                     "promoter_copy_number": ([0] * self.n_TU, self.rna_ids),
-                    "gene_copy_number": ([0] * self.n_TU, self.gene_ids),
+                    "gene_copy_number": ([0] * self.n_cistron, self.cistron_ids),
                     "bound_TF_indexes": ([], self.tf_ids),
                     "bound_TF_coordinates": [],
                     "bound_TF_domains": [],
@@ -83,7 +120,7 @@ class RnaSynthProb(Step):
     def update_condition(self, timestep, states):
         return (states["global_time"] % states["timestep"]) == 0
 
-    def next_update(self, timestep, states):
+    def update(self, states, interval=None):
         TU_indexes, all_coordinates, all_domains, bound_TFs = attrs(
             states["promoters"], ["TU_index", "coordinates", "domain_index", "bound_TF"]
         )

@@ -6,7 +6,8 @@ DNA Supercoiling Listener
 
 import numpy as np
 from ecoli.library.schema import numpy_schema, listener_schema, attrs
-from vivarium.core.process import Step
+from ecoli.library.schema_types import CHROMOSOMAL_SEGMENT_ARRAY
+from ecoli.library.ecoli_step import EcoliStep as Step
 
 from ecoli.processes.registries import topology_registry
 
@@ -29,11 +30,32 @@ class DnaSupercoiling(Step):
     name = NAME
     topology = TOPOLOGY
 
-    defaults = {
-        "relaxed_DNA_base_pairs_per_turn": 0,
-        "emit_unique": False,
-        "time_step": 1,
+    config_schema = {
+        'relaxed_DNA_base_pairs_per_turn': 'float{0.0}',
+        'emit_unique': 'boolean{false}',
+        'time_step': 'float{1.0}',
     }
+
+
+    def inputs(self):
+        return {
+            'chromosomal_segments': CHROMOSOMAL_SEGMENT_ARRAY,
+            'global_time': 'float',
+            'timestep': 'float',
+        }
+
+    def outputs(self):
+        return {
+            'listeners': {
+                'dna_supercoiling': {
+                    'segment_left_boundary_coordinates': 'array[integer]',
+                    'segment_right_boundary_coordinates': 'array[integer]',
+                    'segment_domain_indexes': 'array[integer]',
+                    'segment_superhelical_densities': 'array[float]',
+                },
+            },
+        }
+
 
     def __init__(self, parameters=None):
         super().__init__(parameters)
@@ -63,7 +85,7 @@ class DnaSupercoiling(Step):
     def update_condition(self, timestep, states):
         return (states["global_time"] % states["timestep"]) == 0
 
-    def next_update(self, timestep, states):
+    def update(self, states, interval=None):
         boundary_coordinates, domain_indexes, linking_numbers = attrs(
             states["chromosomal_segments"],
             ["boundary_coordinates", "domain_index", "linking_number"],

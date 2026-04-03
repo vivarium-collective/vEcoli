@@ -17,10 +17,34 @@ which reads the requests and allocates molecular counts for the evolve_state.
 import abc
 import warnings
 
-from vivarium.core.process import Step, Process
+from ecoli.library.ecoli_step import EcoliStep as Step, EcoliProcess as Process
+from ecoli.library.schema_types import UNIQUE_TYPES
 from vivarium.library.dict_utils import deep_merge
 
 from ecoli.processes.registries import topology_registry
+
+
+def _typed_ports(ports_schema):
+    """Convert ports_schema keys to typed port dict using known types."""
+    result = {}
+    for key in ports_schema:
+        if key.startswith('_'):
+            continue
+        if key in ('bulk', 'bulk_total'):
+            result[key] = 'bulk_array'
+        elif key in UNIQUE_TYPES:
+            result[key] = UNIQUE_TYPES[key]
+        elif key == 'global_time':
+            result[key] = 'float'
+        elif key == 'timestep':
+            result[key] = 'integer'
+        elif key == 'next_update_time':
+            result[key] = 'float'
+        elif key in ('request', 'allocate', 'process', 'listeners'):
+            result[key] = 'node'
+        else:
+            result[key] = 'node'
+    return result
 
 
 class Requester(Step):
@@ -28,9 +52,25 @@ class Requester(Step):
 
     Accepts a PartitionedProcess as an input, and runs in coordination with an
     Evolver that uses the same PartitionedProcess.
+
+    process-bigraph interface: Requesters read from all ports but only
+    write to request, process, next_update_time, and optionally listeners.
     """
 
-    defaults = {"process": None}
+    config_schema = {
+        'process': {'_type': 'quote', '_default': None},
+    }
+
+    def inputs(self):
+        return _typed_ports(self.ports_schema())
+
+    def outputs(self):
+        return {
+            'request': 'map[map[list[integer]]]',
+            'process': 'tuple',
+            'next_update_time': 'float',
+            'listeners': 'map[map[float]]',
+        }
 
     def __init__(self, parameters=None):
         assert isinstance(parameters["process"], PartitionedProcess)
@@ -94,8 +134,11 @@ class Requester(Step):
         self.cached_bulk_ports = list(ports["request"].keys())
         return ports
 
-    def next_update(self, timestep, states):
-        process = states["process"][0]
+    def update(self, states, interval=None):
+        proc_state = states.get("process")
+        if proc_state is None or (isinstance(proc_state, (list, tuple)) and len(proc_state) == 0):
+            return {}
+        process = proc_state[0] if isinstance(proc_state, (list, tuple)) else proc_state
         request = process.calculate_request(states["timestep"], states)
         process.request_set = True
 
@@ -121,9 +164,22 @@ class Evolver(Step):
 
     Accepts a PartitionedProcess as an input, and runs in coordination with an
     Requester that uses the same PartitionedProcess.
+
+    process-bigraph interface: Evolvers read from all ports but only
+    write to everything except allocate, global_time, and timestep.
     """
 
-    defaults = {"process": None}
+    config_schema = {
+        'process': {'_type': 'quote', '_default': None},
+    }
+
+    def inputs(self):
+        return _typed_ports(self.ports_schema())
+
+    def outputs(self):
+        input_only = {'allocate', 'global_time', 'timestep'}
+        all_ports = _typed_ports(self.ports_schema())
+        return {k: v for k, v in all_ports.items() if k not in input_only}
 
     def __init__(self, parameters=None):
         assert isinstance(parameters["process"], PartitionedProcess)
@@ -171,21 +227,16 @@ class Evolver(Step):
         }
         return ports
 
-    def next_update(self, timestep, states):
+    def update(self, states, interval=None):
         allocations = states.pop("allocate")
         states = deep_merge(states, allocations)
-        process = states["process"][0]
+        proc_state = states.get("process")
+        if proc_state is None or (isinstance(proc_state, (list, tuple)) and len(proc_state) == 0):
+            return {}
+        process = proc_state[0] if isinstance(proc_state, (list, tuple)) else proc_state
 
         # If the Requester has not run yet, skip the Evolver's update to
-        # let the Requester run in the next time step. This problem
-        # often arises after division because after the step divider
-        # runs, Vivarium wants to run the Evolvers instead of re-running
-        # the Requesters. Skipping the Evolvers in this case means our
-        # timesteps are slightly off. However, the alternative is to run
-        # self.process.calculate_request and discard the result before
-        # running the Evolver this timestep, which means we skip the
-        # Allocator. Skipping the Allocator can cause the simulation to
-        # crash, so having a slightly off timestep is preferable.
+        # let the Requester run in the next time step.
         if not process.request_set:
             return {}
 
@@ -199,7 +250,16 @@ class PartitionedProcess(Process):
     """Partitioned Process Base Class
 
     This is the base class for all processes whose updates can be partitioned.
+
+    process-bigraph interface: Subclasses may define ``_output_ports``
+    as a set of port names that appear in the delta returned by
+    ``evolve_state()``.  All other ports from ``ports_schema()`` are
+    treated as input-only when building the process-bigraph dependency
+    graph.  If ``_output_ports`` is None, all ports are assumed to be
+    both input and output (conservative default).
     """
+
+    _output_ports = None
 
     def __init__(self, parameters=None):
         super().__init__(parameters)

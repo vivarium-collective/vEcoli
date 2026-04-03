@@ -1,6 +1,6 @@
 import numpy as np
 from ecoli.processes.registries import topology_registry
-from vivarium.core.process import Step
+from ecoli.library.ecoli_step import EcoliStep as Step
 from vivarium.library.units import units
 
 NAME = "media_update"
@@ -18,7 +18,23 @@ class MediaUpdate(Step):
 
     name = NAME
     topology = TOPOLOGY
-    defaults = {"saved_media": {}, "time_step": 1, "media_id": "minimal"}
+
+    config_schema = {
+        'saved_media': 'map[map[float]]',
+        'time_step': 'float{1.0}',
+        'media_id': 'string{minimal}',
+    }
+
+    def inputs(self):
+        return {
+            'boundary': {'external': 'map[float]'},
+            'environment': {'media_id': 'string'},
+        }
+
+    def outputs(self):
+        return {
+            'boundary': {'external': 'map[float]'},
+        }
 
     def __init__(self, parameters=None):
         super().__init__(parameters)
@@ -36,18 +52,15 @@ class MediaUpdate(Step):
             "environment": {"media_id": {"_default": ""}},
         }
 
-    def next_update(self, timestep, states):
+    def update(self, states, interval=None):
         if states["environment"]["media_id"] == self.curr_media_id:
             return {}
 
         self.curr_media_id = states["environment"]["media_id"]
         env_concs = self.saved_media[self.curr_media_id]
         conc_update = {}
-        # Calculate concentration delta to get from environment specified
-        # by old media ID to the one specified by the current media ID
         for mol, conc in env_concs.items():
             diff = conc - states["boundary"]["external"][mol]
-            # Arithmetic with np.inf gets messy
             if np.isnan(diff):
                 diff = self.zero_diff
             conc_update[mol] = diff

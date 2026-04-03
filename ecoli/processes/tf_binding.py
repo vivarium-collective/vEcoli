@@ -9,7 +9,7 @@ This process models how transcription factors bind to promoters on the DNA seque
 import numpy as np
 import warnings
 
-from vivarium.core.process import Step
+from ecoli.library.ecoli_step import EcoliStep as Step
 
 from ecoli.library.schema import (
     listener_schema,
@@ -18,6 +18,8 @@ from ecoli.library.schema import (
     bulk_name_to_idx,
     counts,
 )
+
+from ecoli.library.schema_types import PROMOTER_ARRAY
 
 from wholecell.utils.random import stochasticRound
 from wholecell.utils import units
@@ -44,36 +46,67 @@ class TfBinding(Step):
 
     name = NAME
     topology = TOPOLOGY
-    defaults = {
-        "tf_ids": [],
-        "rna_ids": [],
-        "delta_prob": {"deltaI": [], "deltaJ": [], "deltaV": []},
-        "n_avogadro": 6.02214076e23 / units.mol,
-        "cell_density": 1100 * units.g / units.L,
-        # Calculate promoter binding probability when not 0CS TF
-        "p_promoter_bound_tf": lambda active, inactive: (
-            float(active) / (float(active) + float(inactive))
-        ),
-        "tf_to_tf_type": {},
-        "active_to_bound": {},
-        "get_unbound": lambda tf: "",
-        "active_to_inactive_tf": {},
-        "bulk_molecule_ids": [],
-        "bulk_mass_data": np.array([[]]) * units.g / units.mol,
-        "seed": 0,
-        "submass_to_idx": {
+
+    config_schema = {
+        'time_step': {'_type': 'integer', '_default': 1},
+        'tf_ids': 'list[string]',
+        'rna_ids': 'list[string]',
+        'delta_prob': {'_type': 'node', '_default': {"deltaI": [], "deltaJ": [], "deltaV": []}},
+        'n_avogadro': {'_type': 'unum', '_default': 6.02214076e23},
+        'cell_density': {'_type': 'unum', '_default': 1100},
+        'p_promoter_bound_tf': {'_type': 'method', '_default': None},
+        'tf_to_tf_type': 'map[string]',
+        'active_to_bound': 'map[string]',
+        'get_unbound': {'_type': 'method', '_default': None},
+        'active_to_inactive_tf': 'map[string]',
+        'bulk_molecule_ids': 'list[string]',
+        'bulk_mass_data': {'_type': 'unum', '_default': None},
+        'seed': {'_type': 'integer', '_default': 0},
+        'submass_to_idx': {'_type': 'map[integer]', '_default': {
             "rRNA": 0,
             "tRNA": 1,
             "mRNA": 2,
             "miscRNA": 3,
-            "nonspecific_RNA": 4,
+            "nonSpecific_RNA": 4,
             "protein": 5,
             "metabolite": 6,
             "water": 7,
             "DNA": 8,
-        },
-        "emit_unique": False,
+        }},
+        'emit_unique': {'_type': 'boolean', '_default': False},
+        'submass_indices': 'map[integer]',
     }
+
+
+    def inputs(self):
+        return {
+            'promoters': PROMOTER_ARRAY,
+            'bulk': 'bulk_array',
+            'bulk_total': 'bulk_array',
+            'listeners': {
+                'rna_synth_prob': 'map[float]',
+            },
+            'timestep': 'float',
+            'next_update_time': 'float',
+            'global_time': 'float',
+        }
+
+    def outputs(self):
+        return {
+            'bulk': 'bulk_array',
+            'promoters': PROMOTER_ARRAY,
+            'listeners': {
+                'rna_synth_prob': {
+                    'p_promoter_bound': f'array[{self.n_TF},float]',
+                    'n_promoter_bound': f'array[{self.n_TF},integer]',
+                    'n_actual_bound': f'array[{self.n_TF},integer]',
+                    'n_available_promoters': f'array[{self.n_TF},integer]',
+                    'n_bound_TF_per_TU': f'array[({self.n_TU}|{self.n_TF}),integer]',
+                },
+            },
+            'next_update_time': 'float',
+        }
+
 
     # Constructor
     def __init__(self, parameters=None):
@@ -189,7 +222,7 @@ class TfBinding(Step):
             return True
         return False
 
-    def next_update(self, timestep, states):
+    def update(self, states, interval=None):
         # At t=0, convert all strings to indices
         if self.active_tf_idx is None:
             bulk_ids = states["bulk"]["id"]

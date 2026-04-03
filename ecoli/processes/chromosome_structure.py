@@ -11,7 +11,7 @@ Chromosome Structure
 import numpy as np
 import numpy.typing as npt
 import warnings
-from vivarium.core.process import Step
+from ecoli.library.ecoli_step import EcoliStep as Step
 from vivarium.core.composer import Composer
 from vivarium.core.engine import Engine
 
@@ -24,6 +24,19 @@ from ecoli.library.schema import (
     attrs,
     bulk_name_to_idx,
     get_free_indices,
+)
+from ecoli.library.schema_types import (
+    ACTIVE_REPLISOME_ARRAY,
+    ORIC_ARRAY,
+    CHROMOSOME_DOMAIN_ARRAY,
+    ACTIVE_RNAP_ARRAY,
+    RNA_ARRAY,
+    ACTIVE_RIBOSOME_ARRAY,
+    FULL_CHROMOSOME_ARRAY,
+    PROMOTER_ARRAY,
+    DNAA_BOX_ARRAY,
+    GENE_ARRAY,
+    CHROMOSOMAL_SEGMENT_ARRAY,
 )
 from ecoli.library.json_state import get_state_from_file
 from wholecell.utils.polymerize import buildSequences
@@ -68,39 +81,86 @@ class ChromosomeStructure(Step):
 
     name = NAME
     topology = TOPOLOGY
-    defaults = {
+
+    config_schema = {
         # Load parameters
-        "rna_sequences": [],
-        "protein_sequences": [],
-        "n_TUs": 1,
-        "n_TFs": 1,
-        "n_amino_acids": 1,
-        "n_fragment_bases": 1,
-        "replichore_lengths": [0, 0],
-        "relaxed_DNA_base_pairs_per_turn": 1,
-        "terC_index": -1,
-        "calculate_superhelical_densities": False,
+        'rna_sequences': 'list[string]',
+        'protein_sequences': 'list[string]',
+        'n_TUs': 'integer{1}',
+        'n_TFs': 'integer{1}',
+        'n_amino_acids': 'integer{1}',
+        'n_fragment_bases': 'integer{1}',
+        'replichore_lengths': {'_type': 'list[integer]', '_default': [0, 0]},
+        'relaxed_DNA_base_pairs_per_turn': 'integer{1}',
+        'terC_index': 'integer{-1}',
+        'calculate_superhelical_densities': 'boolean{false}',
         # Get placeholder value for chromosome domains without children
-        "no_child_place_holder": -1,
+        'no_child_place_holder': 'integer{-1}',
         # Load bulk molecule views
-        "inactive_RNAPs": [],
-        "fragmentBases": [],
-        "ppi": "ppi",
-        "active_tfs": [],
-        "ribosome_30S_subunit": "30S",
-        "ribosome_50S_subunit": "50S",
-        "amino_acids": [],
-        "water": "water",
-        "seed": 0,
-        "emit_unique": False,
-        "rna_ids": [],
-        "n_mature_rnas": 0,
-        "mature_rna_ids": [],
-        "mature_rna_end_positions": [],
-        "mature_rna_nt_counts": [],
-        "unprocessed_rna_index_mapping": {},
-        "time_step": 1.0,
+        'inactive_RNAPs': 'list[string]',
+        'fragmentBases': 'list[string]',
+        'ppi': 'string{ppi}',
+        'active_tfs': 'list[string]',
+        'ribosome_30S_subunit': 'string{30S}',
+        'ribosome_50S_subunit': 'string{50S}',
+        'amino_acids': 'list[string]',
+        'water': 'string{water}',
+        'seed': 'integer{0}',
+        'emit_unique': 'boolean{false}',
+        'rna_ids': 'list[string]',
+        'n_mature_rnas': 'integer{0}',
+        'mature_rna_ids': 'list[string]',
+        'mature_rna_end_positions': 'list[integer]',
+        'mature_rna_nt_counts': {'_type': 'node', '_default': []},
+        'unprocessed_rna_index_mapping': 'map[integer]',
+        'time_step': 'float{1.0}',
     }
+
+
+    def inputs(self):
+        return {
+            'listeners': {
+                'rnap_data': {
+                    'active_rnap_n_bound_ribosomes': 'list[integer]',
+                },
+            },
+            'active_replisomes': ACTIVE_REPLISOME_ARRAY,
+            'oriCs': ORIC_ARRAY,
+            'chromosome_domains': CHROMOSOME_DOMAIN_ARRAY,
+            'active_RNAPs': ACTIVE_RNAP_ARRAY,
+            'RNAs': RNA_ARRAY,
+            'active_ribosome': ACTIVE_RIBOSOME_ARRAY,
+            'full_chromosomes': FULL_CHROMOSOME_ARRAY,
+            'promoters': PROMOTER_ARRAY,
+            'DnaA_boxes': DNAA_BOX_ARRAY,
+            'genes': GENE_ARRAY,
+            'chromosomal_segments': CHROMOSOMAL_SEGMENT_ARRAY,
+            'global_time': 'float',
+            'timestep': 'integer',
+            'next_update_time': 'float',
+        }
+
+    def outputs(self):
+        return {
+            'listeners': {
+                'rnap_data': {
+                    'active_rnap_n_bound_ribosomes': 'list[integer]',
+                },
+            },
+            'active_replisomes': ACTIVE_REPLISOME_ARRAY,
+            'oriCs': ORIC_ARRAY,
+            'chromosome_domains': CHROMOSOME_DOMAIN_ARRAY,
+            'active_RNAPs': ACTIVE_RNAP_ARRAY,
+            'RNAs': RNA_ARRAY,
+            'active_ribosome': ACTIVE_RIBOSOME_ARRAY,
+            'full_chromosomes': FULL_CHROMOSOME_ARRAY,
+            'chromosomal_segments': CHROMOSOMAL_SEGMENT_ARRAY,
+            'promoters': PROMOTER_ARRAY,
+            'genes': GENE_ARRAY,
+            'DnaA_boxes': DNAA_BOX_ARRAY,
+            'next_update_time': 'float',
+        }
+
 
     # Constructor
     def __init__(self, parameters=None):
@@ -223,7 +283,7 @@ class ChromosomeStructure(Step):
             return True
         return False
 
-    def next_update(self, timestep, states):
+    def update(self, states, interval=None):
         # At t=0, convert all strings to indices
         if self.inactive_RNAPs_idx is None:
             self.fragmentBasesIdx = bulk_name_to_idx(

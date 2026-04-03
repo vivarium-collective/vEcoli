@@ -6,7 +6,8 @@ Replication Data Listener
 
 import numpy as np
 from ecoli.library.schema import numpy_schema, listener_schema, attrs
-from vivarium.core.process import Step
+from ecoli.library.schema_types import ORIC_ARRAY, DNAA_BOX_ARRAY, ACTIVE_REPLISOME_ARRAY
+from ecoli.library.ecoli_step import EcoliStep as Step
 
 from ecoli.processes.registries import topology_registry
 
@@ -31,7 +32,35 @@ class ReplicationData(Step):
     name = NAME
     topology = TOPOLOGY
 
-    defaults = {"time_step": 1, "emit_unique": False}
+    config_schema = {
+        'time_step': 'float{1.0}',
+        'emit_unique': 'boolean{false}',
+    }
+
+
+    def inputs(self):
+        return {
+            'oriCs': ORIC_ARRAY,
+            'DnaA_boxes': DNAA_BOX_ARRAY,
+            'active_replisomes': ACTIVE_REPLISOME_ARRAY,
+            'global_time': 'float',
+            'timestep': 'float',
+        }
+
+    def outputs(self):
+        return {
+            'listeners': {
+                'replication_data': {
+                    'fork_coordinates': 'array[integer]',
+                    'fork_domains': 'array[integer]',
+                    'fork_unique_index': 'array[integer]',
+                    'number_of_oric': 'integer',
+                    'free_DnaA_boxes': 'integer',
+                    'total_DnaA_boxes': 'integer',
+                },
+            },
+        }
+
 
     def ports_schema(self):
         return {
@@ -61,7 +90,7 @@ class ReplicationData(Step):
     def update_condition(self, timestep, states):
         return (states["global_time"] % states["timestep"]) == 0
 
-    def next_update(self, timestep, states):
+    def update(self, states, interval=None):
         fork_coordinates, fork_domains, fork_unique_index = attrs(
             states["active_replisomes"], ["coordinates", "domain_index", "unique_index"]
         )

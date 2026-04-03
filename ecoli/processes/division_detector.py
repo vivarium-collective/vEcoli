@@ -1,4 +1,4 @@
-from vivarium.core.process import Step
+from ecoli.library.ecoli_step import EcoliStep as Step
 
 
 class DivisionDetector(Step):

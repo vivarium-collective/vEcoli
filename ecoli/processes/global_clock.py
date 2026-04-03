@@ -1,4 +1,4 @@
-from vivarium.core.process import Process
+from ecoli.library.ecoli_step import EcoliProcess as Process
 
 
 class GlobalClock(Process):
@@ -9,29 +9,48 @@ class GlobalClock(Process):
 
     name = "global_clock"
 
+    config_schema = {}
+
+
+    def inputs(self):
+        return {
+            'global_time': 'float',
+            'next_update_time': 'map[float]',
+        }
+
+    def outputs(self):
+        return {
+            'global_time': 'float',
+        }
+
+
     def ports_schema(self):
         return {
             "global_time": {"_default": 0.0, "_updater": "accumulate"},
             "next_update_time": {"*": {}},
         }
 
-    def calculate_timestep(self, states):
+    def calculate_timestep(self, interval_or_states, states=None):
+        """Calculate the minimum time until a manually time-stepped process
+        needs to update.
+
+        Bridges v1 signature ``(states)`` and v2 signature ``(interval, state)``.
         """
-        Subtract global time from next update times for each manually time-stepped
-        processes to calculate time until a process updates. Use that time as the
-        time step for this process so vivarium-core's internal simulation clock
-        advances by the same amount of time and processes that do not rely on
-        this manual time stepping stay in sync with the ones that do.
-        """
+        if states is None:
+            # v1 call: calculate_timestep(states)
+            view = interval_or_states
+        else:
+            # v2 call: calculate_timestep(interval, state)
+            view = states
         return min(
-            next_update_time - states["global_time"]
-            for next_update_time in states["next_update_time"].values()
+            next_update_time - view["global_time"]
+            for next_update_time in view["next_update_time"].values()
         )
 
-    def next_update(self, timestep, states):
+    def update(self, states, interval):
         """
-        The timestep that we increment global_time by is the same minimum time step
+        The interval that we increment global_time by is the same minimum time step
         that we calculated in calculate_timestep. This guarantees that we never
         accidentally skip over a process update time.
         """
-        return {"global_time": timestep}
+        return {"global_time": interval}

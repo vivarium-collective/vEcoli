@@ -6,7 +6,8 @@ RNA Counts Listener
 
 import numpy as np
 from ecoli.library.schema import numpy_schema, attrs, listener_schema
-from vivarium.core.process import Step
+from ecoli.library.schema_types import RNA_ARRAY
+from ecoli.library.ecoli_step import EcoliStep as Step
 
 from ecoli.processes.registries import topology_registry
 
@@ -30,12 +31,48 @@ class RNACounts(Step):
     name = NAME
     topology = TOPOLOGY
 
-    defaults = {
-        "rna_ids": [],
-        "mrna_indexes": [],
-        "time_step": 1,
-        "emit_unique": False,
+    config_schema = {
+        'rna_ids': 'list[string]',
+        'mrna_indexes': 'array[integer]',
+        'all_TU_ids': 'list[string]',
+        'mRNA_indexes': 'array[integer]',
+        'mRNA_TU_ids': 'list[string]',
+        'rRNA_indexes': 'array[integer]',
+        'rRNA_TU_ids': 'list[string]',
+        'all_cistron_ids': 'list[string]',
+        'cistron_is_mRNA': 'array[integer]',
+        'mRNA_cistron_ids': 'list[string]',
+        'cistron_is_rRNA': 'array[integer]',
+        'rRNA_cistron_ids': 'list[string]',
+        'cistron_tu_mapping_matrix': 'csr_matrix',
+        'time_step': 'float{1.0}',
+        'emit_unique': 'boolean{false}',
     }
+
+
+    def inputs(self):
+        return {
+            'RNAs': RNA_ARRAY,
+            'global_time': 'float',
+            'timestep': 'float',
+        }
+
+    def outputs(self):
+        return {
+            'listeners': {
+                'rna_counts': {
+                    'mRNA_counts': f'array[{self.n_mRNA_TU},integer]',
+                    'full_mRNA_counts': f'array[{self.n_mRNA_TU},integer]',
+                    'partial_mRNA_counts': f'array[{self.n_mRNA_TU},integer]',
+                    'mRNA_cistron_counts': f'array[{self.n_mRNA_cistron},integer]',
+                    'full_mRNA_cistron_counts': f'array[{self.n_mRNA_cistron},integer]',
+                    'partial_mRNA_cistron_counts': f'array[{self.n_mRNA_cistron},integer]',
+                    'partial_rRNA_counts': f'array[{self.n_rRNA_TU},integer]',
+                    'partial_rRNA_cistron_counts': f'array[{self.n_rRNA_cistron},integer]',
+                },
+            },
+        }
+
 
     def __init__(self, parameters=None):
         super().__init__(parameters)
@@ -56,6 +93,12 @@ class RNACounts(Step):
 
         # Get mapping matrix between TUs and cistrons
         self.cistron_tu_mapping_matrix = self.parameters["cistron_tu_mapping_matrix"]
+
+        # Dimension variables for shaped array types
+        self.n_mRNA_TU = len(self.mRNA_TU_ids)
+        self.n_rRNA_TU = len(self.rRNA_TU_ids)
+        self.n_mRNA_cistron = len(self.mRNA_cistron_ids)
+        self.n_rRNA_cistron = len(self.rRNA_cistron_ids)
 
     def ports_schema(self):
         return {
@@ -81,7 +124,7 @@ class RNACounts(Step):
     def update_condition(self, timestep, states):
         return (states["global_time"] % states["timestep"]) == 0
 
-    def next_update(self, timestep, states):
+    def update(self, states, interval=None):
         # Get attributes of mRNAs
         TU_indexes, can_translate, is_full_transcript = attrs(
             states["RNAs"], ["TU_index", "can_translate", "is_full_transcript"]
