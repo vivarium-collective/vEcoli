@@ -870,6 +870,9 @@ class EcoliSim:
 
         print(f"  Seeded in {_time.time()-t0:.2f}s", flush=True)
 
+        # Invalidate cached views since seeding modified state
+        ecoli._invalidate_caches()
+
         self._composite = ecoli
         self.generated_initial_state = None
         self.ecoli = None

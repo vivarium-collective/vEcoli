@@ -126,7 +126,7 @@ class MetabolismRedux(Step):
             },
             'global_time': 'float',
             'timestep': 'integer',
-            'next_update_time': 'float',
+            'next_update_time': 'overwrite[float]',
         }
 
     def outputs(self):
@@ -140,7 +140,7 @@ class MetabolismRedux(Step):
                     'coefficient_values': 'list[float]',
                     'reaction_fluxes': 'list[float]',
                     'exchange_fluxes': 'map[float]',
-                    'objective_value': 'float',
+                    'objective_value': 'overwrite[float]',
                     'shadow_prices': 'list[float]',
                     'reduced_costs': 'list[float]',
                     'target_kinetic_fluxes': 'list[float]',
@@ -148,11 +148,11 @@ class MetabolismRedux(Step):
                     'target_kinetic_bounds': 'list[float]',
                 },
                 'mass': {
-                    'cell_mass': 'float',
-                    'dry_mass': 'float',
+                    'cell_mass': 'overwrite[float]',
+                    'dry_mass': 'overwrite[float]',
                 },
             },
-            'next_update_time': 'float',
+            'next_update_time': 'overwrite[float]',
         }
 
 

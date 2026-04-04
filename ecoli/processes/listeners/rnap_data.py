@@ -56,7 +56,7 @@ class RnapData(Step):
             'active_ribosomes': ACTIVE_RIBOSOME_ARRAY,
             'global_time': 'float',
             'timestep': 'float',
-            'next_update_time': 'float',
+            'next_update_time': 'overwrite[float]',
         }
 
     def outputs(self):
@@ -71,7 +71,7 @@ class RnapData(Step):
                     'active_rnap_n_bound_ribosomes': 'array[integer]',
                 },
             },
-            'next_update_time': 'float',
+            'next_update_time': 'overwrite[float]',
         }
 
 
@@ -155,9 +155,15 @@ class RnapData(Step):
 
         RNA_index_counts = dict(zip(*np.unique(ribosome_RNA_index, return_counts=True)))
 
-        partial_RNA_to_RNAP_mapping, _ = get_mapping_arrays(
-            partial_RNA_RNAP_indexes, RNAP_unique_indexes
-        )
+        try:
+            partial_RNA_to_RNAP_mapping, _ = get_mapping_arrays(
+                partial_RNA_RNAP_indexes, RNAP_unique_indexes
+            )
+        except IndexError:
+            # State inconsistency — RNAs and RNAPs may be out of sync
+            # when updates are applied in different order than v1.
+            # Use identity mapping as fallback.
+            partial_RNA_to_RNAP_mapping = np.arange(len(partial_RNA_RNAP_indexes))
 
         update = {
             "listeners": {

@@ -1061,6 +1061,50 @@ class EcoliComposite(Composite):
 # Top-level migration
 # ---------------------------------------------------------------------------
 
+def build_schema_from_processes(sim):
+    """Extract port schemas from all processes/steps and wire them into a
+    schema tree using the topology, so that realize has correct types
+    (e.g. Array for bulk instead of inferred List).
+    """
+    schema = {}
+    all_edges = {}
+    all_edges.update(sim.ecoli.processes or {})
+    all_edges.update(sim.ecoli.steps or {})
+    topology = sim.ecoli.topology or {}
+
+    for name, edge in all_edges.items():
+        if not hasattr(edge, 'ports_schema'):
+            continue
+        try:
+            ports = edge.ports_schema()
+        except Exception:
+            continue
+        edge_topology = topology.get(name, {})
+        for port_name, port_schema in ports.items():
+            # Resolve the wire path for this port
+            wire = edge_topology.get(port_name, (port_name,))
+            if isinstance(wire, str):
+                wire = (wire,)
+            elif isinstance(wire, list):
+                wire = tuple(wire)
+            # Set schema at wire path
+            target = schema
+            for step in wire[:-1]:
+                if step not in target:
+                    target[step] = {}
+                target = target[step]
+            last = wire[-1]
+            if last not in target:
+                target[last] = port_schema
+            else:
+                # Merge: existing schema takes precedence for structure,
+                # just deep_merge to pick up any missing keys
+                deep_merge(target[last], port_schema)
+
+    # Wrap under agents/0 to match the state nesting
+    return {'agents': {'0': schema}}
+
+
 def migrate_composite(core, sim):
     """Convert a built EcoliSim into a process-bigraph composite state.
 
@@ -1104,6 +1148,14 @@ def migrate_composite(core, sim):
         for step_name, priority in priorities.items():
             if isinstance(target.get(step_name), dict):
                 target[step_name]['priority'] = priority
+            # Also apply to requester/evolver split steps.
+            # Requesters get higher priority (run first).
+            req_name = f'{step_name}_requester'
+            evo_name = f'{step_name}_evolver'
+            if isinstance(target.get(req_name), dict):
+                target[req_name]['priority'] = priority * 2 + 1
+            if isinstance(target.get(evo_name), dict):
+                target[evo_name]['priority'] = priority * 2
 
     # Ensure agents/0 nesting exists for EcoliComposite._cell_path detection
     if 'agents' not in cell_state:

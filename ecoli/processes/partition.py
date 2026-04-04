@@ -17,6 +17,8 @@ which reads the requests and allocates molecular counts for the evolve_state.
 import abc
 import warnings
 
+import numpy as np
+
 from ecoli.library.ecoli_step import EcoliStep as Step, EcoliProcess as Process
 from ecoli.library.schema_types import UNIQUE_TYPES
 from vivarium.library.dict_utils import deep_merge
@@ -66,10 +68,10 @@ class Requester(Step):
 
     def outputs(self):
         return {
-            'request': 'map[map[list[integer]]]',
-            'process': 'tuple',
-            'next_update_time': 'float',
-            'listeners': 'map[map[float]]',
+            'request': {'_type': 'overwrite[map[list[integer]]]', '_default': {}},
+            'process': 'quote',
+            'next_update_time': 'overwrite[float]',
+            'listeners': 'map[map[overwrite[float]]]',
         }
 
     def __init__(self, parameters=None):
@@ -169,6 +171,8 @@ class Evolver(Step):
     write to everything except allocate, global_time, and timestep.
     """
 
+    _input_only_ports = {'allocate', 'global_time', 'timestep'}
+
     config_schema = {
         'process': {'_type': 'quote', '_default': None},
     }
@@ -179,6 +183,11 @@ class Evolver(Step):
     def outputs(self):
         input_only = {'allocate', 'global_time', 'timestep'}
         all_ports = _typed_ports(self.ports_schema())
+        # Override specific output semantics
+        if 'next_update_time' in all_ports:
+            all_ports['next_update_time'] = 'overwrite[float]'
+        if 'process' in all_ports:
+            all_ports['process'] = 'quote'
         return {k: v for k, v in all_ports.items() if k not in input_only}
 
     def __init__(self, parameters=None):
@@ -229,7 +238,10 @@ class Evolver(Step):
 
     def update(self, states, interval=None):
         allocations = states.pop("allocate")
-        states = deep_merge(states, allocations)
+        for key, value in allocations.items():
+            if isinstance(value, list):
+                value = np.array(value)
+            states[key] = value
         proc_state = states.get("process")
         if proc_state is None or (isinstance(proc_state, (list, tuple)) and len(proc_state) == 0):
             return {}

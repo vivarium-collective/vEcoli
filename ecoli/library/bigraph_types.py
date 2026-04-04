@@ -505,12 +505,17 @@ class BulkArray(Array):
     pass
 
 
+_BULK_APPLY_COUNT = [0]
+_BULK_TOTAL_DELTA = [0]
+
 @dispatch
 def apply(schema: BulkArray, state, update, path):
     """Apply sparse index updates to the 'count' field of a bulk array."""
     if isinstance(update, list):
         # Sparse index updates: [(index_array, count_delta), ...]
         for idx, delta in update:
+            _BULK_APPLY_COUNT[0] += 1
+            _BULK_TOTAL_DELTA[0] += int(delta.sum()) if hasattr(delta, 'sum') else int(delta)
             state['count'][idx] += delta
         return state, []
 

@@ -54,9 +54,9 @@ class ReplicationData(Step):
                     'fork_coordinates': 'array[integer]',
                     'fork_domains': 'array[integer]',
                     'fork_unique_index': 'array[integer]',
-                    'number_of_oric': 'integer',
-                    'free_DnaA_boxes': 'integer',
-                    'total_DnaA_boxes': 'integer',
+                    'number_of_oric': 'overwrite[integer]',
+                    'free_DnaA_boxes': 'overwrite[integer]',
+                    'total_DnaA_boxes': 'overwrite[integer]',
                 },
             },
         }

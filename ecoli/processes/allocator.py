@@ -65,8 +65,8 @@ class Allocator(Step):
 
     def outputs(self):
         return {
-            'allocate': 'map[map[list[integer]]]',
-            'request': 'map[map[list[integer]]]',
+            'allocate': 'overwrite[map[map[list[integer]]]]',
+            'request': 'overwrite[map[map[list[integer]]]]',
             'listeners': {
                 'atp': {
                     'atp_requested': 'list[integer]',

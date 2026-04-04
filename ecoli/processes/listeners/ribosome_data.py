@@ -57,7 +57,7 @@ class RibosomeData(Step):
             'RNAs': RNA_ARRAY,
             'global_time': 'float',
             'timestep': 'float',
-            'next_update_time': 'float',
+            'next_update_time': 'overwrite[float]',
         }
 
     def outputs(self):
@@ -66,20 +66,20 @@ class RibosomeData(Step):
                 'ribosome_data': {
                     'n_ribosomes_per_transcript': f'array[{self.n_monomers},integer]',
                     'n_ribosomes_on_partial_mRNA_per_transcript': f'array[{self.n_monomers},integer]',
-                    'total_rRNA_initiated': 'integer',
-                    'total_rRNA_init_prob': 'float',
-                    'rRNA5S_initiated': 'integer',
-                    'rRNA16S_initiated': 'integer',
-                    'rRNA23S_initiated': 'integer',
-                    'rRNA5S_init_prob': 'float',
-                    'rRNA16S_init_prob': 'float',
-                    'rRNA23S_init_prob': 'float',
+                    'total_rRNA_initiated': 'overwrite[integer]',
+                    'total_rRNA_init_prob': 'overwrite[float]',
+                    'rRNA5S_initiated': 'overwrite[integer]',
+                    'rRNA16S_initiated': 'overwrite[integer]',
+                    'rRNA23S_initiated': 'overwrite[integer]',
+                    'rRNA5S_init_prob': 'overwrite[float]',
+                    'rRNA16S_init_prob': 'overwrite[float]',
+                    'rRNA23S_init_prob': 'overwrite[float]',
                     'mRNA_TU_index': 'array[integer]',
                     'n_ribosomes_on_each_mRNA': 'array[integer]',
                     'protein_mass_on_polysomes': 'array[float]',
                 },
             },
-            'next_update_time': 'float',
+            'next_update_time': 'overwrite[float]',
         }
 
 

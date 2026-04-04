@@ -137,7 +137,7 @@ class ChromosomeStructure(Step):
             'chromosomal_segments': CHROMOSOMAL_SEGMENT_ARRAY,
             'global_time': 'float',
             'timestep': 'integer',
-            'next_update_time': 'float',
+            'next_update_time': 'overwrite[float]',
         }
 
     def outputs(self):
@@ -158,7 +158,7 @@ class ChromosomeStructure(Step):
             'promoters': PROMOTER_ARRAY,
             'genes': GENE_ARRAY,
             'DnaA_boxes': DNAA_BOX_ARRAY,
-            'next_update_time': 'float',
+            'next_update_time': 'overwrite[float]',
         }
 
 
