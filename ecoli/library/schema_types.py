@@ -35,27 +35,27 @@ BULK_ARRAY = (
 # ---------------------------------------------------------------------------
 # Unique molecule arrays
 # ---------------------------------------------------------------------------
-PROMOTER_ARRAY = f'array[TU_index:integer|coordinates:integer|domain_index:integer|bound_TF:array[23,boolean]|{_UNIQUE_TAIL}]'
+PROMOTER_ARRAY = f'unique_array[TU_index:integer|coordinates:integer|domain_index:integer|bound_TF:array[23,boolean]|{_UNIQUE_TAIL}]'
 
-RNA_ARRAY = f'array[TU_index:integer|transcript_length:integer|is_mRNA:boolean|is_full_transcript:boolean|can_translate:boolean|RNAP_index:integer|{_UNIQUE_TAIL}]'
+RNA_ARRAY = f'unique_array[TU_index:integer|transcript_length:integer|is_mRNA:boolean|is_full_transcript:boolean|can_translate:boolean|RNAP_index:integer|{_UNIQUE_TAIL}]'
 
-ACTIVE_RNAP_ARRAY = f'array[domain_index:integer|coordinates:integer|is_forward:boolean|{_UNIQUE_TAIL}]'
+ACTIVE_RNAP_ARRAY = f'unique_array[domain_index:integer|coordinates:integer|is_forward:boolean|{_UNIQUE_TAIL}]'
 
-ACTIVE_RIBOSOME_ARRAY = f'array[protein_index:integer|peptide_length:integer|mRNA_index:integer|pos_on_mRNA:integer|{_UNIQUE_TAIL}]'
+ACTIVE_RIBOSOME_ARRAY = f'unique_array[protein_index:integer|peptide_length:integer|mRNA_index:integer|pos_on_mRNA:integer|{_UNIQUE_TAIL}]'
 
-ACTIVE_REPLISOME_ARRAY = f'array[domain_index:integer|right_replichore:boolean|coordinates:integer|{_UNIQUE_TAIL}]'
+ACTIVE_REPLISOME_ARRAY = f'unique_array[domain_index:integer|right_replichore:boolean|coordinates:integer|{_UNIQUE_TAIL}]'
 
-FULL_CHROMOSOME_ARRAY = f'array[division_time:float|has_triggered_division:boolean|domain_index:integer|{_UNIQUE_TAIL}]'
+FULL_CHROMOSOME_ARRAY = f'unique_array[division_time:float|has_triggered_division:boolean|domain_index:integer|{_UNIQUE_TAIL}]'
 
-ORIC_ARRAY = f'array[domain_index:integer|{_UNIQUE_TAIL}]'
+ORIC_ARRAY = f'unique_array[domain_index:integer|{_UNIQUE_TAIL}]'
 
-CHROMOSOME_DOMAIN_ARRAY = f'array[domain_index:integer|child_domains:array[2,integer]|{_UNIQUE_TAIL}]'
+CHROMOSOME_DOMAIN_ARRAY = f'unique_array[domain_index:integer|child_domains:array[2,integer]|{_UNIQUE_TAIL}]'
 
-CHROMOSOMAL_SEGMENT_ARRAY = f'array[boundary_molecule_indexes:array[2,integer]|boundary_coordinates:array[2,integer]|domain_index:integer|linking_number:float|{_UNIQUE_TAIL}]'
+CHROMOSOMAL_SEGMENT_ARRAY = f'unique_array[boundary_molecule_indexes:array[2,integer]|boundary_coordinates:array[2,integer]|domain_index:integer|linking_number:float|{_UNIQUE_TAIL}]'
 
-GENE_ARRAY = f'array[cistron_index:integer|coordinates:integer|domain_index:integer|{_UNIQUE_TAIL}]'
+GENE_ARRAY = f'unique_array[cistron_index:integer|coordinates:integer|domain_index:integer|{_UNIQUE_TAIL}]'
 
-DNAA_BOX_ARRAY = f'array[coordinates:integer|domain_index:integer|DnaA_bound:boolean|{_UNIQUE_TAIL}]'
+DNAA_BOX_ARRAY = f'unique_array[coordinates:integer|domain_index:integer|DnaA_bound:boolean|{_UNIQUE_TAIL}]'
 
 # ---------------------------------------------------------------------------
 # Convenience mapping: port name → type expression

@@ -37,7 +37,7 @@ from bigraph_schema.schema import (
 from bigraph_schema.methods import (
     infer, set_default, default, serialize, realize, render,
     wrap_default, resolve, reify_schema, validate, merge_update,
-    apply,
+    apply, reconcile,
 )
 
 from vivarium.core.process import Process as VivariumProcess, Step as VivariumStep
@@ -525,6 +525,121 @@ def apply(schema: BulkArray, state, update, path):
 
 
 # ============================================================================
+# UniqueArray — structured array for unique molecules (set/add/delete ops)
+# ============================================================================
+
+@dataclass(kw_only=True)
+class UniqueArray(Array):
+    """Structured numpy array for unique molecule populations.
+
+    Updates use dict format with 'set', 'add', and 'delete' keys:
+      - set: list of {col: values} dicts — overwrite active rows
+      - add: list of {col: values} dicts — activate inactive rows
+      - delete: list of index arrays — deactivate rows
+
+    The reconciler batches operations from multiple steps and applies
+    them in order: set → add → delete.
+    """
+    pass
+
+
+def _get_free_indices(array, n_new):
+    """Find inactive slots in a unique molecule array, extending if needed."""
+    from ecoli.library.schema import get_free_indices
+    return get_free_indices(array, n_new)
+
+
+@dispatch
+def reconcile(schema: UniqueArray, updates: list):
+    """Batch set/add/delete operations across all updates."""
+    sets = []
+    adds = []
+    deletes = []
+
+    for update in updates:
+        if update is None or not isinstance(update, dict):
+            continue
+        if 'set' in update:
+            val = update['set']
+            if isinstance(val, list):
+                sets.extend(val)
+            elif isinstance(val, dict):
+                sets.append(val)
+        if 'add' in update:
+            val = update['add']
+            if isinstance(val, list):
+                adds.extend(val)
+            elif isinstance(val, dict):
+                adds.append(val)
+        if 'delete' in update:
+            val = update['delete']
+            if isinstance(val, list):
+                if len(val) > 0:
+                    if isinstance(val[0], (list, np.ndarray)):
+                        deletes.extend(val)
+                    elif isinstance(val[0], (int, np.integer)):
+                        deletes.append(val)
+            elif isinstance(val, np.ndarray):
+                deletes.append(val)
+
+    result = {}
+    if sets:
+        result['set'] = sets
+    if adds:
+        result['add'] = adds
+    if deletes:
+        result['delete'] = deletes
+    return result if result else None
+
+
+@dispatch
+def apply(schema: UniqueArray, state, update, path):
+    """Apply batched unique molecule operations: set → add → delete."""
+    if update is None or not isinstance(update, dict) or len(update) == 0:
+        return state, []
+
+    if not state.flags.owndata:
+        result = state.copy()
+    else:
+        result = state
+    result.flags.writeable = True
+
+    active_mask = result['_entryState'].view(np.bool_)
+
+    # Save initial active indices for delete operations
+    initially_active_idx = None
+    if 'delete' in update:
+        initially_active_idx = np.nonzero(active_mask)[0]
+
+    # 1. Set operations: overwrite columns for active rows
+    for set_update in update.get('set', []):
+        for col, col_values in set_update.items():
+            result[col][active_mask] = col_values
+
+    # 2. Add operations: activate inactive rows with new data
+    for add_update in update.get('add', []):
+        n_new = len(next(iter(add_update.values())))
+        result, free_indices = _get_free_indices(result, n_new)
+        if 'unique_index' not in add_update:
+            result['unique_index'][free_indices] = (
+                np.arange(n_new) + result.metadata
+            )
+            result.metadata += n_new
+        for col, col_values in add_update.items():
+            result[col][free_indices] = col_values
+        result['_entryState'][free_indices] = 1
+
+    # 3. Delete operations: deactivate rows
+    if initially_active_idx is not None:
+        for delete_indices in update.get('delete', []):
+            rows_to_delete = initially_active_idx[delete_indices]
+            result[rows_to_delete] = np.zeros(1, dtype=result.dtype)
+
+    result.flags.writeable = False
+    return result, []
+
+
+# ============================================================================
 # Type registry
 # ============================================================================
 
@@ -539,4 +654,5 @@ ECOLI_TYPES = {
     'step': StepLink,
     'process': ProcessLink,
     'bulk_array': BulkArray,
+    'unique_array': UniqueArray,
 }
