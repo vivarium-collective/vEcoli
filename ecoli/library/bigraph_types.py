@@ -635,9 +635,37 @@ def reconcile(schema: UniqueArray, updates: list):
     return result if result else None
 
 
+def _as_op_list(value, leaf_check=None):
+    """Normalize a unique-molecule operation value into a list.
+
+    A single operation can be passed as either a dict (one op) or a
+    list of dicts (batched ops). Reconcile produces lists; the
+    reconcile fast-path passes single updates through unchanged, so
+    apply must accept both forms. ``leaf_check`` (used for delete ops)
+    decides whether a list is itself a single op or a batch — for
+    deletes, a list of ints/np.integer IS the single op, while a list
+    whose first element is a list/array is a batch.
+    """
+    if value is None:
+        return ()
+    if isinstance(value, dict):
+        return (value,)
+    if isinstance(value, list):
+        if leaf_check is not None and len(value) > 0 and leaf_check(value[0]):
+            return (value,)
+        return tuple(value)
+    if isinstance(value, np.ndarray):
+        return (value,)
+    return ()
+
+
 @dispatch
 def apply(schema: UniqueArray, state, update, path):
-    """Apply batched unique molecule operations: set → add → delete."""
+    """Apply batched unique molecule operations: set → add → delete.
+
+    Tolerates both reconciled (lists of ops) and raw (single op) forms
+    so the top-level reconcile fast-path can pass single updates through.
+    """
     if update is None or not isinstance(update, dict) or len(update) == 0:
         return state, []
 
@@ -655,12 +683,12 @@ def apply(schema: UniqueArray, state, update, path):
         initially_active_idx = np.nonzero(active_mask)[0]
 
     # 1. Set operations: overwrite columns for active rows
-    for set_update in update.get('set', []):
+    for set_update in _as_op_list(update.get('set')):
         for col, col_values in set_update.items():
             result[col][active_mask] = col_values
 
     # 2. Add operations: activate inactive rows with new data
-    for add_update in update.get('add', []):
+    for add_update in _as_op_list(update.get('add')):
         n_new = len(next(iter(add_update.values())))
         result, free_indices = _get_free_indices(result, n_new)
         if 'unique_index' not in add_update:
@@ -672,9 +700,15 @@ def apply(schema: UniqueArray, state, update, path):
             result[col][free_indices] = col_values
         result['_entryState'][free_indices] = 1
 
-    # 3. Delete operations: deactivate rows
+    # 3. Delete operations: deactivate rows.
+    # A delete payload is either a single list/array of indices (one op)
+    # or a list of such (batched). Distinguish by checking the first
+    # element's type.
+    def _is_index_leaf(x):
+        return isinstance(x, (int, np.integer))
     if initially_active_idx is not None:
-        for delete_indices in update.get('delete', []):
+        for delete_indices in _as_op_list(
+                update.get('delete'), leaf_check=_is_index_leaf):
             rows_to_delete = initially_active_idx[delete_indices]
             result[rows_to_delete] = np.zeros(1, dtype=result.dtype)
 
