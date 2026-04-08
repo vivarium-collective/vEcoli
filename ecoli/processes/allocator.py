@@ -69,8 +69,9 @@ class Allocator(Step):
             'request': 'overwrite[map[map[list[integer]]]]',
             'listeners': {
                 'atp': {
-                    'atp_requested': 'list[integer]',
-                    'atp_allocated_initial': 'list[integer]',
+                    # length n_processes; written as numpy arrays
+                    'atp_requested': f'array[{self.n_processes},integer]',
+                    'atp_allocated_initial': f'array[{self.n_processes},integer]',
                 },
             },
         }

@@ -21,34 +21,7 @@ import copy
 import numpy as np
 
 from bigraph_schema import deep_merge, Edge as BigraphEdge
-
-
-# ---------------------------------------------------------------------------
-# Port classification helpers
-# ---------------------------------------------------------------------------
-
-def _get_output_ports(instance, step_name):
-    """Get the set of output port names for a step instance."""
-    if hasattr(instance, '_output_ports') and instance._output_ports is not None:
-        return instance._output_ports
-    input_only = getattr(instance, '_input_only_ports', None)
-    if input_only is not None:
-        try:
-            all_ports = set(instance.ports_schema().keys())
-        except Exception:
-            return None
-        return all_ports - input_only
-    return None
-
-
-def _split_dep_outputs(step_name, instance, wires):
-    """Return narrowed output wires for the dependency graph."""
-    output_ports = _get_output_ports(instance, step_name)
-    if output_ports is not None:
-        dep = {k: v for k, v in wires.items() if k in output_ports}
-        dep.pop('bulk_total', None)
-        return dep
-    return dict(wires)
+from process_bigraph import wire_step_layers
 
 
 # ---------------------------------------------------------------------------
@@ -387,12 +360,21 @@ def translate_processes(core, tree, topology=None, edge_type=None, step_name=Non
         wires = list_paths(topology)
 
         interface = tree.interface()
-        for port_key in ['inputs', 'outputs']:
-            for port_name in interface.get(port_key, {}):
-                if port_name not in wires:
-                    wires[port_name] = [port_name]
+        input_port_names = set(interface.get('inputs', {}).keys())
+        output_port_names = set(interface.get('outputs', {}).keys())
+        for port_name in input_port_names | output_port_names:
+            if port_name not in wires:
+                wires[port_name] = [port_name]
 
-        dep_output_wires = _split_dep_outputs(step_name or cls.__name__, tree, wires)
+        # Filter outputs to only declared output ports so the dep graph
+        # (which reads `outputs`) doesn't think the step writes to ports
+        # it only reads. process-bigraph's build_step_network falls back
+        # to `outputs` when `_dep_outputs` is unset, so we no longer need
+        # a separate `_dep_outputs` key.
+        # Inputs stay as all wires — processes may read from any wired
+        # port, even ports that are technically declared as outputs (e.g.
+        # the Allocator's read-modify-write of listeners.atp).
+        outputs_wires = {k: v for k, v in wires.items() if k in output_port_names}
 
         state.update({
             '_type': type_name,
@@ -402,8 +384,8 @@ def translate_processes(core, tree, topology=None, edge_type=None, step_name=Non
             '_outputs': tree.outputs(),
             'instance': tree,
             'inputs': copy.deepcopy(wires),
-            'outputs': copy.deepcopy(wires),
-            '_dep_outputs': copy.deepcopy(dep_output_wires)})
+            'outputs': copy.deepcopy(outputs_wires),
+        })
         return state
 
     elif isinstance(tree, dict):
@@ -455,6 +437,8 @@ def migrate_composite(core, sim):
         target = cell_state
 
     if flat_flow:
+        # Assign legacy priorities (some framework code paths still consume
+        # this; remove once verified unused).
         priorities = extract_flow_priorities(flat_flow)
         for step_name, priority in priorities.items():
             if isinstance(target.get(step_name), dict):
@@ -466,55 +450,13 @@ def migrate_composite(core, sim):
             if isinstance(target.get(evo_name), dict):
                 target[evo_name]['priority'] = priority * 2
 
-        # Layer-based flow chain (mirrors v1's vivarium execution layers).
-        #
-        # Steps with no remaining unsatisfied deps form layer 0; each subsequent
-        # layer contains steps whose deps are all in earlier layers. Steps in
-        # the same layer read from the SAME incoming token and write to the
-        # SAME outgoing token, so the dep graph shows them as independent
-        # within a layer.
-        #
-        # Why this matters: process-bigraph's run_steps() batches all
-        # currently-runnable steps, computes their updates without applying
-        # in between, and then reconciles + applies the whole batch atomically.
-        # That gives us v1's per-layer atomicity (every step in a layer sees
-        # the same starting state). A linear chain defeats this because each
-        # step is ready only after the previous one finishes.
-        flow_levels = {}  # step_name -> integer level
-        for step_name in flat_flow.keys():
-            deps = flat_flow.get(step_name) or []
-            if not deps:
-                flow_levels[step_name] = 0
-                continue
-            max_dep_level = -1
-            for dep_path in deps:
-                dep_name = dep_path[-1] if isinstance(dep_path, (list, tuple)) else dep_path
-                if dep_name in flow_levels:
-                    max_dep_level = max(max_dep_level, flow_levels[dep_name])
-            flow_levels[step_name] = max_dep_level + 1
-
-        layers = {}  # level -> list of step names
-        for step_name, level in flow_levels.items():
-            layers.setdefault(level, []).append(step_name)
-
-        target['_flow'] = {}
-        for level in sorted(layers.keys()):
-            target['_flow'][f'_layer_{level}'] = 0
-
-        for level in sorted(layers.keys()):
-            in_token = f'_layer_{level - 1}' if level > 0 else None
-            out_token = f'_layer_{level}'
-            for name in layers[level]:
-                step = target.get(name)
-                if not isinstance(step, dict) or 'instance' not in step:
-                    continue
-                if in_token is not None:
-                    step['inputs']['_flow_in'] = ['_flow', in_token]
-                    step['_triggers'] = {'_flow_in': 'integer'}
-                else:
-                    step['_triggers'] = {'global_time': 'float'}
-                step['outputs']['_flow_out'] = ['_flow', out_token]
-                step['_dep_outputs']['_flow_out'] = ['_flow', out_token]
+        # Wire steps for layer-batched execution. wire_step_layers computes
+        # the topological depth of each step from the dep graph and gives
+        # all steps in a layer a shared incoming/outgoing trigger token, so
+        # process-bigraph's run_steps batches them and apply_updates
+        # reconciles their writes atomically (matching v1 vivarium's
+        # per-layer execution semantics).
+        wire_step_layers(target, flat_flow)
 
     if 'agents' not in cell_state:
         cell_state = {'agents': {'0': cell_state}}

@@ -122,7 +122,7 @@ class ChromosomeStructure(Step):
             'bulk': 'bulk_array',
             'listeners': {
                 'rnap_data': {
-                    'active_rnap_n_bound_ribosomes': 'list[integer]',
+                    'active_rnap_n_bound_ribosomes': 'array[integer]',
                 },
             },
             'active_replisomes': ACTIVE_REPLISOME_ARRAY,
@@ -146,7 +146,7 @@ class ChromosomeStructure(Step):
             'bulk': 'bulk_array',
             'listeners': {
                 'rnap_data': {
-                    'active_rnap_n_bound_ribosomes': 'list[integer]',
+                    'active_rnap_n_bound_ribosomes': 'array[integer]',
                 },
             },
             'active_replisomes': ACTIVE_REPLISOME_ARRAY,
