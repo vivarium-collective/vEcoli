@@ -888,6 +888,67 @@ class EcoliSim:
         elapsed = _time.time() - t0
         print(f"Completed in {elapsed:.2f} seconds", flush=True)
 
+    def _run_composite_native(self):
+        """Run via process-bigraph Composite, skipping the v1 build entirely.
+
+        Unlike :py:meth:`_run_composite`, this path does NOT require
+        ``build_ecoli()`` to have been called first. It constructs the
+        composite document directly from sim_data via
+        :py:func:`ecoli.composites.ecoli_composite.build_composite_native`,
+        bypassing ``Ecoli.generate()`` (the vivarium engine ceremony).
+        """
+        from ecoli.composites.ecoli_composite import build_composite_native
+        from ecoli.library.bigraph_types import ECOLI_TYPES
+        from process_bigraph import Composite
+        from bigraph_schema import allocate_core
+        import time as _time
+
+        # Resolve process classes / topologies / configs from registries
+        # without invoking the vivarium engine. These helpers populate
+        # self.config['processes' | 'topology' | 'process_configs'] in place
+        # via the ConfigEntry descriptors and are required before
+        # Ecoli(config) can run.
+        self.processes = self._retrieve_processes(
+            self.processes,
+            self.add_processes,
+            self.exclude_processes,
+            self.swap_processes,
+        )
+        self.topology = self._retrieve_topology(
+            self.topology, self.processes, self.swap_processes, self.log_updates
+        )
+        self.process_configs = self._retrieve_process_configs(
+            self.process_configs, self.processes
+        )
+
+        core = allocate_core()
+        core.register_types(ECOLI_TYPES)
+
+        print("Building composite document directly from sim_data...", flush=True)
+        t0 = _time.time()
+        state = build_composite_native(core, self.config)
+        print(f"  Built in {_time.time()-t0:.2f}s", flush=True)
+
+        print("Creating composite (with realize)...", flush=True)
+        t0 = _time.time()
+        ecoli = Composite({'schema': {}, 'state': state}, core=core)
+        print(f"  Composite created in {_time.time()-t0:.2f}s", flush=True)
+
+        # Steps should only run when triggered by global_clock,
+        # not from initial state. Clear to_run so the first cycle
+        # starts from global_clock's update of global_time.
+        ecoli.to_run = []
+
+        self._composite = ecoli
+        self.generated_initial_state = None
+        self.ecoli = None
+
+        print(f"Running composite for {self.max_duration}s...", flush=True)
+        t0 = _time.time()
+        ecoli.run(float(self.max_duration))
+        elapsed = _time.time() - t0
+        print(f"Completed in {elapsed:.2f} seconds", flush=True)
+
     def run(self):
         """Create and run an EcoliSim experiment. If the simulation reaches
         the maximum duration specified by ``config['max_duration']``, it will
@@ -898,13 +959,21 @@ class EcoliSim:
             Run :py:meth:`~ecoli.experiments.ecoli_master_sim.EcoliSim.build_ecoli`
             before calling :py:meth:`~ecoli.experiments.ecoli_master_sim.EcoliSim.run`!
         """
+        engine = self.config.get("engine")
+
+        if engine == "composite_native":
+            # Native path constructs the composite directly from sim_data
+            # without requiring the v1 vivarium build_ecoli() pass.
+            self._run_composite_native()
+            return
+
         if self.ecoli is None:
             raise RuntimeError(
                 "Build the composite by calling build_ecoli() \
                 before calling run()."
             )
 
-        if self.config.get("engine") == "composite":
+        if engine == "composite":
             self._run_composite()
             return
 

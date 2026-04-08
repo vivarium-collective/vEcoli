@@ -17,11 +17,13 @@ Provides:
 """
 
 import copy
+from copy import deepcopy
 
 import numpy as np
 
 from bigraph_schema import deep_merge, Edge as BigraphEdge
 from process_bigraph import wire_step_layers
+from vivarium.core.engine import _StepGraph
 
 
 # ---------------------------------------------------------------------------
@@ -462,3 +464,404 @@ def migrate_composite(core, sim):
         cell_state = {'agents': {'0': cell_state}}
 
     return cell_state
+
+
+# ---------------------------------------------------------------------------
+# Native composite builder (no vivarium composer / engine appeal)
+# ---------------------------------------------------------------------------
+
+def build_composite_native(core, sim_config):
+    """Build a process-bigraph composite document directly from sim_data.
+
+    Does **not** instantiate :py:class:`ecoli.composites.ecoli_master.Ecoli`
+    or any vivarium composer. Walks the registries and ``LoadSimData``
+    directly to assemble the same processes/steps/flow/topology/state
+    that the v1 composer would have built — but emits a process-bigraph
+    composite document, not a vivarium composite.
+
+    Returns a state dict shaped as ``{'agents': {<agent_id>: {...}}}``,
+    ready for ``Composite({'schema': {}, 'state': state}, core=core)``.
+    """
+    from ecoli.library.sim_data import LoadSimData
+
+    load_sim_data = LoadSimData(**sim_config)
+
+    processes, steps, flow, partitioned_processes = (
+        _build_processes_steps_flow(load_sim_data, sim_config))
+    topology = _build_full_topology(sim_config, partitioned_processes, steps)
+    initial_cell_state = _build_initial_state(
+        load_sim_data, sim_config, steps)
+
+    # If multi-cell or spatial, the initial state may already be wrapped.
+    agent_id = sim_config.get('agent_id', '0')
+    if 'agents' in initial_cell_state:
+        cell_inner = initial_cell_state['agents'][agent_id]
+    else:
+        cell_inner = initial_cell_state
+
+    cell_state = {}
+    cell_state.update(cell_inner)
+
+    for name, instance in {**processes, **steps}.items():
+        edge_topology = topology.get(name)
+        edge_type = 'process' if name in processes else 'step'
+        cell_state[name] = _build_edge(
+            core, instance, edge_topology, edge_type=edge_type, step_name=name)
+
+    # Listener seeding: still needed until per-process initial_state()
+    # methods replace the seed_port_defaults stopgap.
+    _make_arrays_writeable(cell_state)
+    seed_port_defaults(cell_state)
+    _seed_listeners(cell_state)
+
+    if flow:
+        wire_step_layers(cell_state, flow)
+
+    return {'agents': {agent_id: cell_state}}
+
+
+def _build_processes_steps_flow(load_sim_data, config):
+    """Build process/step instances and the flow dep graph from sim_data.
+
+    Direct port of the build logic that lives in
+    ``Ecoli.generate_processes_and_steps``, with vivarium-specific bits
+    (``schema_override``, ``self.partitioned_processes``) removed.
+    Returns ``(processes, steps, flow, partitioned_processes)``.
+    """
+    from ecoli.processes.partition import (
+        PartitionedProcess, Requester, Evolver, Step,
+    )
+    from ecoli.processes.allocator import Allocator
+    from ecoli.processes.unique_update import UniqueUpdate
+    from ecoli.processes.cell_division import (
+        Division, MarkDPeriod, StopAfterDivision)
+    from ecoli.library.logging_tools import make_logging_process
+    from ecoli.library.sim_data import RAND_MAX
+    from reconstruction.ecoli.dataclasses.process.replication import MAX_TIMESTEP
+
+    time_step = config["time_step"]
+    if time_step > MAX_TIMESTEP:
+        raise ValueError(
+            f"Time step {time_step} is greater than the maximum time step "
+            f"{MAX_TIMESTEP} defined in reconstruction/ecoli/dataclasses/"
+            f"process/replication.py. Edit and re-run ParCa with a larger "
+            f"maximum or use a smaller time step.")
+
+    # Resolve "sim_data" / "default" / dict process configs into actual configs.
+    # Mirrors the in-place mutation that v1 does, but on a local copy so
+    # repeated calls remain idempotent.
+    process_configs = {
+        name: cfg for name, cfg in config["process_configs"].items()
+    }
+    for process in process_configs.keys():
+        cfg = process_configs[process]
+        if cfg == "sim_data":
+            process_configs[process] = load_sim_data.get_config_by_name(
+                process, time_step)
+        elif cfg == "default":
+            process_configs[process] = None
+        elif isinstance(cfg, dict):
+            try:
+                default = load_sim_data.get_config_by_name(process, time_step)
+            except KeyError:
+                default = config["processes"][process].defaults
+            process_configs[process] = deepcopy(default)
+            process_configs[process] = deep_merge(
+                process_configs[process], cfg)
+            if "seed" in process_configs[process]:
+                process_configs[process]["seed"] = (
+                    process_configs[process]["seed"] + config["seed"]
+                ) % RAND_MAX
+
+    processes = {}
+    steps = {}
+    flow = {}
+    partitioned_processes = []
+
+    for process_name, process_class in config["processes"].items():
+        if issubclass(process_class, PartitionedProcess):
+            parallel = process_configs[process_name].pop("_parallel", False)
+            if parallel and process_name == "ecoli-transcript-initiation":
+                raise ValueError(
+                    "Transcript initiation cannot be run in parallel due to "
+                    "creation of unique indices in the process.")
+            process = process_class(process_configs[process_name])
+            evo_cls = Evolver
+            req_cls = Requester
+            if config["log_updates"]:
+                evo_cls = make_logging_process(Evolver)
+                req_cls = make_logging_process(Requester)
+            steps[f"{process_name}_evolver"] = evo_cls({
+                "time_step": time_step,
+                "process": process,
+                "_parallel": parallel,
+            })
+            steps[f"{process_name}_requester"] = req_cls({
+                "time_step": time_step,
+                "process": process,
+                "_parallel": parallel,
+            })
+            partitioned_processes.append(process_name)
+        elif issubclass(process_class, Step):
+            cls = process_class
+            if config["log_updates"]:
+                cls = make_logging_process(cls)
+            steps[process_name] = cls(process_configs[process_name])
+        else:
+            cls = process_class
+            if config["log_updates"]:
+                cls = make_logging_process(cls)
+            processes[process_name] = cls(process_configs[process_name])
+
+    # Parse flow into execution layers, inserting Allocator + UniqueUpdate.
+    step_graph = _StepGraph()
+    for process in config["processes"]:
+        deps = config["flow"].get(process, [])
+        tuplified_deps = []
+        for dep_path in deps:
+            if dep_path[-1] in partitioned_processes:
+                tuplified_deps.append(
+                    tuple(dep_path[:-1]) + (f"{dep_path[-1]}_evolver",))
+            else:
+                tuplified_deps.append(tuple(dep_path))
+        if process in partitioned_processes:
+            step_graph.add((f"{process}_requester",), tuplified_deps)
+            step_graph.add((f"{process}_evolver",),
+                           [(f"{process}_requester",)])
+        elif process in steps:
+            step_graph.add((process,), tuplified_deps)
+
+    layers = step_graph.get_execution_layers()
+    allocator_counter = 1
+    unique_update_counter = 1
+    for layer_steps in layers:
+        requesters = False
+        for step_path in layer_steps:
+            if "evolver" in step_path[-1]:
+                flow[step_path[-1]] = [(f"allocator_{allocator_counter - 1}",)]
+            elif unique_update_counter > 1:
+                flow[step_path[-1]] = [
+                    (f"unique_update_{unique_update_counter - 1}",)]
+                if "requester" in step_path[-1]:
+                    requesters = True
+            else:
+                flow[step_path[-1]] = []
+        if requesters:
+            flow[f"allocator_{allocator_counter}"] = layer_steps
+            allocator_counter += 1
+        else:
+            flow[f"unique_update_{unique_update_counter}"] = [step_path]
+            unique_update_counter += 1
+
+    # Add Allocator Steps
+    allocator_config = load_sim_data.get_allocator_config(
+        time_step, process_names=partitioned_processes)
+    for i in range(1, allocator_counter):
+        steps[f"allocator_{i}"] = Allocator(allocator_config)
+
+    # Add UniqueUpdate Steps
+    unique_mols = (
+        load_sim_data.sim_data.internal_state
+    ).unique_molecule.unique_molecule_definitions.keys()
+    unique_topo = {
+        unique_mol + "s": ("unique", unique_mol)
+        for unique_mol in unique_mols
+        if unique_mol not in ["active_ribosome", "DnaA_box"]
+    }
+    unique_topo["active_ribosome"] = ("unique", "active_ribosome")
+    unique_topo["DnaA_boxes"] = ("unique", "DnaA_box")
+    params = {"unique_topo": unique_topo, "emit_unique": config["emit_unique"]}
+    for i in range(1, unique_update_counter):
+        steps[f"unique_update_{i}"] = UniqueUpdate(params)
+
+    # Division steps
+    if config["divide"]:
+        # Native v2 division references the v1 Ecoli composer for daughter
+        # cell construction. That's a v1-only path; if you need composite
+        # division, this needs to be ported separately.
+        import ecoli.composites.ecoli_master as _ecoli_master
+        division_config = {
+            "division_threshold": config["division_threshold"],
+            "agent_id": config["agent_id"],
+            "composer": _ecoli_master.Ecoli,
+            "composer_config": config,
+            "dry_mass_inc_dict":
+                load_sim_data.sim_data.expectedDryMassIncreaseDict,
+            "seed": config["seed"],
+        }
+        steps["division"] = Division(division_config)
+        if config["d_period"]:
+            steps["mark_d_period"] = MarkDPeriod()
+            flow["mark_d_period"] = [
+                (f"unique_update_{unique_update_counter - 1}",)]
+            steps[f"unique_update_{unique_update_counter}"] = UniqueUpdate(params)
+            flow[f"unique_update_{unique_update_counter}"] = [("mark_d_period",)]
+            flow["division"] = [(f"unique_update_{unique_update_counter}",)]
+        else:
+            flow["division"] = [(f"unique_update_{unique_update_counter - 1}",)]
+        if config["generations"] is not None:
+            processes["stop-after-division"] = StopAfterDivision()
+
+    return processes, steps, flow, partitioned_processes
+
+
+def _build_full_topology(config, partitioned_processes, steps):
+    """Build the augmented topology dict from config and the step set.
+
+    Direct port of ``Ecoli.generate_topology``.
+    """
+    topology = {}
+    for process_id, ports in config["topology"].items():
+        if process_id in partitioned_processes:
+            topology[f"{process_id}_requester"] = deepcopy(ports)
+            topology[f"{process_id}_evolver"] = deepcopy(ports)
+            if config["log_updates"]:
+                topology[f"{process_id}_evolver"]["log_update"] = (
+                    "log_update", f"{process_id}_evolver")
+                topology[f"{process_id}_requester"]["log_update"] = (
+                    "log_update", f"{process_id}_requester")
+            topology[f"{process_id}_requester"]["request"] = (
+                "request", process_id)
+            topology[f"{process_id}_evolver"]["allocate"] = (
+                "allocate", process_id)
+            topology[f"{process_id}_requester"]["next_update_time"] = (
+                "next_update_time", process_id)
+            topology[f"{process_id}_evolver"]["next_update_time"] = (
+                "next_update_time", process_id)
+            topology[f"{process_id}_requester"]["process"] = (
+                "process", process_id)
+            topology[f"{process_id}_evolver"]["process"] = (
+                "process", process_id)
+            topology[f"{process_id}_requester"]["global_time"] = ("global_time",)
+            topology[f"{process_id}_evolver"]["global_time"] = ("global_time",)
+        else:
+            topology[process_id] = deepcopy(ports)
+            if config["log_updates"]:
+                topology[process_id]["log_update"] = ("log_update", process_id)
+
+    if config["divide"]:
+        if config["d_period"]:
+            topology["mark_d_period"] = {
+                "full_chromosome": tuple(config["chromosome_path"]),
+                "global_time": ("global_time",),
+                "divide": ("divide",),
+            }
+        topology["division"] = {
+            "division_variable": tuple(config["division_variable"]),
+            "full_chromosome": tuple(config["chromosome_path"]),
+            "agents": ("..", "..", "agents"),
+            "media_id": ("environment", "media_id"),
+            "division_threshold": ("division_threshold",),
+        }
+        if config["generations"] is not None:
+            topology["stop-after-division"] = {"agents": ("..", "..", "agents")}
+
+    # Add Allocator and UniqueUpdate topologies
+    allocator_topo = {
+        "request": ("request",),
+        "allocate": ("allocate",),
+        "bulk": ("bulk",),
+    }
+    for step_name, step in steps.items():
+        if "unique_update" in step_name:
+            topology[step_name] = step.unique_topo.copy()
+        elif "allocator" in step_name:
+            topology[step_name] = allocator_topo.copy()
+
+    return topology
+
+
+def _build_initial_state(load_sim_data, config, steps):
+    """Build the cell initial state dict from sim_data.
+
+    Direct port of ``Ecoli.initial_state``. Pulls bulk + unique molecule +
+    environment + boundary state from ``LoadSimData.generate_initial_state``
+    (or a saved JSON if specified), applies any user overrides, and adds
+    the shared partitioned-process instance dict under ``process``.
+    """
+    from ecoli.library.json_state import get_state_from_file
+    from wholecell.utils.filepath import is_cloud_uri
+
+    full_initial_state = config.get("initial_state", None)
+    if not full_initial_state:
+        initial_state_file = config.get("initial_state_file", None)
+        if not initial_state_file:
+            full_initial_state = load_sim_data.generate_initial_state()
+        else:
+            if is_cloud_uri(initial_state_file) or initial_state_file.startswith("/"):
+                state_path = initial_state_file
+            else:
+                state_path = f"data/{initial_state_file}.json"
+            full_initial_state = get_state_from_file(path=state_path)
+
+    if "agents" in full_initial_state:
+        agent_initial_state = full_initial_state["agents"][
+            config.get("agent_id", "0")]
+    else:
+        agent_initial_state = full_initial_state
+
+    initial_state_overrides = config.get("initial_state_overrides", [])
+    if initial_state_overrides:
+        bulk_map = {
+            bulk_id: row_id
+            for row_id, bulk_id in enumerate(agent_initial_state["bulk"]["id"])
+        }
+    for override_file in initial_state_overrides:
+        override = get_state_from_file(path=f"data/{override_file}.json")
+        bulk_overrides = override.pop("bulk", {})
+        agent_initial_state["bulk"].flags.writeable = True
+        for molecule, count in bulk_overrides.items():
+            agent_initial_state["bulk"]["count"][bulk_map[molecule]] = count
+        agent_initial_state["bulk"].flags.writeable = False
+        deep_merge(agent_initial_state, override)
+
+    # Place shared PartitionedProcess instances under ('process',) so the
+    # Requester and Evolver pair can both reach the same parameter object.
+    agent_initial_state["process"] = {
+        step.parameters["process"].name: (step.parameters["process"],)
+        for step in steps.values()
+        if "process" in step.parameters
+    }
+    return full_initial_state
+
+
+def _build_edge(core, instance, topology, edge_type='step', step_name=None):
+    """Construct a process-bigraph edge dict for one process/step instance."""
+    cls = type(instance)
+    instance.core = core
+    if not hasattr(instance, '_config'):
+        instance._config = instance.parameters
+    if not hasattr(cls, 'config_schema'):
+        cls.config_schema = {}
+
+    if edge_type == 'process':
+        type_name = 'process'
+        state = {'interval': 1.0}
+    else:
+        type_name = 'step'
+        state = {'priority': 1.0}
+
+    if topology is None:
+        topology = getattr(instance, 'topology', {}) or {}
+    wires = list_paths(topology) or {}
+
+    interface = instance.interface()
+    input_port_names = set(interface.get('inputs', {}).keys())
+    output_port_names = set(interface.get('outputs', {}).keys())
+    for port_name in input_port_names | output_port_names:
+        if port_name not in wires:
+            wires[port_name] = [port_name]
+
+    outputs_wires = {k: v for k, v in wires.items() if k in output_port_names}
+
+    state.update({
+        '_type': type_name,
+        'address': f'local:{cls.__name__}',
+        'config': instance.parameters,
+        '_inputs': instance.inputs(),
+        '_outputs': instance.outputs(),
+        'instance': instance,
+        'inputs': copy.deepcopy(wires),
+        'outputs': copy.deepcopy(outputs_wires),
+    })
+    return state

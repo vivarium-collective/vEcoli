@@ -44,6 +44,55 @@ def run_v1(duration):
     return runtime, initial_bulk, final_bulk, None
 
 
+def run_v2_native(duration):
+    """Run native composite engine (no v1 build), return (runtime, initial_bulk, final_bulk)."""
+    from ecoli.experiments.ecoli_master_sim import EcoliSim
+    from ecoli.composites.ecoli_composite import build_composite_native
+    from ecoli.library.bigraph_types import ECOLI_TYPES
+    from process_bigraph import Composite
+    from bigraph_schema import allocate_core
+
+    sim = EcoliSim.from_file()
+    sim.max_duration = int(duration)
+    sim.emitter = 'null'
+    sim.divide = False
+
+    # Resolve registries (cheap, no vivarium engine)
+    sim.processes = sim._retrieve_processes(
+        sim.processes, sim.add_processes, sim.exclude_processes, sim.swap_processes)
+    sim.topology = sim._retrieve_topology(
+        sim.topology, sim.processes, sim.swap_processes, sim.log_updates)
+    sim.process_configs = sim._retrieve_process_configs(
+        sim.process_configs, sim.processes)
+
+    core = allocate_core()
+    core.register_types(ECOLI_TYPES)
+
+    state = build_composite_native(core, sim.config)
+    composite = Composite({'schema': {}, 'state': state}, core=core)
+    composite.to_run = []
+
+    # Initial bulk
+    if 'agents' in composite.state:
+        cell = composite.state['agents'][next(iter(composite.state['agents']))]
+    else:
+        cell = composite.state
+    initial_bulk = cell['bulk']['count'].copy()
+
+    t0 = time.time()
+    composite.run(float(duration))
+    runtime = time.time() - t0
+
+    # Final bulk
+    if 'agents' in composite.state:
+        cell = composite.state['agents'][next(iter(composite.state['agents']))]
+    else:
+        cell = composite.state
+    final_bulk = cell['bulk']['count'].copy()
+
+    return runtime, initial_bulk, final_bulk
+
+
 def run_v2(duration):
     """Run composite engine, return (runtime, initial_bulk, final_bulk)."""
     from ecoli.experiments.ecoli_master_sim import EcoliSim
@@ -113,8 +162,8 @@ with open(sys.argv[1], 'wb') as f:
     v1_runtime, v1_init, v1_final, v1_ts = run_in_subprocess('run_v1', duration)
     print(f"  v1 done: {v1_runtime:.2f}s wall time\n", flush=True)
 
-    print("Running v2 (composite)...", flush=True)
-    v2_runtime, v2_init, v2_final = run_in_subprocess('run_v2', duration)
+    print("Running v2 (composite, native build)...", flush=True)
+    v2_runtime, v2_init, v2_final = run_in_subprocess('run_v2_native', duration)
     print(f"  v2 done: {v2_runtime:.2f}s wall time\n", flush=True)
 
     # Check initial states match
