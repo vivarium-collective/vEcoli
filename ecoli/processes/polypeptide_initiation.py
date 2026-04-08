@@ -100,6 +100,9 @@ class PolypeptideInitiation(PartitionedProcess):
                     'max_p': 'overwrite[float]',
                     'max_p_per_protein': 'overwrite[array[float]]',
                     'is_n_ribosomes_to_activate_reduced': 'overwrite[boolean]',
+                    # Written by empty_update path
+                    'ribosomes_initialized': 'overwrite[integer]',
+                    'prob_translation_per_transcript': 'overwrite[float]',
                 },
             },
         }

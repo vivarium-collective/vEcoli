@@ -466,30 +466,55 @@ def migrate_composite(core, sim):
             if isinstance(target.get(evo_name), dict):
                 target[evo_name]['priority'] = priority * 2
 
-        # Add flow token chain to enforce v1's step ordering.
-        # Each step reads _flow/{prev} and writes _flow/{current},
-        # creating a strict dependency chain in the step network.
-        # Steps declare only their flow token as a trigger — all
-        # other inputs are "silent" (received but not triggering).
-        flow_names = list(flat_flow.keys())
-        target['_flow'] = {}
-        prev_token = None
-        for i, name in enumerate(flow_names):
-            step = target.get(name)
-            if not isinstance(step, dict) or 'instance' not in step:
+        # Layer-based flow chain (mirrors v1's vivarium execution layers).
+        #
+        # Steps with no remaining unsatisfied deps form layer 0; each subsequent
+        # layer contains steps whose deps are all in earlier layers. Steps in
+        # the same layer read from the SAME incoming token and write to the
+        # SAME outgoing token, so the dep graph shows them as independent
+        # within a layer.
+        #
+        # Why this matters: process-bigraph's run_steps() batches all
+        # currently-runnable steps, computes their updates without applying
+        # in between, and then reconciles + applies the whole batch atomically.
+        # That gives us v1's per-layer atomicity (every step in a layer sees
+        # the same starting state). A linear chain defeats this because each
+        # step is ready only after the previous one finishes.
+        flow_levels = {}  # step_name -> integer level
+        for step_name in flat_flow.keys():
+            deps = flat_flow.get(step_name) or []
+            if not deps:
+                flow_levels[step_name] = 0
                 continue
-            token = f'_ft_{i}'
-            target['_flow'][token] = 0
-            if prev_token is not None:
-                step['inputs']['_flow_in'] = ['_flow', prev_token]
-                # Only trigger from flow token
-                step['_triggers'] = {'_flow_in': 'integer'}
-            else:
-                # First step triggers from global_time
-                step['_triggers'] = {'global_time': 'float'}
-            step['outputs']['_flow_out'] = ['_flow', token]
-            step['_dep_outputs']['_flow_out'] = ['_flow', token]
-            prev_token = token
+            max_dep_level = -1
+            for dep_path in deps:
+                dep_name = dep_path[-1] if isinstance(dep_path, (list, tuple)) else dep_path
+                if dep_name in flow_levels:
+                    max_dep_level = max(max_dep_level, flow_levels[dep_name])
+            flow_levels[step_name] = max_dep_level + 1
+
+        layers = {}  # level -> list of step names
+        for step_name, level in flow_levels.items():
+            layers.setdefault(level, []).append(step_name)
+
+        target['_flow'] = {}
+        for level in sorted(layers.keys()):
+            target['_flow'][f'_layer_{level}'] = 0
+
+        for level in sorted(layers.keys()):
+            in_token = f'_layer_{level - 1}' if level > 0 else None
+            out_token = f'_layer_{level}'
+            for name in layers[level]:
+                step = target.get(name)
+                if not isinstance(step, dict) or 'instance' not in step:
+                    continue
+                if in_token is not None:
+                    step['inputs']['_flow_in'] = ['_flow', in_token]
+                    step['_triggers'] = {'_flow_in': 'integer'}
+                else:
+                    step['_triggers'] = {'global_time': 'float'}
+                step['outputs']['_flow_out'] = ['_flow', out_token]
+                step['_dep_outputs']['_flow_out'] = ['_flow', out_token]
 
     if 'agents' not in cell_state:
         cell_state = {'agents': {'0': cell_state}}

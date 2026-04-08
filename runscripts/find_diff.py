@@ -95,3 +95,4 @@ if __name__ == '__main__':
     with chdir(ROOT):
         find_diffs(1)
         find_diffs(2)
+        find_diffs(4)

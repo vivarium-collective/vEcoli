@@ -119,6 +119,7 @@ class ChromosomeStructure(Step):
 
     def inputs(self):
         return {
+            'bulk': 'bulk_array',
             'listeners': {
                 'rnap_data': {
                     'active_rnap_n_bound_ribosomes': 'list[integer]',
@@ -142,6 +143,7 @@ class ChromosomeStructure(Step):
 
     def outputs(self):
         return {
+            'bulk': 'bulk_array',
             'listeners': {
                 'rnap_data': {
                     'active_rnap_n_bound_ribosomes': 'list[integer]',

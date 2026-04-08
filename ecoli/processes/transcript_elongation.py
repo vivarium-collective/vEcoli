@@ -144,6 +144,9 @@ class TranscriptElongation(PartitionedProcess):
                 },
                 'growth_limits': {
                     'ntp_used': 'overwrite[array[integer]]',
+                    'ntp_pool_size': 'overwrite[array[integer]]',
+                    'ntp_request_size': 'overwrite[array[integer]]',
+                    'ntp_allocated': 'overwrite[array[integer]]',
                 },
                 'rnap_data': {
                     'actual_elongations': 'overwrite[integer]',
