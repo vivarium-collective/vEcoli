@@ -44,8 +44,8 @@ def run_v1(duration):
     return runtime, initial_bulk, final_bulk, None
 
 
-def run_v2_native(duration):
-    """Run native composite engine (no v1 build), return (runtime, initial_bulk, final_bulk)."""
+def run_v2(duration):
+    """Run composite engine, return (runtime, initial_bulk, final_bulk)."""
     from ecoli.experiments.ecoli_master_sim import EcoliSim
     from ecoli.composites.ecoli_composite import build_composite_native
     from ecoli.library.bigraph_types import ECOLI_TYPES
@@ -72,7 +72,6 @@ def run_v2_native(duration):
     composite = Composite({'schema': {}, 'state': state}, core=core)
     composite.to_run = []
 
-    # Initial bulk
     if 'agents' in composite.state:
         cell = composite.state['agents'][next(iter(composite.state['agents']))]
     else:
@@ -83,49 +82,10 @@ def run_v2_native(duration):
     composite.run(float(duration))
     runtime = time.time() - t0
 
-    # Final bulk
     if 'agents' in composite.state:
         cell = composite.state['agents'][next(iter(composite.state['agents']))]
     else:
         cell = composite.state
-    final_bulk = cell['bulk']['count'].copy()
-
-    return runtime, initial_bulk, final_bulk
-
-
-def run_v2(duration):
-    """Run composite engine, return (runtime, initial_bulk, final_bulk)."""
-    from ecoli.experiments.ecoli_master_sim import EcoliSim
-
-    sim = EcoliSim.from_file()
-    sim.max_duration = int(duration)
-    sim.emitter = 'null'
-    sim.divide = False
-    sim.config['engine'] = 'composite'
-    sim.build_ecoli()
-
-    # Grab initial bulk before running
-    # After build_ecoli, generated_initial_state has the bulk
-    init = sim.generated_initial_state
-    if 'agents' in init:
-        init = init['agents'][next(iter(init['agents']))]
-    initial_bulk = init['bulk']['count'].copy()
-
-    t0 = time.time()
-    sim.run()
-    runtime = time.time() - t0
-
-    # Extract final bulk from composite state
-    composite = sim._composite
-    # Find the cell state (may be under agents/0 or directly)
-    cell = None
-    if 'agents' in composite.state:
-        agents = composite.state['agents']
-        first_key = next(iter(agents))
-        cell = agents[first_key]
-    else:
-        cell = composite.state
-
     final_bulk = cell['bulk']['count'].copy()
 
     return runtime, initial_bulk, final_bulk
@@ -162,8 +122,8 @@ with open(sys.argv[1], 'wb') as f:
     v1_runtime, v1_init, v1_final, v1_ts = run_in_subprocess('run_v1', duration)
     print(f"  v1 done: {v1_runtime:.2f}s wall time\n", flush=True)
 
-    print("Running v2 (composite, native build)...", flush=True)
-    v2_runtime, v2_init, v2_final = run_in_subprocess('run_v2_native', duration)
+    print("Running v2 (composite)...", flush=True)
+    v2_runtime, v2_init, v2_final = run_in_subprocess('run_v2', duration)
     print(f"  v2 done: {v2_runtime:.2f}s wall time\n", flush=True)
 
     # Check initial states match
