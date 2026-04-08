@@ -189,7 +189,7 @@ class TranscriptInitiation(PartitionedProcess):
 
     def inputs(self):
         return {
-            'environment': 'node',
+            'environment': {'media_id': 'string'},
             'full_chromosomes': FULL_CHROMOSOME_ARRAY,
             'RNAs': RNA_ARRAY,
             'active_RNAPs': ACTIVE_RNAP_ARRAY,

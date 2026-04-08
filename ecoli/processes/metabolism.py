@@ -87,9 +87,19 @@ class Metabolism(Step):
             'bulk': 'bulk_array',
             'bulk_total': 'bulk_array',
             'listeners': 'node',
-            'environment': 'node',
+            'environment': {
+                'media_id': 'string',
+                'exchange_data': {
+                    'constrained': 'map[float]',
+                    'unconstrained': 'list[string]',
+                },
+            },
             'boundary': 'node',
-            'polypeptide_elongation': 'node',
+            'polypeptide_elongation': {
+                'gtp_to_hydrolyze': 'float',
+                'aa_count_diff': 'array[float]',
+                'aa_exchange_rates': 'array[float]',
+            },
             'global_time': 'float',
             'timestep': 'integer',
             'next_update_time': 'float',
@@ -98,9 +108,8 @@ class Metabolism(Step):
     def outputs(self):
         return {
             'bulk': 'bulk_array',
-            'environment': 'node',
+            'environment': {'exchange': 'map[float]'},
             'listeners': 'overwrite[node]',
-            'polypeptide_elongation': 'overwrite[node]',
             'next_update_time': 'overwrite[float]',
         }
 

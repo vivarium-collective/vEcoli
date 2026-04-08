@@ -178,13 +178,17 @@ class PolypeptideElongation(PartitionedProcess):
 
     def inputs(self):
         return {
-            'environment': 'node',
+            'environment': {'media_id': 'string'},
             'boundary': 'node',
             'listeners': 'node',
             'active_ribosome': ACTIVE_RIBOSOME_ARRAY,
             'bulk': 'bulk_array',
             'bulk_total': 'bulk_array',
-            'polypeptide_elongation': 'node',
+            'polypeptide_elongation': {
+                'gtp_to_hydrolyze': 'float',
+                'aa_count_diff': 'array[float]',
+                'aa_exchange_rates': 'array[float]',
+            },
             'timestep': 'integer',
         }
 
@@ -193,7 +197,11 @@ class PolypeptideElongation(PartitionedProcess):
             'bulk': 'bulk_array',
             'active_ribosome': ACTIVE_RIBOSOME_ARRAY,
             'listeners': 'overwrite[node]',
-            'polypeptide_elongation': 'node',
+            'polypeptide_elongation': {
+                'gtp_to_hydrolyze': 'overwrite[float]',
+                'aa_count_diff': 'overwrite[array[float]]',
+                'aa_exchange_rates': 'overwrite[array[float]]',
+            },
         }
 
     defaults = {

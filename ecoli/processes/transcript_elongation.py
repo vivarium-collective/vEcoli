@@ -121,7 +121,7 @@ class TranscriptElongation(PartitionedProcess):
 
     def inputs(self):
         return {
-            'environment': 'node',
+            'environment': {'media_id': 'string'},
             'RNAs': RNA_ARRAY,
             'active_RNAPs': ACTIVE_RNAP_ARRAY,
             'bulk': 'bulk_array',

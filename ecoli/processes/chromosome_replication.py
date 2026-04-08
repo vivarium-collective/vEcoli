@@ -90,7 +90,7 @@ class ChromosomeReplication(PartitionedProcess):
             'chromosome_domains': CHROMOSOME_DOMAIN_ARRAY,
             'full_chromosomes': FULL_CHROMOSOME_ARRAY,
             'listeners': 'node',
-            'environment': 'node',
+            'environment': {'media_id': 'string'},
             'timestep': 'integer',
         }
 

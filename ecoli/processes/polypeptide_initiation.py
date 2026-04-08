@@ -73,7 +73,7 @@ class PolypeptideInitiation(PartitionedProcess):
 
     def inputs(self):
         return {
-            'environment': 'node',
+            'environment': {'media_id': 'string'},
             'listeners': 'node',
             'active_ribosome': ACTIVE_RIBOSOME_ARRAY,
             'RNA': RNA_ARRAY,
