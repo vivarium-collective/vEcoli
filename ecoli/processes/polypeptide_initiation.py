@@ -28,6 +28,7 @@ from wholecell.utils.fitting import normalize
 
 from ecoli.processes.registries import topology_registry
 from ecoli.processes.partition import PartitionedProcess
+from ecoli.library.schema_types import ACTIVE_RIBOSOME_ARRAY, RNA_ARRAY
 
 # Register default topology for this process, associating it with process name
 NAME = "ecoli-polypeptide-initiation"
@@ -47,6 +48,46 @@ class PolypeptideInitiation(PartitionedProcess):
 
     name = NAME
     topology = TOPOLOGY
+
+    config_schema = {
+        'protein_lengths': 'array[integer]',
+        'translation_efficiencies': 'array[float]',
+        'active_ribosome_fraction': 'map[float]',
+        'elongation_rates': 'map[float]',
+        'variable_elongation': 'boolean',
+        'make_elongation_rates': 'method',
+        'rna_id_to_cistron_indexes': 'method',
+        'cistron_start_end_pos_in_tu': 'map[node]',
+        'tu_ids': 'list[string]',
+        'active_ribosome_footprint_size': 'unum',
+        'cistron_to_monomer_mapping': 'array[integer]',
+        'cistron_tu_mapping_matrix': 'csr_matrix',
+        'monomer_index_to_cistron_index': 'map[integer]',
+        'monomer_index_to_tu_indexes': 'map[integer]',
+        'ribosome30S': 'string',
+        'ribosome50S': 'string',
+        'seed': 'integer',
+        'monomer_ids': 'list[string]',
+        'emit_unique': 'boolean',
+    }
+
+    def inputs(self):
+        return {
+            'environment': 'node',
+            'listeners': 'node',
+            'active_ribosome': ACTIVE_RIBOSOME_ARRAY,
+            'RNA': RNA_ARRAY,
+            'bulk': 'bulk_array',
+            'timestep': 'integer',
+        }
+
+    def outputs(self):
+        return {
+            'bulk': 'bulk_array',
+            'active_ribosome': ACTIVE_RIBOSOME_ARRAY,
+            'listeners': 'overwrite[node]',
+        }
+
     defaults = {
         "protein_lengths": [],
         "translation_efficiencies": [],

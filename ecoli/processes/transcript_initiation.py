@@ -41,6 +41,12 @@ from scipy.stats import chisquare
 
 from ecoli.processes.registries import topology_registry
 from ecoli.processes.partition import PartitionedProcess
+from ecoli.library.schema_types import (
+    FULL_CHROMOSOME_ARRAY,
+    RNA_ARRAY,
+    ACTIVE_RNAP_ARRAY,
+    PROMOTER_ARRAY,
+)
 
 
 # Register default topology for this process, associating it with process name
@@ -142,6 +148,65 @@ class TranscriptInitiation(PartitionedProcess):
 
     name = NAME
     topology = TOPOLOGY
+
+    config_schema = {
+        'fracActiveRnapDict': 'map[float]',
+        'rnaLengths': 'array[integer]',
+        'rnaPolymeraseElongationRateDict': 'map[float]',
+        'variable_elongation': 'boolean',
+        'make_elongation_rates': 'method',
+        'active_rnap_foorprint_size': 'integer',
+        'basal_prob': 'array[float]',
+        'delta_prob': 'map[node]',
+        'get_delta_prob_matrix': 'method',
+        'perturbations': 'map[node]',
+        'rna_data': 'units_array',
+        'active_rnap_footprint_size': 'unum',
+        'get_rnap_active_fraction_from_ppGpp': 'method',
+        'idx_rRNA': 'array[integer]',
+        'idx_mRNA': 'array[integer]',
+        'idx_tRNA': 'array[integer]',
+        'idx_rprotein': 'array[integer]',
+        'idx_rnap': 'array[integer]',
+        'rnaSynthProbFractions': 'map[float]',
+        'rnaSynthProbRProtein': 'map[float]',
+        'rnaSynthProbRnaPolymerase': 'map[float]',
+        'replication_coordinate': 'array[integer]',
+        'transcription_direction': 'array[integer]',
+        'n_avogadro': 'unum',
+        'cell_density': 'unum',
+        'ppgpp': 'string',
+        'inactive_RNAP': 'string',
+        'synth_prob': 'array[float]',
+        'copy_number': 'array[integer]',
+        'ppgpp_regulation': 'boolean',
+        'trna_attenuation': 'boolean',
+        'attenuated_rna_indices': 'array[integer]',
+        'attenuation_adjustments': 'array[float]',
+        'seed': 'integer',
+        'emit_unique': 'boolean',
+    }
+
+    def inputs(self):
+        return {
+            'environment': 'node',
+            'full_chromosomes': FULL_CHROMOSOME_ARRAY,
+            'RNAs': RNA_ARRAY,
+            'active_RNAPs': ACTIVE_RNAP_ARRAY,
+            'promoters': PROMOTER_ARRAY,
+            'bulk': 'bulk_array',
+            'listeners': 'node',
+            'timestep': 'integer',
+        }
+
+    def outputs(self):
+        return {
+            'bulk': 'bulk_array',
+            'RNAs': RNA_ARRAY,
+            'active_RNAPs': ACTIVE_RNAP_ARRAY,
+            'listeners': 'overwrite[node]',
+        }
+
     defaults = {
         "fracActiveRnapDict": {},
         "rnaLengths": np.array([]),

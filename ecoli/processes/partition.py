@@ -60,19 +60,35 @@ class Requester(Step):
     """
 
     config_schema = {
-        'process': {'_type': 'quote', '_default': None},
+        'process': 'node',
     }
 
     def inputs(self):
-        return _typed_ports(self.ports_schema())
+        process = self.parameters.get("process")
+        ports = process.inputs()
+        # Requester also reads these control ports
+        ports['global_time'] = 'float'
+        ports['timestep'] = 'integer'
+        ports['next_update_time'] = 'float'
+        ports['process'] = 'quote'
+        return ports
 
     def outputs(self):
-        return {
+        process = self.parameters.get("process")
+        result = {
             'request': {'_type': 'overwrite[map[list[integer]]]', '_default': {}},
             'process': 'quote',
             'next_update_time': 'overwrite[float]',
             'listeners': 'map[map[overwrite[float]]]',
         }
+        # Include any non-bulk, non-listener ports that calculate_request
+        # writes to (e.g. polypeptide_elongation state).
+        if process is not None:
+            proc_outputs = process.outputs()
+            for key in proc_outputs:
+                if key not in result and key not in ('bulk', 'bulk_total'):
+                    result[key] = proc_outputs[key]
+        return result
 
     def __init__(self, parameters=None):
         assert isinstance(parameters["process"], PartitionedProcess)
@@ -174,21 +190,31 @@ class Evolver(Step):
     _input_only_ports = {'allocate', 'global_time', 'timestep'}
 
     config_schema = {
-        'process': {'_type': 'quote', '_default': None},
+        'process': 'node',
     }
 
     def inputs(self):
-        return _typed_ports(self.ports_schema())
+        process = self.parameters.get("process")
+        ports = process.inputs()
+        # Evolver also reads these control ports
+        ports['allocate'] = 'node'
+        ports['global_time'] = 'float'
+        ports['timestep'] = 'integer'
+        ports['next_update_time'] = 'float'
+        ports['process'] = 'quote'
+        return ports
 
     def outputs(self):
-        input_only = {'allocate', 'global_time', 'timestep'}
-        all_ports = _typed_ports(self.ports_schema())
-        # Override specific output semantics
-        if 'next_update_time' in all_ports:
-            all_ports['next_update_time'] = 'overwrite[float]'
-        if 'process' in all_ports:
-            all_ports['process'] = 'quote'
-        return {k: v for k, v in all_ports.items() if k not in input_only}
+        process = self.parameters.get("process")
+        ports = process.outputs()
+        # Evolver writes next_update_time and process in addition to
+        # whatever the wrapped process declares.
+        ports['next_update_time'] = 'overwrite[float]'
+        ports['process'] = 'quote'
+        # Evolver doesn't write to allocate, global_time, timestep
+        for k in ('allocate', 'global_time', 'timestep'):
+            ports.pop(k, None)
+        return ports
 
     def __init__(self, parameters=None):
         assert isinstance(parameters["process"], PartitionedProcess)
@@ -263,15 +289,22 @@ class PartitionedProcess(Process):
 
     This is the base class for all processes whose updates can be partitioned.
 
-    process-bigraph interface: Subclasses may define ``_output_ports``
-    as a set of port names that appear in the delta returned by
-    ``evolve_state()``.  All other ports from ``ports_schema()`` are
-    treated as input-only when building the process-bigraph dependency
-    graph.  If ``_output_ports`` is None, all ports are assumed to be
-    both input and output (conservative default).
+    Subclasses must implement:
+      - ``ports_schema()``: v1 bidirectional port schema
+      - ``calculate_request(timestep, states)``: compute resource requests
+      - ``evolve_state(timestep, states)``: compute state updates
+
+    Subclasses may define ``_output_ports`` as a set of port names that
+    appear in the delta returned by ``evolve_state()``.  All other ports
+    are treated as input-only for the dependency graph.
+
+    For v2, subclasses should override ``inputs()`` and ``outputs()`` to
+    declare typed ports. The default implementations derive from
+    ``ports_schema()`` using ``_typed_ports()``.
     """
 
     _output_ports = None
+    _input_only_ports = None
 
     def __init__(self, parameters=None):
         super().__init__(parameters)
@@ -290,6 +323,23 @@ class PartitionedProcess(Process):
     def ports_schema(self):
         return {}
 
+    def inputs(self):
+        """All ports are inputs (process reads from all of them)."""
+        return _typed_ports(self.ports_schema())
+
+    def outputs(self):
+        """Output ports — what evolve_state actually writes to.
+
+        Uses _output_ports if defined, otherwise derives from
+        _input_only_ports. Falls back to all ports.
+        """
+        typed = _typed_ports(self.ports_schema())
+        if self._output_ports is not None:
+            return {k: v for k, v in typed.items() if k in self._output_ports}
+        if self._input_only_ports is not None:
+            return {k: v for k, v in typed.items() if k not in self._input_only_ports}
+        return typed
+
     @abc.abstractmethod
     def calculate_request(self, timestep, states):
         return {}
@@ -298,7 +348,12 @@ class PartitionedProcess(Process):
     def evolve_state(self, timestep, states):
         return {}
 
-    def next_update(self, timestep, states):
+    def update(self, states, interval=None):
+        timestep = states.get('timestep', interval or 1)
+        return self._do_update(timestep, states)
+
+    def _do_update(self, timestep, states):
+        """Combined request + evolve for standalone (non-partitioned) use."""
         if self.request_only:
             return self.calculate_request(timestep, states)
         if self.evolve_only:

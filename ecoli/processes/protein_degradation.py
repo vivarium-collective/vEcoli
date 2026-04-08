@@ -37,6 +37,28 @@ class ProteinDegradation(PartitionedProcess):
 
     name = NAME
     topology = TOPOLOGY
+
+    config_schema = {
+        'raw_degradation_rate': 'array[float]',
+        'water_id': 'string',
+        'amino_acid_ids': 'list[string]',
+        'amino_acid_counts': 'array[integer]',
+        'protein_ids': 'list[string]',
+        'protein_lengths': 'array[integer]',
+        'seed': 'integer',
+    }
+
+    def inputs(self):
+        return {
+            'bulk': 'bulk_array',
+            'timestep': 'integer',
+        }
+
+    def outputs(self):
+        return {
+            'bulk': 'bulk_array',
+        }
+
     defaults = {
         "raw_degradation_rate": [],
         "water_id": "h2o",

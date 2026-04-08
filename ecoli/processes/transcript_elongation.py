@@ -33,6 +33,7 @@ from ecoli.library.data_predicates import monotonically_increasing
 from ecoli.processes.registries import topology_registry
 from ecoli.processes.partition import PartitionedProcess
 from ecoli.processes.unique_update import UniqueUpdate
+from ecoli.library.schema_types import RNA_ARRAY, ACTIVE_RNAP_ARRAY
 
 
 # Register default topology for this process, associating it with process name
@@ -87,6 +88,56 @@ class TranscriptElongation(PartitionedProcess):
 
     name = NAME
     topology = TOPOLOGY
+
+    config_schema = {
+        'rnaPolymeraseElongationRateDict': 'map[float]',
+        'rnaIds': 'list[string]',
+        'rnaLengths': 'array[integer]',
+        'rnaSequences': 'array[integer]',
+        'ntWeights': 'array[float]',
+        'endWeight': 'array[float]',
+        'replichore_lengths': 'array[integer]',
+        'n_fragment_bases': 'integer',
+        'recycle_stalled_elongation': 'boolean',
+        'submass_indices': 'map[integer]',
+        'is_mRNA': 'array[boolean]',
+        'inactive_RNAP': 'string',
+        'ppi': 'string',
+        'ntp_ids': 'list[string]',
+        'variable_elongation': 'boolean',
+        'make_elongation_rates': 'method',
+        'fragmentBases': 'list[string]',
+        'polymerized_ntps': 'list[string]',
+        'charged_trnas': 'list[string]',
+        'trna_attenuation': 'boolean',
+        'cell_density': 'unum',
+        'n_avogadro': 'unum',
+        'get_attenuation_stop_probabilities': 'method',
+        'attenuated_rna_indices': 'array[integer]',
+        'location_lookup': 'map[node]',
+        'seed': 'integer',
+        'emit_unique': 'boolean',
+    }
+
+    def inputs(self):
+        return {
+            'environment': 'node',
+            'RNAs': RNA_ARRAY,
+            'active_RNAPs': ACTIVE_RNAP_ARRAY,
+            'bulk': 'bulk_array',
+            'bulk_total': 'bulk_array',
+            'listeners': 'node',
+            'timestep': 'integer',
+        }
+
+    def outputs(self):
+        return {
+            'bulk': 'bulk_array',
+            'RNAs': RNA_ARRAY,
+            'active_RNAPs': ACTIVE_RNAP_ARRAY,
+            'listeners': 'overwrite[node]',
+        }
+
     defaults = {
         # Parameters
         "rnaPolymeraseElongationRateDict": {},

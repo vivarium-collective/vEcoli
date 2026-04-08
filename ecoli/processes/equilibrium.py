@@ -26,11 +26,37 @@ topology_registry.register(NAME, TOPOLOGY)
 class Equilibrium(PartitionedProcess):
     """Equilibrium PartitionedProcess
 
-    molecule_names: list of molecules that are being iterated over size:94
+    Models ligand binding/unbinding to maintain equilibrium.
     """
 
     name = NAME
     topology = TOPOLOGY
+
+    config_schema = {
+        'jit': 'boolean',
+        'n_avogadro': 'float',
+        'cell_density': 'float',
+        'stoichMatrix': 'array[integer]',
+        'fluxesAndMoleculesToSS': 'method',
+        'moleculeNames': 'list[string]',
+        'seed': 'integer',
+        'complex_ids': 'list[string]',
+        'reaction_ids': 'list[string]',
+    }
+
+    def inputs(self):
+        return {
+            'bulk': 'bulk_array',
+            'listeners': 'node',
+            'timestep': 'integer',
+        }
+
+    def outputs(self):
+        return {
+            'bulk': 'bulk_array',
+            'listeners': 'overwrite[node]',
+        }
+
     defaults = {
         "jit": False,
         "n_avogadro": 0.0,

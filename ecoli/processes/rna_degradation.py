@@ -46,6 +46,7 @@ from wholecell.utils import units
 
 from ecoli.processes.registries import topology_registry
 from ecoli.processes.partition import PartitionedProcess
+from ecoli.library.schema_types import RNA_ARRAY, ACTIVE_RIBOSOME_ARRAY
 
 
 # Register default topology for this process, associating it with process name
@@ -65,6 +66,62 @@ class RnaDegradation(PartitionedProcess):
 
     name = NAME
     topology = TOPOLOGY
+
+    config_schema = {
+        'rna_ids': 'list[string]',
+        'mature_rna_ids': 'list[string]',
+        'cistron_ids': 'list[string]',
+        'cistron_tu_mapping_matrix': 'csr_matrix',
+        'mature_rna_cistron_indexes': 'array[integer]',
+        'all_rna_ids': 'list[string]',
+        'n_total_RNAs': 'integer',
+        'n_avogadro': 'float',
+        'cell_density': 'unum',
+        'endoRNase_ids': 'list[string]',
+        'exoRNase_ids': 'list[string]',
+        'kcat_exoRNase': 'unum',
+        'Kcat_endoRNases': 'unum',
+        'charged_trna_names': 'list[string]',
+        'uncharged_trna_indexes': 'array[integer]',
+        'rna_deg_rates': 'unum',
+        'is_mRNA': 'array[boolean]',
+        'is_rRNA': 'array[boolean]',
+        'is_tRNA': 'array[boolean]',
+        'is_miscRNA': 'array[boolean]',
+        'degrade_misc': 'boolean',
+        'rna_lengths': 'array[integer]',
+        'nt_counts': 'array[integer]',
+        'polymerized_ntp_ids': 'list[string]',
+        'water_id': 'string',
+        'ppi_id': 'string',
+        'proton_id': 'string',
+        'nmp_ids': 'list[string]',
+        'rrfa_idx': 'integer',
+        'rrla_idx': 'integer',
+        'rrsa_idx': 'integer',
+        'ribosome30S': 'string',
+        'ribosome50S': 'string',
+        'Kms': 'unum',
+        'seed': 'integer',
+        'emit_unique': 'boolean',
+    }
+
+    def inputs(self):
+        return {
+            'bulk': 'bulk_array',
+            'RNAs': RNA_ARRAY,
+            'active_ribosome': ACTIVE_RIBOSOME_ARRAY,
+            'listeners': 'node',
+            'timestep': 'integer',
+        }
+
+    def outputs(self):
+        return {
+            'bulk': 'bulk_array',
+            'RNAs': RNA_ARRAY,
+            'listeners': 'overwrite[node]',
+        }
+
     defaults = {
         "rna_ids": [],
         "mature_rna_ids": [],

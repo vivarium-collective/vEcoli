@@ -873,6 +873,11 @@ class EcoliSim:
         # Invalidate cached views since seeding modified state
         ecoli._invalidate_caches()
 
+        # Steps should only run when triggered by global_clock,
+        # not from initial state. Clear to_run so the first cycle
+        # starts from global_clock's update of global_time.
+        ecoli.to_run = []
+
         self._composite = ecoli
         self.generated_initial_state = None
         self.ecoli = None

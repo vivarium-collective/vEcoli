@@ -37,6 +37,29 @@ class Complexation(PartitionedProcess):
 
     name = NAME
     topology = TOPOLOGY
+
+    config_schema = {
+        'stoichiometry': 'array[integer]',
+        'rates': 'array[float]',
+        'molecule_names': 'list[string]',
+        'seed': 'integer',
+        'reaction_ids': 'list[string]',
+        'complex_ids': 'list[string]',
+    }
+
+    def inputs(self):
+        return {
+            'bulk': 'bulk_array',
+            'listeners': 'node',
+            'timestep': 'integer',
+        }
+
+    def outputs(self):
+        return {
+            'bulk': 'bulk_array',
+            'listeners': 'overwrite[node]',
+        }
+
     defaults = {
         "stoichiometry": np.array([[]]),
         "rates": np.array([]),

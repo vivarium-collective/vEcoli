@@ -31,6 +31,12 @@ from wholecell.utils.polymerize import buildSequences, polymerize, computeMassIn
 
 from ecoli.processes.registries import topology_registry
 from ecoli.processes.partition import PartitionedProcess
+from ecoli.library.schema_types import (
+    ACTIVE_REPLISOME_ARRAY,
+    ORIC_ARRAY,
+    CHROMOSOME_DOMAIN_ARRAY,
+    FULL_CHROMOSOME_ARRAY,
+)
 
 
 # Register default topology for this process, associating it with process name
@@ -53,6 +59,51 @@ class ChromosomeReplication(PartitionedProcess):
 
     name = NAME
     topology = TOPOLOGY
+
+    config_schema = {
+        'get_dna_critical_mass': 'method',
+        'criticalInitiationMass': 'unum',
+        'nutrientToDoublingTime': 'map[float]',
+        'replichore_lengths': 'array[integer]',
+        'sequences': 'array[integer]',
+        'polymerized_dntp_weights': 'unum',
+        'replication_coordinate': 'array[integer]',
+        'D_period': 'unum',
+        'replisome_protein_mass': 'float',
+        'no_child_place_holder': 'integer',
+        'basal_elongation_rate': 'integer',
+        'make_elongation_rates': 'method',
+        'mechanistic_replisome': 'boolean',
+        'replisome_trimers_subunits': 'list[string]',
+        'replisome_monomers_subunits': 'list[string]',
+        'dntps': 'list[string]',
+        'ppi': 'list[string]',
+        'seed': 'integer',
+        'emit_unique': 'boolean',
+    }
+
+    def inputs(self):
+        return {
+            'bulk': 'bulk_array',
+            'active_replisomes': ACTIVE_REPLISOME_ARRAY,
+            'oriCs': ORIC_ARRAY,
+            'chromosome_domains': CHROMOSOME_DOMAIN_ARRAY,
+            'full_chromosomes': FULL_CHROMOSOME_ARRAY,
+            'listeners': 'node',
+            'environment': 'node',
+            'timestep': 'integer',
+        }
+
+    def outputs(self):
+        return {
+            'bulk': 'bulk_array',
+            'active_replisomes': ACTIVE_REPLISOME_ARRAY,
+            'oriCs': ORIC_ARRAY,
+            'chromosome_domains': CHROMOSOME_DOMAIN_ARRAY,
+            'full_chromosomes': FULL_CHROMOSOME_ARRAY,
+            'listeners': 'overwrite[node]',
+        }
+
     defaults = {
         "get_dna_critical_mass": lambda doubling_time: units.Unum,
         "criticalInitiationMass": 975 * units.fg,

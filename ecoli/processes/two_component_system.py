@@ -33,6 +33,28 @@ class TwoComponentSystem(PartitionedProcess):
 
     name = NAME
     topology = TOPOLOGY
+
+    config_schema = {
+        'jit': 'boolean',
+        'n_avogadro': 'float',
+        'cell_density': 'float',
+        'moleculesToNextTimeStep': 'method',
+        'moleculeNames': 'list[string]',
+        'seed': 'integer',
+    }
+
+    def inputs(self):
+        return {
+            'bulk': 'bulk_array',
+            'listeners': 'node',
+            'timestep': 'integer',
+        }
+
+    def outputs(self):
+        return {
+            'bulk': 'bulk_array',
+        }
+
     defaults = {
         "jit": False,
         "n_avogadro": 0.0,

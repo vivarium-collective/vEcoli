@@ -41,6 +41,7 @@ from ecoli.library.schema import (
 from ecoli.processes.registries import topology_registry
 from ecoli.processes.partition import PartitionedProcess
 from ecoli.processes.metabolism import CONC_UNITS, TIME_UNITS
+from ecoli.library.schema_types import ACTIVE_RIBOSOME_ARRAY
 
 
 MICROMOLAR_UNITS = units.umol / units.L
@@ -99,6 +100,102 @@ class PolypeptideElongation(PartitionedProcess):
 
     name = NAME
     topology = TOPOLOGY
+
+    config_schema = {
+        'n_avogadro': 'unum',
+        'proteinIds': 'array[string]',
+        'proteinLengths': 'array[integer]',
+        'proteinSequences': 'array[integer]',
+        'aaWeightsIncorporated': 'array[float]',
+        'endWeight': 'array[float]',
+        'variable_elongation': 'boolean',
+        'make_elongation_rates': 'method',
+        'next_aa_pad': 'integer',
+        'ribosomeElongationRate': 'float',
+        'translation_aa_supply': 'map[float]',
+        'import_threshold': 'float',
+        'aa_from_trna': 'array[float]',
+        'gtpPerElongation': 'float',
+        'aa_supply_in_charging': 'boolean',
+        'mechanistic_translation_supply': 'boolean',
+        'mechanistic_aa_transport': 'boolean',
+        'ppgpp_regulation': 'boolean',
+        'disable_ppgpp_elongation_inhibition': 'boolean',
+        'trna_charging': 'boolean',
+        'translation_supply': 'boolean',
+        'mechanistic_supply': 'boolean',
+        'ribosome30S': 'string',
+        'ribosome50S': 'string',
+        'amino_acids': 'list[string]',
+        'aa_exchange_names': 'list[string]',
+        'basal_elongation_rate': 'float',
+        'ribosomeElongationRateDict': 'map[float]',
+        'uncharged_trna_names': 'array[string]',
+        'aaNames': 'list[string]',
+        'aa_enzymes': 'list[string]',
+        'proton': 'string',
+        'water': 'string',
+        'cellDensity': 'unum',
+        'elongation_max': 'unum',
+        'aa_from_synthetase': 'array[float]',
+        'charging_stoich_matrix': 'array[integer]',
+        'charged_trna_names': 'list[string]',
+        'charging_molecule_names': 'list[string]',
+        'synthetase_names': 'list[string]',
+        'ppgpp_reaction_names': 'list[string]',
+        'ppgpp_reaction_metabolites': 'list[string]',
+        'ppgpp_reaction_stoich': 'array[integer]',
+        'ppgpp_synthesis_reaction': 'string',
+        'ppgpp_degradation_reaction': 'string',
+        'aa_importers': 'list[string]',
+        'amino_acid_export': 'map[node]',
+        'synthesis_index': 'integer',
+        'aa_exporters': 'list[string]',
+        'get_pathway_enzyme_counts_per_aa': 'method',
+        'import_constraint_threshold': 'float',
+        'unit_conversion': 'float',
+        'elong_rate_by_ppgpp': 'float',
+        'amino_acid_import': 'map[node]',
+        'degradation_index': 'integer',
+        'amino_acid_synthesis': 'map[node]',
+        'rela': 'string',
+        'spot': 'string',
+        'ppgpp': 'string',
+        'kS': 'float',
+        'KMtf': 'float',
+        'KMaa': 'float',
+        'krta': 'float',
+        'krtf': 'float',
+        'KD_RelA': 'float',
+        'k_RelA': 'float',
+        'k_SpoT_syn': 'float',
+        'k_SpoT_deg': 'float',
+        'KI_SpoT': 'float',
+        'aa_supply_scaling': 'map[float]',
+        'seed': 'integer',
+        'emit_unique': 'boolean',
+    }
+
+    def inputs(self):
+        return {
+            'environment': 'node',
+            'boundary': 'node',
+            'listeners': 'node',
+            'active_ribosome': ACTIVE_RIBOSOME_ARRAY,
+            'bulk': 'bulk_array',
+            'bulk_total': 'bulk_array',
+            'polypeptide_elongation': 'node',
+            'timestep': 'integer',
+        }
+
+    def outputs(self):
+        return {
+            'bulk': 'bulk_array',
+            'active_ribosome': ACTIVE_RIBOSOME_ARRAY,
+            'listeners': 'overwrite[node]',
+            'polypeptide_elongation': 'node',
+        }
+
     defaults = {
         "time_step": 1,
         "n_avogadro": 6.02214076e23 / units.mol,

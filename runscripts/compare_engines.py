@@ -23,11 +23,14 @@ def run_v1(duration):
 
     sim = EcoliSim.from_file()
     sim.max_duration = int(duration)
-    sim.emitter = 'timeseries'
+    sim.emitter = 'null'
     sim.divide = False
     sim.build_ecoli()
 
-    initial_bulk = sim.generated_initial_state['bulk']['count'].copy()
+    init = sim.generated_initial_state
+    if 'agents' in init:
+        init = init['agents'][next(iter(init['agents']))]
+    initial_bulk = init['bulk']['count'].copy()
 
     t0 = time.time()
     sim.run()
@@ -36,10 +39,9 @@ def run_v1(duration):
     state = sim.ecoli_experiment.state.get_value(condition=not_a_process)
     final_bulk = state['bulk']['count'].copy()
 
-    timeseries = sim.query()
     sim.ecoli_experiment.end()
 
-    return runtime, initial_bulk, final_bulk, timeseries
+    return runtime, initial_bulk, final_bulk, None
 
 
 def run_v2(duration):
@@ -48,14 +50,17 @@ def run_v2(duration):
 
     sim = EcoliSim.from_file()
     sim.max_duration = int(duration)
-    sim.emitter = 'timeseries'
+    sim.emitter = 'null'
     sim.divide = False
     sim.config['engine'] = 'composite'
     sim.build_ecoli()
 
     # Grab initial bulk before running
     # After build_ecoli, generated_initial_state has the bulk
-    initial_bulk = sim.generated_initial_state['bulk']['count'].copy()
+    init = sim.generated_initial_state
+    if 'agents' in init:
+        init = init['agents'][next(iter(init['agents']))]
+    initial_bulk = init['bulk']['count'].copy()
 
     t0 = time.time()
     sim.run()
@@ -78,15 +83,39 @@ def run_v2(duration):
 
 
 def compare(duration=4.0):
-    print(f"=== Engine Comparison ({duration}s simulated) ===\n")
+    print(f"=== Engine Comparison ({duration}s simulated) ===\n", flush=True)
+
+    # Run in separate subprocesses to avoid shared state issues
+    # (numba JIT recompilation hangs on second build in same process)
+    import subprocess, pickle, tempfile
+
+    def run_in_subprocess(func_name, duration):
+        script = f"""
+import pickle, sys
+sys.path.insert(0, '.')
+from runscripts.compare_engines import {func_name}
+result = {func_name}({duration})
+with open(sys.argv[1], 'wb') as f:
+    pickle.dump(result, f)
+"""
+        with tempfile.NamedTemporaryFile(suffix='.pkl', delete=False) as tmp:
+            tmp_path = tmp.name
+        proc = subprocess.run(
+            [sys.executable, '-c', script, tmp_path],
+            capture_output=True, text=True, timeout=300)
+        if proc.returncode != 0:
+            print(f"  STDERR: {proc.stderr[-500:]}", flush=True)
+            raise RuntimeError(f"{func_name} failed: {proc.stderr[-200:]}")
+        with open(tmp_path, 'rb') as f:
+            return pickle.load(f)
 
     print("Running v1 (vivarium)...", flush=True)
-    v1_runtime, v1_init, v1_final, v1_ts = run_v1(duration)
-    print(f"  v1 done: {v1_runtime:.2f}s wall time\n")
+    v1_runtime, v1_init, v1_final, v1_ts = run_in_subprocess('run_v1', duration)
+    print(f"  v1 done: {v1_runtime:.2f}s wall time\n", flush=True)
 
     print("Running v2 (composite)...", flush=True)
-    v2_runtime, v2_init, v2_final = run_v2(duration)
-    print(f"  v2 done: {v2_runtime:.2f}s wall time\n")
+    v2_runtime, v2_init, v2_final = run_in_subprocess('run_v2', duration)
+    print(f"  v2 done: {v2_runtime:.2f}s wall time\n", flush=True)
 
     # Check initial states match
     init_match = np.array_equal(v1_init, v2_init)

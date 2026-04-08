@@ -20,9 +20,9 @@ import numpy as np
 import numpy.typing as npt
 from scipy.sparse import csr_matrix
 from unum import Unum
-from vivarium.core.process import Step
 from vivarium.library.units import units as vivunits
 
+from ecoli.library.ecoli_step import EcoliStep as Step
 from ecoli.processes.registries import topology_registry
 from ecoli.library.schema import numpy_schema, bulk_name_to_idx, counts, listener_schema
 from wholecell.utils import units
@@ -35,13 +35,9 @@ from reconstruction.ecoli.dataclasses.process.metabolism import REVERSE_TAG
 NAME = "ecoli-metabolism"
 TOPOLOGY = {
     "bulk": ("bulk",),
-    # Non-partitioned counts
     "bulk_total": ("bulk",),
     "listeners": ("listeners",),
-    "environment": {
-        "_path": ("environment",),
-        "exchange": ("exchange",),
-    },
+    "environment": ("environment",),
     "boundary": ("boundary",),
     "polypeptide_elongation": ("process_state", "polypeptide_elongation"),
     "global_time": ("global_time",),
@@ -62,10 +58,52 @@ USE_KINETICS = True
 
 
 class Metabolism(Step):
-    """Metabolism Process"""
+    """Metabolism Process
+
+    Encodes molecular simulation of microbial metabolism using FBA.
+    Runs as a time-driven process (not partitioned).
+    """
 
     name = NAME
     topology = TOPOLOGY
+
+    config_schema = {
+        'get_import_constraints': 'method',
+        'nutrientToDoublingTime': 'map[float]',
+        'use_trna_charging': 'boolean',
+        'include_ppgpp': 'boolean',
+        'mechanistic_aa_transport': 'boolean',
+        'aa_names': 'list[string]',
+        'exchange_molecules': 'list[string]',
+        'media_id': 'string',
+        'imports': 'map[node]',
+        'metabolism': 'map[node]',
+        'seed': 'integer',
+        'time_step': 'integer',
+    }
+
+    def inputs(self):
+        return {
+            'bulk': 'bulk_array',
+            'bulk_total': 'bulk_array',
+            'listeners': 'node',
+            'environment': 'node',
+            'boundary': 'node',
+            'polypeptide_elongation': 'node',
+            'global_time': 'float',
+            'timestep': 'integer',
+            'next_update_time': 'float',
+        }
+
+    def outputs(self):
+        return {
+            'bulk': 'bulk_array',
+            'environment': 'node',
+            'listeners': 'overwrite[node]',
+            'polypeptide_elongation': 'overwrite[node]',
+            'next_update_time': 'overwrite[float]',
+        }
+
     defaults = {
         "get_import_constraints": lambda u, c, p: (u, c, []),
         "nutrientToDoublingTime": {},
@@ -393,7 +431,11 @@ class Metabolism(Step):
             return True
         return False
 
-    def next_update(self, timestep, states):
+    def update(self, states, interval=None):
+        timestep = states.get('timestep', 1)
+        return self._do_update(timestep, states)
+
+    def _do_update(self, timestep, states):
         # At t=0, convert all strings to indices
         if self.metabolite_idx is None:
             self.metabolite_idx = bulk_name_to_idx(

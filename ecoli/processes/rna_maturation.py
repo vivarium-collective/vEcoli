@@ -24,6 +24,44 @@ class RnaMaturation(PartitionedProcess):
     name = NAME
     topology = TOPOLOGY
 
+    config_schema = {
+        'stoich_matrix': 'csr_matrix',
+        'enzyme_matrix': 'array[integer]',
+        'n_required_enzymes': 'array[integer]',
+        'degraded_nt_counts': 'array[float]',
+        'n_ppi_added': 'array[integer]',
+        'main_23s_rRNA_id': 'string',
+        'main_16s_rRNA_id': 'string',
+        'main_5s_rRNA_id': 'string',
+        'variant_23s_rRNA_ids': 'list[string]',
+        'variant_16s_rRNA_ids': 'list[string]',
+        'variant_5s_rRNA_ids': 'list[string]',
+        'delta_nt_counts_23s': 'array[float]',
+        'delta_nt_counts_16s': 'array[float]',
+        'delta_nt_counts_5s': 'array[float]',
+        'unprocessed_rna_ids': 'list[string]',
+        'mature_rna_ids': 'list[string]',
+        'rna_maturation_enzyme_ids': 'list[string]',
+        'fragment_bases': 'list[string]',
+        'ppi': 'string',
+        'water': 'string',
+        'nmps': 'list[string]',
+        'proton': 'string',
+    }
+
+    def inputs(self):
+        return {
+            'bulk': 'bulk_array',
+            'bulk_total': 'bulk_array',
+            'listeners': 'node',
+        }
+
+    def outputs(self):
+        return {
+            'bulk': 'bulk_array',
+            'listeners': 'overwrite[node]',
+        }
+
     # Constructor
     def __init__(self, parameters=None):
         super().__init__(parameters)
