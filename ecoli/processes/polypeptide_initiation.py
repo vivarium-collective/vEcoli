@@ -59,7 +59,7 @@ class PolypeptideInitiation(PartitionedProcess):
         'rna_id_to_cistron_indexes': 'method',
         'cistron_start_end_pos_in_tu': 'map[node]',
         'tu_ids': 'list[string]',
-        'active_ribosome_footprint_size': 'unum',
+        'active_ribosome_footprint_size': 'unum[nt]',
         'cistron_to_monomer_mapping': 'array[integer]',
         'cistron_tu_mapping_matrix': 'csr_matrix',
         'monomer_index_to_cistron_index': 'map[integer]',
@@ -74,7 +74,12 @@ class PolypeptideInitiation(PartitionedProcess):
     def inputs(self):
         return {
             'environment': {'media_id': 'string'},
-            'listeners': 'node',
+            'listeners': {
+                'ribosome_data': {
+                    # Read back the previous timestep's effective rate
+                    'effective_elongation_rate': 'float',
+                },
+            },
             'active_ribosome': ACTIVE_RIBOSOME_ARRAY,
             'RNA': RNA_ARRAY,
             'bulk': 'bulk_array',
@@ -85,7 +90,18 @@ class PolypeptideInitiation(PartitionedProcess):
         return {
             'bulk': 'bulk_array',
             'active_ribosome': ACTIVE_RIBOSOME_ARRAY,
-            'listeners': 'overwrite[node]',
+            'listeners': {
+                'ribosome_data': {
+                    'did_initialize': 'overwrite[integer]',
+                    'ribosome_init_event_per_monomer': 'overwrite[array[integer]]',
+                    'target_prob_translation_per_transcript': 'overwrite[array[float]]',
+                    'actual_prob_translation_per_transcript': 'overwrite[array[float]]',
+                    'mRNA_is_overcrowded': 'overwrite[array[boolean]]',
+                    'max_p': 'overwrite[float]',
+                    'max_p_per_protein': 'overwrite[array[float]]',
+                    'is_n_ribosomes_to_activate_reduced': 'overwrite[boolean]',
+                },
+            },
         }
 
     defaults = {

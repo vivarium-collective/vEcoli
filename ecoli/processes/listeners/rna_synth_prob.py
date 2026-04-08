@@ -64,6 +64,7 @@ class RnaSynthProb(Step):
                 'bound_TF_indexes': 'array[integer]',
                 'bound_TF_coordinates': 'array[integer]',
                 'bound_TF_domains': 'array[integer]',
+                # Probabilities — dimensionless floats in [0, 1]
                 'expected_rna_init_per_cistron': f'array[{self.n_cistron},float]',
                 'actual_rna_synth_prob_per_cistron': f'array[{self.n_cistron},float]',
                 'target_rna_synth_prob_per_cistron': f'array[{self.n_cistron},float]',

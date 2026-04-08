@@ -47,14 +47,19 @@ class Equilibrium(PartitionedProcess):
     def inputs(self):
         return {
             'bulk': 'bulk_array',
-            'listeners': 'node',
+            'listeners': {'mass': {'cell_mass': 'float[fg]'}},
             'timestep': 'integer',
         }
 
     def outputs(self):
         return {
             'bulk': 'bulk_array',
-            'listeners': 'overwrite[node]',
+            'listeners': {
+                'equilibrium_listener': {
+                    # Reaction rates — counts per second
+                    'reaction_rates': 'overwrite[array[float[1/s]]]',
+                },
+            },
         }
 
     defaults = {

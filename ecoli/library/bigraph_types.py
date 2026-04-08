@@ -39,6 +39,7 @@ from bigraph_schema.methods import (
     wrap_default, resolve, reify_schema, validate, merge_update,
     apply, reconcile,
 )
+from bigraph_schema.methods.handle_parameters import align_parameters
 
 from vivarium.core.process import Process as VivariumProcess, Step as VivariumStep
 from process_bigraph import Step as BigraphStep, Process as BigraphProcess, StepLink, ProcessLink
@@ -130,9 +131,16 @@ def unum_dimension(value):
 
 @dataclass(kw_only=True)
 class UnumUnits(Node):
+    """Wraps a Unum (or Pint) Quantity. Function bodies receive the
+    Quantity unchanged so dimensional arithmetic in process internals
+    keeps working — `_units` is documentary metadata describing the
+    expected pint-parseable unit string for the slot, validated at
+    wire build time but not converted at runtime."""
+    _schema_keys = Node._schema_keys | frozenset({'_units'})
     _dimension: typing.Dict = field(default_factory=dict)
     units: typing.Dict = field(default_factory=dict)
     magnitude: Node = field(default_factory=Node)
+    _units: str = ''
 
 
 @dispatch
@@ -181,7 +189,32 @@ def render(schema: UnumUnits, defaults=False):
         '_dimension': schema._dimension,
         'units': schema.units,
         'magnitude': render(schema.magnitude)}
+    if schema._units:
+        data['_units'] = schema._units
     return wrap_default(schema, data) if defaults else data
+
+
+@dispatch
+def align_parameters(schema: UnumUnits, parameters):
+    """unum[g/L] — single parameter is the documented unit string."""
+    if len(parameters) == 1:
+        return {'_units': parameters[0]}
+    return {}
+
+
+@dispatch
+def reify_schema(core, schema: UnumUnits, parameters):
+    """Set documented unit string verbatim — does not enforce conversion.
+
+    Function bodies receive the Quantity unchanged. The unit string is
+    metadata that lets tooling and analyses know what dimension the
+    slot expects.
+    """
+    if '_units' in parameters:
+        units_param = parameters['_units']
+        if isinstance(units_param, str):
+            schema._units = units_param
+    return schema
 
 
 # ============================================================================

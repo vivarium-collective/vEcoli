@@ -64,19 +64,22 @@ class RibosomeData(Step):
         return {
             'listeners': {
                 'ribosome_data': {
+                    # Counts (dimensionless integers)
                     'n_ribosomes_per_transcript': f'array[{self.n_monomers},integer]',
                     'n_ribosomes_on_partial_mRNA_per_transcript': f'array[{self.n_monomers},integer]',
                     'total_rRNA_initiated': 'overwrite[integer]',
-                    'total_rRNA_init_prob': 'overwrite[float]',
                     'rRNA5S_initiated': 'overwrite[integer]',
                     'rRNA16S_initiated': 'overwrite[integer]',
                     'rRNA23S_initiated': 'overwrite[integer]',
+                    'mRNA_TU_index': 'array[integer]',
+                    'n_ribosomes_on_each_mRNA': 'array[integer]',
+                    # Probabilities (dimensionless floats in [0,1])
+                    'total_rRNA_init_prob': 'overwrite[float]',
                     'rRNA5S_init_prob': 'overwrite[float]',
                     'rRNA16S_init_prob': 'overwrite[float]',
                     'rRNA23S_init_prob': 'overwrite[float]',
-                    'mRNA_TU_index': 'array[integer]',
-                    'n_ribosomes_on_each_mRNA': 'array[integer]',
-                    'protein_mass_on_polysomes': 'array[float]',
+                    # Mass per polysome — femtograms
+                    'protein_mass_on_polysomes': 'array[float[fg]]',
                 },
             },
             'next_update_time': 'overwrite[float]',

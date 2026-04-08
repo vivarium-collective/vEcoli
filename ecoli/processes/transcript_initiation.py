@@ -161,7 +161,7 @@ class TranscriptInitiation(PartitionedProcess):
         'get_delta_prob_matrix': 'method',
         'perturbations': 'map[node]',
         'rna_data': 'units_array',
-        'active_rnap_footprint_size': 'unum',
+        'active_rnap_footprint_size': 'unum[nt]',
         'get_rnap_active_fraction_from_ppGpp': 'method',
         'idx_rRNA': 'array[integer]',
         'idx_mRNA': 'array[integer]',
@@ -173,8 +173,8 @@ class TranscriptInitiation(PartitionedProcess):
         'rnaSynthProbRnaPolymerase': 'map[float]',
         'replication_coordinate': 'array[integer]',
         'transcription_direction': 'array[integer]',
-        'n_avogadro': 'unum',
-        'cell_density': 'unum',
+        'n_avogadro': 'unum[1/mol]',
+        'cell_density': 'unum[g/L]',
         'ppgpp': 'string',
         'inactive_RNAP': 'string',
         'synth_prob': 'array[float]',
@@ -195,7 +195,7 @@ class TranscriptInitiation(PartitionedProcess):
             'active_RNAPs': ACTIVE_RNAP_ARRAY,
             'promoters': PROMOTER_ARRAY,
             'bulk': 'bulk_array',
-            'listeners': 'node',
+            'listeners': {'mass': {'cell_mass': 'float[fg]'}},
             'timestep': 'integer',
         }
 
@@ -204,7 +204,26 @@ class TranscriptInitiation(PartitionedProcess):
             'bulk': 'bulk_array',
             'RNAs': RNA_ARRAY,
             'active_RNAPs': ACTIVE_RNAP_ARRAY,
-            'listeners': 'overwrite[node]',
+            'listeners': {
+                'rna_synth_prob': {
+                    # Synthesis probabilities — dimensionless
+                    'target_rna_synth_prob': 'overwrite[array[float]]',
+                    'actual_rna_synth_prob': 'overwrite[array[float]]',
+                    'max_p': 'overwrite[float]',
+                    'tu_is_overcrowded': 'overwrite[array[boolean]]',
+                    'total_rna_init': 'overwrite[integer]',
+                },
+                'ribosome_data': {
+                    # rRNA initiation counts and probabilities
+                    'rRNA_initiated_TU': 'overwrite[array[integer]]',
+                    'rRNA_init_prob_TU': 'overwrite[array[float]]',
+                    'total_rna_init': 'overwrite[integer]',
+                },
+                'rnap_data': {
+                    'did_initialize': 'overwrite[integer]',
+                    'rna_init_event': 'overwrite[array[integer]]',
+                },
+            },
         }
 
     defaults = {

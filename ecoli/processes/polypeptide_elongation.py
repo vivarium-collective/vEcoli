@@ -102,7 +102,7 @@ class PolypeptideElongation(PartitionedProcess):
     topology = TOPOLOGY
 
     config_schema = {
-        'n_avogadro': 'unum',
+        'n_avogadro': 'unum[1/mol]',
         'proteinIds': 'array[string]',
         'proteinLengths': 'array[integer]',
         'proteinSequences': 'array[integer]',
@@ -135,8 +135,8 @@ class PolypeptideElongation(PartitionedProcess):
         'aa_enzymes': 'list[string]',
         'proton': 'string',
         'water': 'string',
-        'cellDensity': 'unum',
-        'elongation_max': 'unum',
+        'cellDensity': 'unum[g/L]',
+        'elongation_max': 'unum[aa/s]',
         'aa_from_synthetase': 'array[float]',
         'charging_stoich_matrix': 'array[integer]',
         'charged_trna_names': 'list[string]',
@@ -180,7 +180,12 @@ class PolypeptideElongation(PartitionedProcess):
         return {
             'environment': {'media_id': 'string'},
             'boundary': 'node',
-            'listeners': 'node',
+            'listeners': {
+                'mass': {
+                    'cell_mass': 'float[fg]',
+                    'dry_mass': 'float[fg]',
+                },
+            },
             'active_ribosome': ACTIVE_RIBOSOME_ARRAY,
             'bulk': 'bulk_array',
             'bulk_total': 'bulk_array',
@@ -196,7 +201,34 @@ class PolypeptideElongation(PartitionedProcess):
         return {
             'bulk': 'bulk_array',
             'active_ribosome': ACTIVE_RIBOSOME_ARRAY,
-            'listeners': 'overwrite[node]',
+            'listeners': {
+                'growth_limits': {
+                    # Concentrations — micromolar (uM = umol/L)
+                    'synthetase_conc': 'overwrite[array[float[uM]]]',
+                    'uncharged_trna_conc': 'overwrite[array[float[uM]]]',
+                    'charged_trna_conc': 'overwrite[array[float[uM]]]',
+                    'aa_conc': 'overwrite[array[float[uM]]]',
+                    'ribosome_conc': 'overwrite[float[uM]]',
+                    'ppgpp_conc': 'overwrite[float[uM]]',
+                    'rela_conc': 'overwrite[float[uM]]',
+                    'spot_conc': 'overwrite[float[uM]]',
+                    # Concentration — millimolar (mM = mmol/L)
+                    'aa_supply_aa_conc': 'overwrite[array[float[mM]]]',
+                    # Count deltas and pool sizes (dimensionless integer counts)
+                    'aa_count_diff': 'overwrite[array[float]]',
+                    'aas_used': 'overwrite[array[integer]]',
+                    'net_charged': 'overwrite[array[integer]]',
+                    'aa_allocated': 'overwrite[array[integer]]',
+                    'aa_pool_size': 'overwrite[array[integer]]',
+                    'aa_request_size': 'overwrite[array[float]]',
+                    'active_ribosome_allocated': 'overwrite[integer]',
+                    # Saturation fractions (dimensionless ratios)
+                    'fraction_trna_charged': 'overwrite[array[float]]',
+                    'fraction_aa_to_elongate': 'overwrite[array[float]]',
+                    'aa_supply_fraction_fwd': 'overwrite[array[float]]',
+                    'aa_supply_fraction_rev': 'overwrite[array[float]]',
+                },
+            },
             'polypeptide_elongation': {
                 'gtp_to_hydrolyze': 'overwrite[float]',
                 'aa_count_diff': 'overwrite[array[float]]',

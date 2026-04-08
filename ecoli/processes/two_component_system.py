@@ -46,7 +46,7 @@ class TwoComponentSystem(PartitionedProcess):
     def inputs(self):
         return {
             'bulk': 'bulk_array',
-            'listeners': 'node',
+            'listeners': {'mass': {'cell_mass': 'float[fg]'}},
             'timestep': 'integer',
         }
 

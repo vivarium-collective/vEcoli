@@ -110,8 +110,8 @@ class TranscriptElongation(PartitionedProcess):
         'polymerized_ntps': 'list[string]',
         'charged_trnas': 'list[string]',
         'trna_attenuation': 'boolean',
-        'cell_density': 'unum',
-        'n_avogadro': 'unum',
+        'cell_density': 'unum[g/L]',
+        'n_avogadro': 'unum[1/mol]',
         'get_attenuation_stop_probabilities': 'method',
         'attenuated_rna_indices': 'array[integer]',
         'location_lookup': 'map[node]',
@@ -126,7 +126,7 @@ class TranscriptElongation(PartitionedProcess):
             'active_RNAPs': ACTIVE_RNAP_ARRAY,
             'bulk': 'bulk_array',
             'bulk_total': 'bulk_array',
-            'listeners': 'node',
+            'listeners': {'mass': {'cell_mass': 'float[fg]'}},
             'timestep': 'integer',
         }
 
@@ -135,7 +135,23 @@ class TranscriptElongation(PartitionedProcess):
             'bulk': 'bulk_array',
             'RNAs': RNA_ARRAY,
             'active_RNAPs': ACTIVE_RNAP_ARRAY,
-            'listeners': 'overwrite[node]',
+            'listeners': {
+                'transcript_elongation_listener': {
+                    'count_rna_synthesized': 'overwrite[array[integer]]',
+                    'count_NTPs_used': 'overwrite[integer]',
+                    'attenuation_probability': 'overwrite[array[float]]',
+                    'counts_attenuated': 'overwrite[array[integer]]',
+                },
+                'growth_limits': {
+                    'ntp_used': 'overwrite[array[integer]]',
+                },
+                'rnap_data': {
+                    'actual_elongations': 'overwrite[integer]',
+                    'did_terminate': 'overwrite[integer]',
+                    'termination_loss': 'overwrite[integer]',
+                    'did_stall': 'overwrite[integer]',
+                },
+            },
         }
 
     defaults = {

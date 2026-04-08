@@ -50,14 +50,17 @@ class Complexation(PartitionedProcess):
     def inputs(self):
         return {
             'bulk': 'bulk_array',
-            'listeners': 'node',
             'timestep': 'integer',
         }
 
     def outputs(self):
         return {
             'bulk': 'bulk_array',
-            'listeners': 'overwrite[node]',
+            'listeners': {
+                'complexation_listener': {
+                    'complexation_events': 'overwrite[array[integer]]',
+                },
+            },
         }
 
     defaults = {

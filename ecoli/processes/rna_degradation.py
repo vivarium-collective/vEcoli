@@ -76,14 +76,14 @@ class RnaDegradation(PartitionedProcess):
         'all_rna_ids': 'list[string]',
         'n_total_RNAs': 'integer',
         'n_avogadro': 'float',
-        'cell_density': 'unum',
+        'cell_density': 'unum[g/L]',
         'endoRNase_ids': 'list[string]',
         'exoRNase_ids': 'list[string]',
-        'kcat_exoRNase': 'unum',
-        'Kcat_endoRNases': 'unum',
+        'kcat_exoRNase': 'unum[1/s]',
+        'Kcat_endoRNases': 'unum[1/s]',
         'charged_trna_names': 'list[string]',
         'uncharged_trna_indexes': 'array[integer]',
-        'rna_deg_rates': 'unum',
+        'rna_deg_rates': 'unum[1/s]',
         'is_mRNA': 'array[boolean]',
         'is_rRNA': 'array[boolean]',
         'is_tRNA': 'array[boolean]',
@@ -101,7 +101,7 @@ class RnaDegradation(PartitionedProcess):
         'rrsa_idx': 'integer',
         'ribosome30S': 'string',
         'ribosome50S': 'string',
-        'Kms': 'unum',
+        'Kms': 'unum[mol/L]',
         'seed': 'integer',
         'emit_unique': 'boolean',
     }
@@ -111,7 +111,7 @@ class RnaDegradation(PartitionedProcess):
             'bulk': 'bulk_array',
             'RNAs': RNA_ARRAY,
             'active_ribosome': ACTIVE_RIBOSOME_ARRAY,
-            'listeners': 'node',
+            'listeners': {'mass': {'cell_mass': 'float[fg]'}},
             'timestep': 'integer',
         }
 
@@ -119,7 +119,17 @@ class RnaDegradation(PartitionedProcess):
         return {
             'bulk': 'bulk_array',
             'RNAs': RNA_ARRAY,
-            'listeners': 'overwrite[node]',
+            'listeners': {
+                'rna_degradation_listener': {
+                    'count_rna_degraded': 'overwrite[array[integer]]',
+                    'nucleotides_from_degradation': 'overwrite[integer]',
+                    'count_RNA_degraded_per_cistron': 'overwrite[array[integer]]',
+                    'fraction_active_endoRNases': 'overwrite[float]',
+                    'diff_relative_first_order_decay': 'overwrite[float]',
+                    'fract_endo_rrna_counts': 'overwrite[array[float]]',
+                    'fragment_bases_digested': 'overwrite[integer]',
+                },
+            },
         }
 
     defaults = {

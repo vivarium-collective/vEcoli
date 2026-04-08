@@ -53,13 +53,20 @@ class RnaMaturation(PartitionedProcess):
         return {
             'bulk': 'bulk_array',
             'bulk_total': 'bulk_array',
-            'listeners': 'node',
         }
 
     def outputs(self):
         return {
             'bulk': 'bulk_array',
-            'listeners': 'overwrite[node]',
+            'listeners': {
+                'rna_maturation_listener': {
+                    'total_maturation_events': 'overwrite[integer]',
+                    'total_degraded_ntps': 'overwrite[integer]',
+                    'unprocessed_rnas_consumed': 'overwrite[array[integer]]',
+                    'mature_rnas_generated': 'overwrite[array[integer]]',
+                    'maturation_enzyme_counts': 'overwrite[array[integer]]',
+                },
+            },
         }
 
     # Constructor

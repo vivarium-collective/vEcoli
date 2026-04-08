@@ -62,13 +62,13 @@ class ChromosomeReplication(PartitionedProcess):
 
     config_schema = {
         'get_dna_critical_mass': 'method',
-        'criticalInitiationMass': 'unum',
+        'criticalInitiationMass': 'unum[fg]',
         'nutrientToDoublingTime': 'map[float]',
         'replichore_lengths': 'array[integer]',
         'sequences': 'array[integer]',
-        'polymerized_dntp_weights': 'unum',
+        'polymerized_dntp_weights': 'unum[fg]',
         'replication_coordinate': 'array[integer]',
-        'D_period': 'unum',
+        'D_period': 'unum[s]',
         'replisome_protein_mass': 'float',
         'no_child_place_holder': 'integer',
         'basal_elongation_rate': 'integer',
@@ -89,7 +89,7 @@ class ChromosomeReplication(PartitionedProcess):
             'oriCs': ORIC_ARRAY,
             'chromosome_domains': CHROMOSOME_DOMAIN_ARRAY,
             'full_chromosomes': FULL_CHROMOSOME_ARRAY,
-            'listeners': 'node',
+            'listeners': {'mass': {'cell_mass': 'float[fg]'}},
             'environment': {'media_id': 'string'},
             'timestep': 'integer',
         }
@@ -101,7 +101,14 @@ class ChromosomeReplication(PartitionedProcess):
             'oriCs': ORIC_ARRAY,
             'chromosome_domains': CHROMOSOME_DOMAIN_ARRAY,
             'full_chromosomes': FULL_CHROMOSOME_ARRAY,
-            'listeners': 'overwrite[node]',
+            'listeners': {
+                'replication_data': {
+                    # Critical initiation mass — femtograms
+                    'critical_initiation_mass': 'overwrite[float[fg]]',
+                    # Cell mass / critical mass — dimensionless ratio
+                    'critical_mass_per_oriC': 'overwrite[float]',
+                },
+            },
         }
 
     defaults = {
