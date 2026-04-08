@@ -1,7 +1,8 @@
 """Compare vivarium (v1) and composite (v2) engines on an identical EcoliSim.
 
 Run from the vEcoli root directory:
-    python runscripts/compare_engines.py [--duration 4]
+    python runscripts/compare_engines.py [--duration 4] [--divide]
+                                          [--division-threshold 290]
 """
 
 import argparse
@@ -16,15 +17,19 @@ from contextlib import chdir
 ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def run_v1(duration):
-    """Run vivarium engine, return (runtime, initial_bulk, final_bulk, query_data)."""
+def run_v1(duration, divide=False, division_threshold=None):
+    """Run vivarium engine, return (runtime, initial_bulk, final_bulk, divided)."""
     from ecoli.experiments.ecoli_master_sim import EcoliSim
     from ecoli.library.schema import not_a_process
+    from ecoli.experiments.ecoli_master_sim import TimeLimitError
+    from ecoli.processes.cell_division import DivisionDetected
 
     sim = EcoliSim.from_file()
     sim.max_duration = int(duration)
     sim.emitter = 'null'
-    sim.divide = False
+    sim.divide = divide
+    if division_threshold is not None:
+        sim.division_threshold = division_threshold
     sim.build_ecoli()
 
     init = sim.generated_initial_state
@@ -32,20 +37,40 @@ def run_v1(duration):
         init = init['agents'][next(iter(init['agents']))]
     initial_bulk = init['bulk']['count'].copy()
 
+    divided = False
     t0 = time.time()
-    sim.run()
+    try:
+        sim.run()
+    except DivisionDetected:
+        divided = True
+    except TimeLimitError:
+        pass
     runtime = time.time() - t0
 
     state = sim.ecoli_experiment.state.get_value(condition=not_a_process)
-    final_bulk = state['bulk']['count'].copy()
+    if 'agents' in state and isinstance(state['agents'], dict):
+        agent_keys = list(state['agents'].keys())
+        print(f"  v1 post-run agents: {agent_keys}", flush=True)
+        if agent_keys:
+            first = state['agents'][agent_keys[0]]
+            if isinstance(first, dict) and 'bulk' in first:
+                final_bulk = first['bulk']['count'].copy()
+            else:
+                final_bulk = initial_bulk.copy()
+        else:
+            final_bulk = initial_bulk.copy()
+    elif 'bulk' in state:
+        final_bulk = state['bulk']['count'].copy()
+    else:
+        final_bulk = initial_bulk.copy()
 
     sim.ecoli_experiment.end()
 
-    return runtime, initial_bulk, final_bulk, None
+    return runtime, initial_bulk, final_bulk, divided
 
 
-def run_v2(duration):
-    """Run composite engine, return (runtime, initial_bulk, final_bulk)."""
+def run_v2(duration, divide=False, division_threshold=None):
+    """Run composite engine, return (runtime, initial_bulk, final_bulk, divided)."""
     from ecoli.experiments.ecoli_master_sim import EcoliSim
     from ecoli.composites.ecoli_composite import build_composite_native
     from ecoli.library.bigraph_types import ECOLI_TYPES
@@ -55,7 +80,9 @@ def run_v2(duration):
     sim = EcoliSim.from_file()
     sim.max_duration = int(duration)
     sim.emitter = 'null'
-    sim.divide = False
+    sim.divide = divide
+    if division_threshold is not None:
+        sim.division_threshold = division_threshold
 
     # Resolve registries (cheap, no vivarium engine)
     sim.processes = sim._retrieve_processes(
@@ -82,28 +109,40 @@ def run_v2(duration):
     composite.run(float(duration))
     runtime = time.time() - t0
 
+    # Note: v2 native does NOT yet implement the _divide handler, so even
+    # if Division fires, the mother is not replaced by daughters. divided
+    # is reported as False until a divide_map type lands.
+    divided = False
     if 'agents' in composite.state:
         cell = composite.state['agents'][next(iter(composite.state['agents']))]
     else:
         cell = composite.state
     final_bulk = cell['bulk']['count'].copy()
 
-    return runtime, initial_bulk, final_bulk
+    return runtime, initial_bulk, final_bulk, divided
 
 
-def compare(duration=4.0):
-    print(f"=== Engine Comparison ({duration}s simulated) ===\n", flush=True)
+def compare(duration=4.0, divide=False, division_threshold=None, timeout=600):
+    label = f"{duration}s simulated"
+    if divide:
+        label += ", divide=True"
+        if division_threshold is not None:
+            label += f", threshold={division_threshold}"
+    print(f"=== Engine Comparison ({label}) ===\n", flush=True)
 
     # Run in separate subprocesses to avoid shared state issues
     # (numba JIT recompilation hangs on second build in same process)
     import subprocess, pickle, tempfile
 
-    def run_in_subprocess(func_name, duration):
+    def run_in_subprocess(func_name, duration, divide, division_threshold):
+        threshold_arg = (
+            f", division_threshold={division_threshold!r}"
+            if division_threshold is not None else "")
         script = f"""
 import pickle, sys
 sys.path.insert(0, '.')
 from runscripts.compare_engines import {func_name}
-result = {func_name}({duration})
+result = {func_name}({duration}, divide={divide}{threshold_arg})
 with open(sys.argv[1], 'wb') as f:
     pickle.dump(result, f)
 """
@@ -122,7 +161,7 @@ with open(sys.argv[1], 'wb') as f:
             tail.append(line)
             if len(tail) > 50:
                 tail.pop(0)
-        proc.wait(timeout=300)
+        proc.wait(timeout=timeout)
         if proc.returncode != 0:
             raise RuntimeError(
                 f"{func_name} failed (rc={proc.returncode}):\n{''.join(tail[-20:])}")
@@ -130,12 +169,14 @@ with open(sys.argv[1], 'wb') as f:
             return pickle.load(f)
 
     print("Running v1 (vivarium)...", flush=True)
-    v1_runtime, v1_init, v1_final, v1_ts = run_in_subprocess('run_v1', duration)
-    print(f"  v1 done: {v1_runtime:.2f}s wall time\n", flush=True)
+    v1_runtime, v1_init, v1_final, v1_divided = run_in_subprocess(
+        'run_v1', duration, divide, division_threshold)
+    print(f"  v1 done: {v1_runtime:.2f}s wall time, divided={v1_divided}\n", flush=True)
 
     print("Running v2 (composite)...", flush=True)
-    v2_runtime, v2_init, v2_final = run_in_subprocess('run_v2', duration)
-    print(f"  v2 done: {v2_runtime:.2f}s wall time\n", flush=True)
+    v2_runtime, v2_init, v2_final, v2_divided = run_in_subprocess(
+        'run_v2', duration, divide, division_threshold)
+    print(f"  v2 done: {v2_runtime:.2f}s wall time, divided={v2_divided}\n", flush=True)
 
     # Check initial states match
     init_match = np.array_equal(v1_init, v2_init)
@@ -197,8 +238,18 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Compare vEcoli engines')
     parser.add_argument('--duration', type=float, default=4.0,
                         help='Simulated seconds (default: 4)')
+    parser.add_argument('--divide', action='store_true',
+                        help='Enable division (adds Division/MarkDPeriod/StopAfterDivision)')
+    parser.add_argument('--division-threshold', type=float, default=None,
+                        help='Override division_threshold (e.g. 290 for early divide test)')
+    parser.add_argument('--timeout', type=int, default=600,
+                        help='Per-subprocess timeout in seconds (default: 600)')
     args = parser.parse_args()
 
     with chdir(ROOT_PATH):
-        corr = compare(args.duration)
+        corr = compare(
+            args.duration,
+            divide=args.divide,
+            division_threshold=args.division_threshold,
+            timeout=args.timeout)
         sys.exit(0 if corr > 0.90 else 1)

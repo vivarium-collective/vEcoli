@@ -37,7 +37,7 @@ from bigraph_schema.schema import (
 from bigraph_schema.methods import (
     infer, set_default, default, serialize, realize, render,
     wrap_default, resolve, reify_schema, validate, merge_update,
-    apply, reconcile,
+    apply, reconcile, divide,
 )
 from bigraph_schema.methods.handle_parameters import align_parameters
 
@@ -557,6 +557,16 @@ def apply(schema: BulkArray, state, update, path):
                  state, update, path)
 
 
+@dispatch
+def divide(schema: BulkArray, state, context=None, path=(), rng=None):
+    """Binomial split of bulk molecule counts. Delegates to v1's
+    `divide_bulk` so v1 and v2 use bit-identical logic."""
+    if state is None:
+        return None, None
+    from ecoli.library.schema import divide_bulk
+    return divide_bulk(state)
+
+
 # ============================================================================
 # UniqueArray — structured array for unique molecules (set/add/delete ops)
 # ============================================================================
@@ -670,6 +680,88 @@ def apply(schema: UniqueArray, state, update, path):
 
     result.flags.writeable = False
     return result, []
+
+
+# Map v1 divider name → divider function. v1's divider_registry is the
+# source of truth at runtime, but importing the functions directly avoids
+# a registry round-trip and lets divide() be self-contained.
+def _get_unique_divider_fn(divider_name):
+    from ecoli.library.schema import (
+        divide_by_domain, divide_RNAs_by_domain, divide_ribosomes_by_RNA,
+        empty_dict_divider, divide_set_none, divide_binomial,
+    )
+    return {
+        'by_domain': divide_by_domain,
+        'rna_by_domain': divide_RNAs_by_domain,
+        'ribosome_by_RNA': divide_ribosomes_by_RNA,
+        'empty_dict': empty_dict_divider,
+        'set_none': divide_set_none,
+        'binomial_ecoli': divide_binomial,
+    }.get(divider_name)
+
+
+def _resolve_topology_path(context, base_path, rel_path):
+    """Resolve a vivarium-style relative path (with leading '..' segments)
+    against a context dict, starting from base_path. Returns the value at
+    the resolved path or None if any segment is missing.
+    """
+    # Walk base_path up for each '..' in rel_path
+    abs_path = list(base_path)
+    for seg in rel_path:
+        if seg == '..':
+            if abs_path:
+                abs_path.pop()
+        else:
+            abs_path.append(seg)
+    cur = context
+    for seg in abs_path:
+        if isinstance(cur, dict) and seg in cur:
+            cur = cur[seg]
+        else:
+            return None
+    return cur
+
+
+@dispatch
+def divide(schema: UniqueArray, state, context=None, path=(), rng=None):
+    """Divide a unique molecule structured array using v1's molecule-specific
+    divider. The molecule name comes from the last segment of `path`
+    (e.g. ('unique', 'full_chromosome') → 'full_chromosome'). Contextual
+    dividers (by_domain, rna_by_domain, ribosome_by_RNA) need sibling
+    unique molecule arrays, which we resolve from `context` using the
+    relative paths declared in v1's UNIQUE_DIVIDERS topology.
+    """
+    if state is None:
+        return None, None
+    if not path:
+        # No molecule identity — share by reference. Caller should
+        # always pass the path so the right divider can be selected.
+        return state, state
+
+    from ecoli.library.schema import UNIQUE_DIVIDERS
+
+    mol_name = path[-1]
+    divider_info = UNIQUE_DIVIDERS.get(mol_name)
+    if divider_info is None:
+        # No v1 divider registered for this molecule. Default: share.
+        return state, state
+
+    divider_fn = _get_unique_divider_fn(divider_info['divider'])
+    if divider_fn is None:
+        return state, state
+
+    # Resolve topology fields against the parent context. Vivarium
+    # `..` goes up from the FULL port path (not one segment above), so
+    # pass `path` directly as the base.
+    topology = divider_info.get('topology', {})
+    divider_state_arg = {}
+    if context is not None:
+        for port_name, port_path in topology.items():
+            resolved = _resolve_topology_path(context, path, port_path)
+            if resolved is not None:
+                divider_state_arg[port_name] = resolved
+
+    return divider_fn(state, divider_state_arg)
 
 
 # ============================================================================

@@ -185,9 +185,19 @@ class StopAfterDivision(Process):
             "agents": {"*": {}},
         }
 
-    def calculate_timestep(self, states):
-        # Make sure update_condition is checked every timestep
-        return 0
+    def calculate_timestep(self, interval_or_state, state=None):
+        # In vivarium, returning 0 means "check every timestep" (handled
+        # specially by vivarium's scheduler). In process-bigraph, 0 would
+        # mean "interval=0", which causes the engine to call this process
+        # forever without advancing time. Use the normal sim timestep so
+        # process-bigraph schedules it on a real cadence.
+        # Bridges both vivarium (calculate_timestep(states)) and
+        # process-bigraph (calculate_timestep(interval, state)) signatures.
+        if state is None:
+            # vivarium signature: keep the legacy 0 → check-every-timestep
+            return 0
+        # process-bigraph signature: use the normal timestep
+        return self.parameters.get('time_step', 1.0)
 
     def update_condition(self, timestep, states):
         # Use this solely to check for division
