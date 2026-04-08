@@ -109,12 +109,23 @@ with open(sys.argv[1], 'wb') as f:
 """
         with tempfile.NamedTemporaryFile(suffix='.pkl', delete=False) as tmp:
             tmp_path = tmp.name
-        proc = subprocess.run(
-            [sys.executable, '-c', script, tmp_path],
-            capture_output=True, text=True, timeout=300)
+        # Stream stdout/stderr line-by-line so progress is visible — using
+        # subprocess.run(capture_output=True) buffers everything until the
+        # subprocess exits, which makes the comparison appear to hang.
+        proc = subprocess.Popen(
+            [sys.executable, '-u', '-c', script, tmp_path],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1)
+        tail = []
+        for line in proc.stdout:
+            print(f"  | {line}", end='', flush=True)
+            tail.append(line)
+            if len(tail) > 50:
+                tail.pop(0)
+        proc.wait(timeout=300)
         if proc.returncode != 0:
-            print(f"  STDERR: {proc.stderr[-500:]}", flush=True)
-            raise RuntimeError(f"{func_name} failed: {proc.stderr[-200:]}")
+            raise RuntimeError(
+                f"{func_name} failed (rc={proc.returncode}):\n{''.join(tail[-20:])}")
         with open(tmp_path, 'rb') as f:
             return pickle.load(f)
 
