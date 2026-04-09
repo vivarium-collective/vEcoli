@@ -69,7 +69,7 @@ def run_v1(duration, divide=False, division_threshold=None):
     return runtime, initial_bulk, final_bulk, divided
 
 
-def run_v2(duration, divide=False, division_threshold=None):
+def run_v2(duration, divide=False, division_threshold=None, parallel_steps=False, parallel_workers=None):
     """Run composite engine, return (runtime, initial_bulk, final_bulk, divided)."""
     from ecoli.experiments.ecoli_master_sim import EcoliSim
     from ecoli.composites.ecoli_composite import build_composite_native
@@ -96,7 +96,12 @@ def run_v2(duration, divide=False, division_threshold=None):
     core.register_types(ECOLI_TYPES)
 
     state = build_composite_native(core, sim.config)
-    composite = Composite({'schema': {}, 'state': state}, core=core)
+    composite_config = {'schema': {}, 'state': state}
+    if parallel_steps:
+        composite_config['parallel_steps'] = True
+        if parallel_workers is not None:
+            composite_config['parallel_workers'] = parallel_workers
+    composite = Composite(composite_config, core=core)
     composite.to_run = []
 
     if 'agents' in composite.state:
@@ -122,12 +127,17 @@ def run_v2(duration, divide=False, division_threshold=None):
     return runtime, initial_bulk, final_bulk, divided
 
 
-def compare(duration=4.0, divide=False, division_threshold=None, timeout=600):
+def compare(duration=4.0, divide=False, division_threshold=None, timeout=600,
+            parallel_steps=False, parallel_workers=None):
     label = f"{duration}s simulated"
     if divide:
         label += ", divide=True"
         if division_threshold is not None:
             label += f", threshold={division_threshold}"
+    if parallel_steps:
+        label += f", parallel_steps=True"
+        if parallel_workers is not None:
+            label += f"({parallel_workers} workers)"
     print(f"=== Engine Comparison ({label}) ===\n", flush=True)
 
     # Run in separate subprocesses to avoid shared state issues
@@ -138,11 +148,17 @@ def compare(duration=4.0, divide=False, division_threshold=None, timeout=600):
         threshold_arg = (
             f", division_threshold={division_threshold!r}"
             if division_threshold is not None else "")
+        # parallel_steps only applies to v2
+        v2_kwargs = ""
+        if func_name == 'run_v2' and parallel_steps:
+            v2_kwargs = f", parallel_steps=True"
+            if parallel_workers is not None:
+                v2_kwargs += f", parallel_workers={parallel_workers}"
         script = f"""
 import pickle, sys
 sys.path.insert(0, '.')
 from runscripts.compare_engines import {func_name}
-result = {func_name}({duration}, divide={divide}{threshold_arg})
+result = {func_name}({duration}, divide={divide}{threshold_arg}{v2_kwargs})
 with open(sys.argv[1], 'wb') as f:
     pickle.dump(result, f)
 """
@@ -244,6 +260,10 @@ if __name__ == '__main__':
                         help='Override division_threshold (e.g. 290 for early divide test)')
     parser.add_argument('--timeout', type=int, default=600,
                         help='Per-subprocess timeout in seconds (default: 600)')
+    parser.add_argument('--parallel-steps', action='store_true',
+                        help='Enable v2 inner thread pool for layer parallelism')
+    parser.add_argument('--parallel-workers', type=int, default=None,
+                        help='Cap thread pool size (default: layer width)')
     args = parser.parse_args()
 
     with chdir(ROOT_PATH):
@@ -251,5 +271,7 @@ if __name__ == '__main__':
             args.duration,
             divide=args.divide,
             division_threshold=args.division_threshold,
+            parallel_steps=args.parallel_steps,
+            parallel_workers=args.parallel_workers,
             timeout=args.timeout)
         sys.exit(0 if corr > 0.90 else 1)
