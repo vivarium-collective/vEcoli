@@ -123,10 +123,14 @@ class ProteinDegradation(PartitionedProcess):
         protein_data = counts(states["bulk"], self.protein_idx)
         # Determine how many proteins to degrade based on the degradation rates
         # and counts of each protein
+        lam = self._proteinDegRates(states["timestep"]) * protein_data
+        # After division, daughter bulk counts can rarely be zero or negative
+        # if the binomial split produces edge cases. Clamp lambda to 0.
+        lam = np.maximum(lam, 0.0)
+        if np.any(np.isnan(lam)):
+            lam = np.nan_to_num(lam, nan=0.0)
         nProteinsToDegrade = np.fmin(
-            self.random_state.poisson(
-                self._proteinDegRates(states["timestep"]) * protein_data
-            ),
+            self.random_state.poisson(lam),
             protein_data,
         )
 

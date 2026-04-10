@@ -26,6 +26,20 @@ class MarkDPeriod(Step):
 
     name = "mark_d_period"
 
+    config_schema = {}
+
+    def inputs(self):
+        return {
+            'full_chromosome': 'unique_array',
+            'global_time': 'float',
+        }
+
+    def outputs(self):
+        return {
+            'full_chromosome': 'unique_array',
+            'divide': 'overwrite[boolean]',
+        }
+
     def ports_schema(self):
         return {
             "full_chromosome": {},
@@ -37,20 +51,20 @@ class MarkDPeriod(Step):
             },
         }
 
-    def next_update(self, timestep, states):
+    def update(self, states, interval=None):
         division_time, has_triggered_division = attrs(
             states["full_chromosome"], ["division_time", "has_triggered_division"]
         )
         if len(division_time) < 2:
             return {}
-        # Set division time to be the minimum division time for a chromosome
-        # that has not yet triggered cell division
-        divide_at_time = division_time[~has_triggered_division].min()
+        not_triggered = ~has_triggered_division
+        if not not_triggered.any():
+            return {}
+        divide_at_time = division_time[not_triggered].min()
         if states["global_time"] >= divide_at_time:
             divide_at_time_index = np.where(division_time == divide_at_time)[0][0]
             has_triggered_division = has_triggered_division.copy()
             has_triggered_division[divide_at_time_index] = True
-            # Set flag for ensuing division Step to trigger division
             return {
                 "full_chromosome": {
                     "set": {"has_triggered_division": has_triggered_division}
@@ -58,6 +72,9 @@ class MarkDPeriod(Step):
                 "divide": True,
             }
         return {}
+
+    def next_update(self, timestep, states):
+        return self.update(states, timestep)
 
 
 class Division(Step):
@@ -71,6 +88,17 @@ class Division(Step):
     """
 
     name = NAME
+
+    config_schema = {
+        'agent_id': 'string',
+        'composer': 'node',
+        'composer_config': 'node',
+        'division_threshold': 'node',
+        'dry_mass_inc_dict': 'node',
+        'seed': 'integer{0}',
+        'daughter_ids_function': 'node',
+    }
+
     defaults: Dict[str, Any] = {
         "daughter_ids_function": daughter_phylogeny_id,
         "threshold": None,
@@ -80,7 +108,6 @@ class Division(Step):
     def __init__(self, parameters=None):
         super().__init__(parameters)
 
-        # must provide a composer to generate new daughters
         self.agent_id = self.parameters["agent_id"]
         self.composer = self.parameters["composer"]
         self.composer_config = self.parameters["composer_config"]
@@ -96,6 +123,20 @@ class Division(Step):
                 loc=1.0, scale=0.1
             )
         self.dry_mass_inc_dict = self.parameters["dry_mass_inc_dict"]
+
+    def inputs(self):
+        return {
+            'division_variable': 'boolean',
+            'full_chromosome': 'unique_array',
+            'media_id': 'string',
+            'division_threshold': 'node',
+        }
+
+    def outputs(self):
+        return {
+            'agents': 'map[node]',
+            'division_threshold': 'overwrite[node]',
+        }
 
     def ports_schema(self):
         return {
@@ -113,9 +154,7 @@ class Division(Step):
             },
         }
 
-    def next_update(self, timestep, states):
-        # Figure out division threshold at first timestep if
-        # using division_threshold is set to mass_distribution
+    def update(self, states, interval=None):
         if states["division_threshold"] == "mass_distribution":
             current_media_id = states["media_id"]
             return {
@@ -168,6 +207,9 @@ class Division(Step):
             }
         return {}
 
+    def next_update(self, timestep, states):
+        return self.update(states, timestep)
+
 
 class DivisionDetected(Exception):
     pass
@@ -176,9 +218,22 @@ class DivisionDetected(Exception):
 class StopAfterDivision(Process):
     """
     Detect division and raise an exception that must be caught.
+
+    NOTE: This is a vivarium-only process. In the composite engine,
+    division detection is handled by the driver loop checking agent count.
     """
 
     name = "stop-after-division"
+
+    config_schema = {}
+
+    def inputs(self):
+        return {
+            'agents': 'map[node]',
+        }
+
+    def outputs(self):
+        return {}
 
     def ports_schema(self):
         return {
@@ -186,25 +241,17 @@ class StopAfterDivision(Process):
         }
 
     def calculate_timestep(self, interval_or_state, state=None):
-        # In vivarium, returning 0 means "check every timestep" (handled
-        # specially by vivarium's scheduler). In process-bigraph, 0 would
-        # mean "interval=0", which causes the engine to call this process
-        # forever without advancing time. Use the normal sim timestep so
-        # process-bigraph schedules it on a real cadence.
-        # Bridges both vivarium (calculate_timestep(states)) and
-        # process-bigraph (calculate_timestep(interval, state)) signatures.
         if state is None:
-            # vivarium signature: keep the legacy 0 → check-every-timestep
             return 0
-        # process-bigraph signature: use the normal timestep
         return self.parameters.get('time_step', 1.0)
 
     def update_condition(self, timestep, states):
-        # Use this solely to check for division
-        # Never actually updates so does not interfere with timestepping
         if len(states["agents"]) > 1:
             raise DivisionDetected("More than one cell in agents store.")
         return False
 
+    def update(self, states, interval=None):
+        return {}
+
     def next_update(self, timestep, states):
-        raise RuntimeError("This should never be called.")
+        return {}

@@ -363,7 +363,7 @@ wheels = [
 
 [[package]]
 name = "bigraph-schema"
-version = "1.0.14"
+version = "1.1.1"
 source = { editable = "../bigraph-schema" }
 dependencies = [
     { name = "fire" },
@@ -2773,7 +2773,7 @@ wheels = [
 
 [[package]]
 name = "process-bigraph"
-version = "1.0.6"
+version = "1.1.0"
 source = { editable = "../process-bigraph" }
 dependencies = [
     { name = "bigraph-schema" },

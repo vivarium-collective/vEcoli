@@ -21,6 +21,7 @@ Also provides ``translate_ports()`` which converts vivarium
 """
 
 import copy
+import os
 import typing
 import importlib
 
@@ -560,11 +561,21 @@ def apply(schema: BulkArray, state, update, path):
 @dispatch
 def divide(schema: BulkArray, state, context=None, path=(), rng=None):
     """Binomial split of bulk molecule counts. Delegates to v1's
-    `divide_bulk` so v1 and v2 use bit-identical logic."""
+    `divide_bulk` so v1 and v2 use bit-identical logic.
+
+    v1's divide_bulk freezes the daughter arrays read-only as a
+    defensive measure for vivarium's tree. v2 mutates state in place
+    via apply(BulkArray) — we need them writeable.
+    """
     if state is None:
         return None, None
     from ecoli.library.schema import divide_bulk
-    return divide_bulk(state)
+    a, b = divide_bulk(state)
+    a = a.copy() if not a.flags.writeable else a
+    b = b.copy() if not b.flags.writeable else b
+    a.flags.writeable = True
+    b.flags.writeable = True
+    return a, b
 
 
 # ============================================================================
@@ -774,8 +785,19 @@ def divide(schema: UniqueArray, state, context=None, path=(), rng=None):
 
     from ecoli.library.schema import UNIQUE_DIVIDERS
 
+    # The unique store uses SINGULAR molecule names (e.g. 'RNA',
+    # 'active_RNAP', 'full_chromosome') but vEcoli's UNIQUE_DIVIDERS
+    # dict mostly uses PLURAL names ('RNAs', 'active_RNAPs', etc.).
+    # active_ribosome is the one exception that's singular in both.
+    # Try several common plural forms.
     mol_name = path[-1]
     divider_info = UNIQUE_DIVIDERS.get(mol_name)
+    if divider_info is None:
+        # +s plural (most cases): RNA→RNAs, active_RNAP→active_RNAPs
+        divider_info = UNIQUE_DIVIDERS.get(mol_name + 's')
+    if divider_info is None:
+        # +es plural (words ending in -x): DnaA_box→DnaA_boxes
+        divider_info = UNIQUE_DIVIDERS.get(mol_name + 'es')
     if divider_info is None:
         # No v1 divider registered for this molecule. Default: share.
         return state, state

@@ -81,6 +81,15 @@ class Shape(Step):
     """
 
     name = "ecoli-shape"
+
+    config_schema = {
+        'width': 'node',
+        'periplasm_fraction': 'float{0.2}',
+        'cytoplasm_fraction': 'float{0.8}',
+        'initial_cell_volume': 'node',
+        'initial_mass': 'node',
+    }
+
     defaults = {
         "width": 1.0 * units.um,
         "periplasm_fraction": 0.2,
@@ -88,6 +97,22 @@ class Shape(Step):
         "initial_cell_volume": 1.2 * units.fL,
         "initial_mass": 1339 * units.fg,
     }
+
+    def inputs(self):
+        return {
+            'cell_global': 'node',
+            'listener_cell_mass': 'float',
+            'listener_cell_volume': 'float',
+            'periplasm_global': 'node',
+            'cytoplasm_global': 'node',
+        }
+
+    def outputs(self):
+        return {
+            'cell_global': 'overwrite[node]',
+            'periplasm_global': 'overwrite[node]',
+            'cytoplasm_global': 'overwrite[node]',
+        }
 
     def __init__(self, parameters=None):
         super().__init__(parameters)
@@ -221,7 +246,13 @@ class Shape(Step):
             },
         }
 
+    def update(self, states, interval=None):
+        return self._compute_update(states)
+
     def next_update(self, timestep, states):
+        return self._compute_update(states)
+
+    def _compute_update(self, states):
         for port in ("cell_global", "periplasm_global", "cytoplasm_global"):
             for variable, value in states[port].items():
                 assert isinstance(value, Quantity), (

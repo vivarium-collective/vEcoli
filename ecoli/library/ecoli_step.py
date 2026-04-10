@@ -15,6 +15,10 @@ Each vEcoli process defines:
 
 The vivarium interface (``defaults``, ``ports_schema``,
 ``next_update``) is derived automatically for backward compatibility.
+
+In v2 (composite engine), config is accessed via ``self.config``.
+In v1 (vivarium engine), config is accessed via ``self.parameters``.
+The bridge ensures both are available regardless of which path was used.
 """
 
 from bigraph_schema.methods import default as schema_default
@@ -48,7 +52,6 @@ class EcoliStep(VivariumStep, BigraphStep):
             if isinstance(spec, dict) and '_default' in spec:
                 result[key] = spec['_default']
             elif isinstance(spec, str) and '{' in spec:
-                # Parse inline default: 'type{value}'
                 type_str, _, default_str = spec.partition('{')
                 default_str = default_str.rstrip('}')
                 type_str = type_str.strip()
@@ -64,30 +67,46 @@ class EcoliStep(VivariumStep, BigraphStep):
                     result[key] = default_str
         return result
 
-    def __init__(self, parameters=None, config=None, core=None):
-        if parameters is not None and config is None:
-            config = parameters
-        if config is not None and parameters is None:
-            parameters = config
+    def __init__(self, config=None, core=None):
+        # realize_link calls edge_class(config, core).
+        # vivarium calls Class(parameters_dict).
+        # Both pass config as the first positional arg.
 
-        # If the subclass has config_schema but no explicit defaults,
-        # derive defaults from config_schema.
         if self.config_schema and not self.__class__.__dict__.get('defaults'):
             self.__class__.defaults = self._defaults_from_schema()
 
-        # vivarium init
-        VivariumStep.__init__(self, parameters=parameters)
+        # vivarium init — sets self.parameters (merges with defaults)
+        VivariumStep.__init__(self, parameters=config)
 
-        # process-bigraph init (composite engine path)
+        # process-bigraph init — sets self.config via Edge.__init__
         if core is not None:
             BigraphStep.__init__(self, config=config or {}, core=core)
+        else:
+            # Ensure self.config is available even without core.
+            # Use self.parameters (post-merge with defaults) so
+            # self.config and self.parameters are always equivalent.
+            self._config = self.parameters
 
     def next_update(self, timestep, states):
         """vivarium Engine entry point — delegates to update()."""
         return self.update(states, timestep)
 
     def update(self, state, interval=None):
-        """process-bigraph entry point — subclasses override this."""
+        """process-bigraph entry point — subclasses override this.
+
+        If a subclass overrides ``next_update`` (vivarium-style) but not
+        ``update``, delegate to the subclass's ``next_update`` so the
+        composite engine path also picks up the logic. We skip the
+        delegation when ``next_update`` is EcoliStep's own version (which
+        just calls ``update``) to avoid infinite recursion.
+        """
+        cls = type(self)
+        _delegation_bases = (EcoliStep, EcoliProcess)
+        for klass in cls.__mro__:
+            if 'next_update' in klass.__dict__:
+                if klass not in _delegation_bases:
+                    return klass.next_update(self, interval or 0, state)
+                break
         return {}
 
 
@@ -102,24 +121,29 @@ class EcoliProcess(VivariumProcess, BigraphProcess):
 
     _defaults_from_schema = EcoliStep._defaults_from_schema
 
-    def __init__(self, parameters=None, config=None, core=None):
-        if parameters is not None and config is None:
-            config = parameters
-        if config is not None and parameters is None:
-            parameters = config
-
+    def __init__(self, config=None, core=None):
         if self.config_schema and not self.__class__.__dict__.get('defaults'):
             self.__class__.defaults = self._defaults_from_schema()
 
-        VivariumProcess.__init__(self, parameters=parameters)
+        VivariumProcess.__init__(self, parameters=config)
 
         if core is not None:
             BigraphProcess.__init__(self, config=config or {}, core=core)
+        else:
+            self._config = self.parameters
 
     def next_update(self, timestep, states):
         return self.update(states, timestep)
 
     def update(self, state, interval):
+        """Same delegation as EcoliStep.update."""
+        cls = type(self)
+        _delegation_bases = (EcoliStep, EcoliProcess)
+        for klass in cls.__mro__:
+            if 'next_update' in klass.__dict__:
+                if klass not in _delegation_bases:
+                    return klass.next_update(self, interval or 0, state)
+                break
         return {}
 
     def calculate_timestep(self, interval_or_state, state=None):
@@ -128,7 +152,5 @@ class EcoliProcess(VivariumProcess, BigraphProcess):
         process-bigraph: calculate_timestep(interval, state)
         """
         if state is None:
-            # Called by vivarium with (states,)
             return self.parameters.get('timestep', 1.0)
-        # Called by process-bigraph with (interval, state)
         return interval_or_state

@@ -115,9 +115,21 @@ def _inject_default(state, wire_path, port_schema):
         if isinstance(target, dict) and wire_path:
             key = wire_path[-1]
             current = target.get(key)
-            if current is None or (
-                    isinstance(current, (list, dict, tuple))
-                    and len(current) == 0):
+            # Overwrite if: missing, empty collection, or a zero/false
+            # scalar that realize created from the type's default. The
+            # ports_schema _default carries the config-specific value
+            # (e.g. timestep=1.0) that the type system can't express.
+            if isinstance(current, np.ndarray):
+                should_write = current.size == 0
+            elif current is None:
+                should_write = True
+            elif isinstance(current, (list, dict, tuple)) and len(current) == 0:
+                should_write = True
+            elif isinstance(current, (int, float)) and current == 0 and not isinstance(default, np.ndarray) and default != 0:
+                should_write = True
+            else:
+                should_write = False
+            if should_write:
                 target[key] = default
         return
 
@@ -160,7 +172,10 @@ def prime_listeners(cell_state):
         try:
             timestep = instance.parameters.get('timestep', 1.0)
             update = instance.next_update(timestep, view)
-        except Exception:
+        except Exception as e:
+            import traceback
+            print(f"  [prime_listeners] {step_name} failed: {e}", flush=True)
+            traceback.print_exc()
             continue
         for port_name, value in update.items():
             if not isinstance(value, dict):
@@ -222,8 +237,19 @@ def build_composite_native(core, sim_config):
             core, instance, edge_topology, edge_type=edge_type, step_name=name)
 
     _make_arrays_writeable(cell_state)
-    seed_state_from_ports(cell_state)
-    prime_listeners(cell_state)
+
+    # Initialize per-process state dicts that are read on the first tick.
+    time_step = sim_config.get('time_step', 1.0)
+    cell_state.setdefault('next_update_time', {})
+    cell_state.setdefault('request', {})
+    cell_state.setdefault('allocate', {})
+    cell_state.setdefault('process', {})
+    for proc_name in partitioned_processes:
+        cell_state['next_update_time'].setdefault(
+            proc_name, float(time_step))
+        cell_state['request'].setdefault(proc_name, {'bulk': []})
+        cell_state['allocate'].setdefault(proc_name, {'bulk': []})
+        cell_state['process'].setdefault(proc_name, tuple())
 
     if flow:
         wire_step_layers(cell_state, flow)
@@ -537,11 +563,17 @@ def _build_initial_state(load_sim_data, config, steps):
 
 
 def _build_edge(core, instance, topology, edge_type='step', step_name=None):
-    """Construct a process-bigraph edge dict for one process/step instance."""
+    """Construct a process-bigraph edge DECLARATION for one process/step.
+
+    Returns a dict with address, config, and wires — but NO 'instance'.
+    The framework's realize() step will instantiate the class from the
+    address and config at Composite creation time (and at division time
+    for daughter cells).
+
+    The address uses the '!module.Class' format so local_lookup_module
+    can import it directly.
+    """
     cls = type(instance)
-    instance.core = core
-    if not hasattr(instance, '_config'):
-        instance._config = instance.parameters
     if not hasattr(cls, 'config_schema'):
         cls.config_schema = {}
 
@@ -565,13 +597,16 @@ def _build_edge(core, instance, topology, edge_type='step', step_name=None):
 
     outputs_wires = {k: v for k, v in wires.items() if k in output_port_names}
 
+    # Fully-qualified module path so realize() can import the class.
+    module = cls.__module__
+    address = f'local:!{module}.{cls.__name__}'
+
     state.update({
         '_type': type_name,
-        'address': f'local:{cls.__name__}',
+        'address': address,
         'config': instance.parameters,
         '_inputs': instance.inputs(),
         '_outputs': instance.outputs(),
-        'instance': instance,
         'inputs': copy.deepcopy(wires),
         'outputs': copy.deepcopy(outputs_wires),
     })

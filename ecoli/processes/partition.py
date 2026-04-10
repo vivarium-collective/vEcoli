@@ -64,12 +64,13 @@ class Requester(Step):
     }
 
     def inputs(self):
-        process = self.parameters.get("process")
+        process = self.config.get("process")
         ports = process.inputs()
+        timestep = process.parameters.get('timestep', 1) if process else 1
         # Requester also reads these control ports
-        ports['global_time'] = 'float'
-        ports['timestep'] = 'integer'
-        ports['next_update_time'] = 'float'
+        ports['global_time'] = 'float{0.0}'
+        ports['timestep'] = f'integer{{{timestep}}}'
+        ports['next_update_time'] = f'float{{{float(timestep)}}}'
         ports['process'] = 'quote'
         return ports
 
@@ -194,13 +195,14 @@ class Evolver(Step):
     }
 
     def inputs(self):
-        process = self.parameters.get("process")
+        process = self.config.get("process")
         ports = process.inputs()
+        timestep = process.parameters.get('timestep', 1) if process else 1
         # Evolver also reads these control ports
         ports['allocate'] = 'node'
-        ports['global_time'] = 'float'
-        ports['timestep'] = 'integer'
-        ports['next_update_time'] = 'float'
+        ports['global_time'] = 'float{0.0}'
+        ports['timestep'] = f'integer{{{timestep}}}'
+        ports['next_update_time'] = f'float{{{float(timestep)}}}'
         ports['process'] = 'quote'
         return ports
 

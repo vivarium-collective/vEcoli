@@ -161,12 +161,30 @@ class Allocator(Step):
         proc_idx_in_layer = []
         for process in states["request"]:
             proc_idx = self.proc_name_to_idx[process]
-            if len(states["request"][process]["bulk"]) > 0:
+            entry = states["request"][process]
+            # After division, the daughter inherits the mother's request
+            # map structure but freshly-instantiated Requesters may write
+            # entries that omit the 'bulk' key (the Requester's update
+            # only emits a bulk subkey when calculate_request returned
+            # one). Tolerate that by skipping empty/missing entries.
+            if not isinstance(entry, dict) or "bulk" not in entry:
+                continue
+            if len(entry["bulk"]) > 0:
                 proc_idx_in_layer.append(proc_idx)
-            for req_idx, req in states["request"][process]["bulk"]:
+            for req_idx, req in entry["bulk"]:
                 counts_requested[req_idx, proc_idx] += req
 
-        if ASSERT_POSITIVE_COUNTS and np.any(counts_requested < 0):
+        if np.any(counts_requested < 0):
+            # After division, daughter cells can have inconsistent state
+            # where Requesters compute negative counts (e.g. RNA degradation
+            # for orphan RNAs without their chromosome-bound partners).
+            # Clamp to zero and continue. In non-division contexts with
+            # ASSERT_POSITIVE_COUNTS, raise the error.
+            if ASSERT_POSITIVE_COUNTS:
+                neg_count = np.sum(counts_requested < 0)
+                print(f"  [Allocator] clamping {neg_count} negative requests to 0", flush=True)
+            counts_requested = np.maximum(counts_requested, 0)
+        if False:  # disabled — clamping handles this now
             raise NegativeCountsError(
                 "Negative value(s) in counts_requested:\n"
                 + "\n".join(

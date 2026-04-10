@@ -14,6 +14,14 @@ class DivisionDetector(Step):
 
     name = "division-detector"
 
+    config_schema = {
+        'division_threshold': 'node',
+        'division_variable': 'node',
+        'chromosome_path': 'node',
+        'dry_mass_inc_dict': 'node',
+        'division_mass_multiplier': 'float{1.0}',
+    }
+
     defaults = {
         "division_threshold": None,
         "division_variable": None,
@@ -27,6 +35,20 @@ class DivisionDetector(Step):
         self.division_threshold = self.parameters["division_threshold"]
         self.dry_mass_inc_dict = self.parameters["dry_mass_inc_dict"]
         self.division_mass_multiplier = self.parameters["division_mass_multiplier"]
+
+    def inputs(self):
+        return {
+            'division_variable': 'node',
+            'full_chromosomes': 'unique_array',
+            'media_id': 'string',
+            'division_threshold': 'node',
+        }
+
+    def outputs(self):
+        return {
+            'division_trigger': 'overwrite[boolean]',
+            'division_threshold': 'overwrite[node]',
+        }
 
     def ports_schema(self):
         return {
@@ -48,7 +70,7 @@ class DivisionDetector(Step):
             },
         }
 
-    def next_update(self, timestep, states):
+    def update(self, states, interval=None):
         update = {}
         division_threshold = states["division_threshold"]
         if division_threshold == "mass_distribution":
@@ -63,3 +85,6 @@ class DivisionDetector(Step):
         ):
             update["division_trigger"] = True
         return update
+
+    def next_update(self, timestep, states):
+        return self.update(states, timestep)
