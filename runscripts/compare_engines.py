@@ -114,12 +114,15 @@ def run_v2(duration, divide=False, division_threshold=None, parallel_steps=False
     composite.run(float(duration))
     runtime = time.time() - t0
 
-    # Note: v2 native does NOT yet implement the _divide handler, so even
-    # if Division fires, the mother is not replaced by daughters. divided
-    # is reported as False until a divide_map type lands.
+    # Check for division: if _divide was handled by bigraph-schema,
+    # the agents store will have more than one agent.
     divided = False
     if 'agents' in composite.state:
-        cell = composite.state['agents'][next(iter(composite.state['agents']))]
+        agents = composite.state['agents']
+        if len(agents) > 1:
+            divided = True
+            print(f"  v2 post-run agents: {list(agents.keys())}", flush=True)
+        cell = agents[next(iter(agents))]
     else:
         cell = composite.state
     final_bulk = cell['bulk']['count'].copy()

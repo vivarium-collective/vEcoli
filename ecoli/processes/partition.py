@@ -60,7 +60,7 @@ class Requester(Step):
     """
 
     config_schema = {
-        'process': 'node',
+        'process': 'shared_process_ref',
         'time_step': 'float{1.0}',
         '_parallel': 'boolean{false}',
         'name': 'string',
@@ -193,7 +193,7 @@ class Evolver(Step):
     _input_only_ports = {'allocate', 'global_time', 'timestep'}
 
     config_schema = {
-        'process': 'node',
+        'process': 'shared_process_ref',
         'time_step': 'float{1.0}',
         '_parallel': 'boolean{false}',
         'name': 'string',

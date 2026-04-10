@@ -997,6 +997,119 @@ def realize(core, schema: SimDataMethod, state, path=()):
 
 
 # ============================================================================
+# SharedProcess — shared process instances referenced by ID
+# ============================================================================
+
+# Global registry mapping process_id → instantiated PartitionedProcess.
+# Populated by realize(SharedProcess), read by realize(SharedProcessRef).
+_shared_processes: dict[str, object] = {}
+
+
+def clear_shared_processes():
+    """Clear the shared process registry (e.g. between simulations)."""
+    _shared_processes.clear()
+
+
+@dataclass(kw_only=True)
+class SharedProcess(Node):
+    """A shared process instance declared in the document's ``process`` store.
+
+    Document form::
+
+        {"_type": "shared_process",
+         "address": "local:!ecoli.processes.equilibrium.Equilibrium",
+         "config": { ... }}
+
+    On ``realize()``, the class is imported from ``address``, instantiated
+    with ``config``, wrapped as ``(instance,)`` (the tuple format that
+    Requester/Evolver ``update()`` expects), and registered in the global
+    ``_shared_processes`` dict keyed by the last path segment (the
+    process name).
+    """
+    pass
+
+
+@realize.dispatch
+def realize(core, schema: SharedProcess, state, path=()):
+    # Already realized — (instance,) tuple or bare instance
+    if isinstance(state, tuple) and len(state) > 0:
+        return schema, state, []
+    if not isinstance(state, dict):
+        return schema, state, []
+
+    address = state.get('address')
+    config = state.get('config', {})
+    process_id = path[-1] if path else state.get('process_id')
+
+    if address is None:
+        return schema, state, []
+
+    # Import the class from address (same protocol as realize_link)
+    if isinstance(address, str):
+        if address.startswith('local:!'):
+            module_path, class_name = address[7:].rsplit('.', 1)
+            mod = importlib.import_module(module_path)
+            cls = getattr(mod, class_name)
+        else:
+            # Fallback for other address formats
+            return schema, state, []
+    else:
+        return schema, state, []
+
+    instance = cls(config)
+
+    # Register for lookup by SharedProcessRef
+    if process_id is not None:
+        _shared_processes[process_id] = instance
+
+    return schema, (instance,), []
+
+
+@dataclass(kw_only=True)
+class SharedProcessRef(Node):
+    """Reference to a shared process instance by ID.
+
+    Used in Requester/Evolver ``config_schema`` so that ``realize()``
+    resolves the reference to the actual ``PartitionedProcess`` instance
+    before ``__init__`` is called.
+
+    Document form (in config)::
+
+        {"process": {"_type": "shared_process_ref",
+                      "process_id": "ecoli-equilibrium"}}
+
+    Or as a bare string when the config_schema declares the type::
+
+        {"process": "ecoli-equilibrium"}
+    """
+    pass
+
+
+@realize.dispatch
+def realize(core, schema: SharedProcessRef, state, path=()):
+    # Already resolved to an instance
+    if not isinstance(state, (str, dict)):
+        return schema, state, []
+
+    if isinstance(state, dict):
+        process_id = state.get('process_id')
+    else:
+        process_id = state
+
+    if process_id is None:
+        return schema, state, []
+
+    instance = _shared_processes.get(process_id)
+    if instance is None:
+        raise RuntimeError(
+            f"SharedProcessRef at {path}: process_id '{process_id}' "
+            f"not found. Available: {sorted(_shared_processes.keys())}. "
+            f"Ensure SharedProcess entries in the 'process' store are "
+            f"realized before step declarations.")
+    return schema, instance, []
+
+
+# ============================================================================
 # Type registry
 # ============================================================================
 
@@ -1014,4 +1127,6 @@ ECOLI_TYPES = {
     'unique_array': UniqueArray,
     'sim_data_ref': SimDataRef,
     'sim_data_method': SimDataMethod,
+    'shared_process': SharedProcess,
+    'shared_process_ref': SharedProcessRef,
 }

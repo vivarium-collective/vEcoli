@@ -50,6 +50,27 @@ def _make_arrays_writeable(state):
                 _make_arrays_writeable(value)
 
 
+def _fill_schema_defaults(target, schema):
+    """Fill target dict with default values from a vivarium ports_schema.
+
+    Walks the schema tree looking for ``_default`` entries and sets them
+    in *target* only when the key is missing.  This ensures listeners
+    that read their own prior state (e.g. ``ribosome_data`` reading
+    ``rRNA_initiated_TU``) have valid values before the first seeding
+    ``update()`` call.
+    """
+    for key, spec in schema.items():
+        if key.startswith('_'):
+            continue
+        if isinstance(spec, dict):
+            if '_default' in spec:
+                target.setdefault(key, spec['_default'])
+            else:
+                sub = target.setdefault(key, {})
+                if isinstance(sub, dict):
+                    _fill_schema_defaults(sub, spec)
+
+
 def _class_address(cls):
     """Fully-qualified module address for realize to import."""
     return f'local:!{cls.__module__}.{cls.__name__}'
@@ -78,7 +99,7 @@ def build_ecoli_document(core, sim_config):
     time_step = sim_config.get('time_step', 1.0)
 
     # 1. Resolve process configs from sim_data
-    configs, classes, partitioned = _resolve_process_configs(
+    configs, classes, partitioned, partitioned_configs = _resolve_process_configs(
         load_sim_data, sim_config)
 
     # 2. Build topology (port → wire path mapping)
@@ -105,6 +126,18 @@ def build_ecoli_document(core, sim_config):
             # UniqueUpdate topology comes from its config's unique_topo
             unique_topology = configs[name].get("unique_topo", {})
             topology[name] = {k: v for k, v in unique_topology.items()}
+
+    # 5b. Declare SharedProcess entries in the process store BEFORE step
+    # declarations so realize() instantiates them first (SharedProcessRef
+    # in Requester/Evolver configs must find the instance at realize time).
+    for proc_name in partitioned:
+        proc_class = sim_config["processes"][proc_name]
+        proc_config = partitioned_configs.get(proc_name, {})
+        cell_state.setdefault('process', {})[proc_name] = {
+            '_type': 'shared_process',
+            'address': _class_address(proc_class),
+            'config': proc_config,
+        }
 
     # 6. Build process declarations and add to cell state
     for name, cls in classes.items():
@@ -136,10 +169,17 @@ def build_ecoli_document(core, sim_config):
         else:
             edge_type = 'step'
 
+        # For the document, replace process instances in config with
+        # string IDs (SharedProcessRef resolves them at realize time).
+        from ecoli.processes.partition import PartitionedProcess
+        doc_config = dict(config) if config else {}
+        if isinstance(doc_config.get('process'), PartitionedProcess):
+            doc_config['process'] = doc_config['process'].name
+
         decl = {
             '_type': edge_type,
             'address': _class_address(cls),
-            'config': config,
+            'config': doc_config,
             '_inputs': interface.get('inputs', {}),
             '_outputs': interface.get('outputs', {}),
             'inputs': copy.deepcopy(wires),
@@ -152,7 +192,114 @@ def build_ecoli_document(core, sim_config):
 
         cell_state[name] = decl
 
-    # 6. Initialize per-process runtime state
+    # 7. Ensure global_time, timestep, and listeners exist for seeding.
+    cell_state.setdefault('global_time', 0.0)
+    cell_state.setdefault('timestep', int(time_step))
+    # Pre-populate listener.mass with zeros so the mass listener
+    # can read its own prior values (fold change computations).
+    cell_state.setdefault('listeners', {}).setdefault('mass', {
+        'cell_mass': 0.0, 'dry_mass': 0.0, 'water_mass': 0.0,
+        'volume': 0.0, 'rna_mass': 0.0, 'protein_mass': 0.0,
+        'rRna_mass': 0.0, 'tRna_mass': 0.0, 'mRna_mass': 0.0,
+        'dna_mass': 0.0, 'smallMolecule_mass': 0.0,
+        'growth': 0.0, 'instantaneous_growth_rate': 0.0,
+        'protein_mass_fraction': 0.0, 'rna_mass_fraction': 0.0,
+        'dry_mass_fold_change': 0.0, 'protein_mass_fold_change': 0.0,
+        'rna_mass_fold_change': 0.0, 'small_molecule_fold_change': 0.0,
+        'expected_mass_fold_change': 0.0, 'projection_mass': 0.0,
+    })
+
+    # 8. Seed initial listener values by running all listeners once.
+    # In v1, prime_listeners did this. In v2, we run the temporary
+    # instances on the initial state and inject their outputs.
+    # This ensures metabolism sees correct cell_mass on its first tick
+    # and all listener outputs have valid initial values for analysis.
+    # Order matters: mass listeners first (other processes read cell_mass),
+    # then remaining listeners.
+    _seed_listeners = [
+        'post-division-mass-listener',
+        'ecoli-mass-listener',
+        'RNA_counts_listener',
+        'rna_synth_prob_listener',
+        'monomer_counts_listener',
+        'dna_supercoiling_listener',
+        'replication_data_listener',
+        'rnap_data_listener',
+        'ribosome_data_listener',
+        'unique_molecule_counts',
+    ]
+    for listener_name in _seed_listeners:
+        if listener_name not in classes:
+            continue
+        listener_cls = classes[listener_name]
+        listener_config = configs[listener_name]
+        listener_topo = topology.get(listener_name, {})
+        try:
+            listener_inst = listener_cls(listener_config)
+
+            # Pre-populate listener sub-dicts with defaults from
+            # ports_schema() so listeners that read their own prior
+            # state (e.g. ribosome_data reads rRNA_initiated_TU,
+            # rnap_data reads rna_init_event) don't crash.
+            # Only pre-populate ports that wire into the 'listeners'
+            # store — other ports like 'next_update_time' must stay
+            # as scalars.
+            try:
+                schema = listener_inst.ports_schema()
+                for port_name, port_schema in schema.items():
+                    if not isinstance(port_schema, dict):
+                        continue
+                    wire_path = listener_topo.get(port_name)
+                    if wire_path is None:
+                        continue
+                    if isinstance(wire_path, tuple):
+                        wire_path = list(wire_path)
+                    # Only pre-populate ports wiring into listeners
+                    if not wire_path or wire_path[0] != 'listeners':
+                        continue
+                    target = cell_state
+                    for seg in wire_path:
+                        target = target.setdefault(seg, {})
+                    _fill_schema_defaults(target, port_schema)
+            except Exception:
+                pass  # ports_schema() not available; proceed anyway
+
+            # Build the view from cell_state using the topology wires
+            view = {}
+            for port_name, wire_path in listener_topo.items():
+                if isinstance(wire_path, tuple):
+                    wire_path = list(wire_path)
+                cur = cell_state
+                for seg in wire_path:
+                    cur = cur.get(seg) if isinstance(cur, dict) else None
+                    if cur is None:
+                        break
+                if cur is not None:
+                    view[port_name] = cur
+            # Run the listener once
+            update = listener_inst.update(view)
+            # Apply the output back to cell_state via topology
+            if update:
+                for port_name, port_update in update.items():
+                    wire_path = listener_topo.get(port_name)
+                    if wire_path is None or not isinstance(port_update, dict):
+                        continue
+                    if isinstance(wire_path, tuple):
+                        wire_path = list(wire_path)
+                    target = cell_state
+                    for seg in wire_path[:-1]:
+                        target = target.setdefault(seg, {})
+                    if isinstance(target, dict) and wire_path:
+                        slot = target.setdefault(wire_path[-1], {})
+                        if isinstance(slot, dict) and isinstance(port_update, dict):
+                            slot.update(port_update)
+        except Exception as e:
+            import traceback
+            print(f"  [seed_listener] {listener_name} failed: {e}", flush=True)
+            traceback.print_exc()
+
+    # 9. Initialize per-process runtime state (except process store,
+    # which was already declared in step 5b as SharedProcess entries).
     for proc_name in partitioned:
         cell_state.setdefault('next_update_time', {}).setdefault(
             proc_name, float(time_step))
@@ -160,10 +307,8 @@ def build_ecoli_document(core, sim_config):
             proc_name, {'bulk': []})
         cell_state.setdefault('allocate', {}).setdefault(
             proc_name, {'bulk': []})
-        cell_state.setdefault('process', {}).setdefault(
-            proc_name, tuple())
 
-    # 7. Wire step layers (flow tokens + triggers)
+    # 9. Wire step layers (flow tokens + triggers)
     if flow:
         wire_step_layers(cell_state, flow)
 
@@ -215,9 +360,14 @@ def _resolve_process_configs(load_sim_data, config):
     classes = {}
     partitioned = []
 
+    partitioned_configs = {}  # original configs for SharedProcess declarations
+
     for process_name, process_class in config["processes"].items():
         if issubclass(process_class, PartitionedProcess):
             parallel = process_configs[process_name].pop("_parallel", False)
+            # Save the original config for the SharedProcess declaration
+            partitioned_configs[process_name] = deepcopy(
+                process_configs[process_name])
             # Instantiate the PartitionedProcess (needed for Requester/Evolver config)
             process_instance = process_class(process_configs[process_name])
             req_config = {
@@ -239,7 +389,7 @@ def _resolve_process_configs(load_sim_data, config):
             configs[process_name] = process_configs.get(process_name)
             classes[process_name] = process_class
 
-    return configs, classes, partitioned
+    return configs, classes, partitioned, partitioned_configs
 
 
 # ---------------------------------------------------------------------------
