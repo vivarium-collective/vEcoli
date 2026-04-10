@@ -27,11 +27,11 @@ class ExchangeData(Step):
 
     def inputs(self):
         return {
-            'boundary': {'external': 'map[float]'},
+            'boundary': {'external': 'map[quantity[millimolar]]'},
             'environment': {
                 'exchange_data': {
-                    'constrained': 'map[float]',
-                    'unconstrained': 'list[string]',
+                    'constrained': 'overwrite[map[unum[mmol/g/h]]]',
+                    'unconstrained': 'overwrite[list[string]]',
                 },
             },
         }
@@ -40,8 +40,8 @@ class ExchangeData(Step):
         return {
             'environment': {
                 'exchange_data': {
-                    'constrained': 'map[float]',
-                    'unconstrained': 'list[string]',
+                    'constrained': 'overwrite[map[unum[mmol/g/h]]]',
+                    'unconstrained': 'overwrite[list[string]]',
                 },
             },
         }

@@ -33,7 +33,7 @@ from scipy.sparse._csr import csr_matrix
 from unum import Unum
 
 from bigraph_schema.schema import (
-    Node, String, Float, Integer, Array, List, Tuple, Link, Overwrite, Protocol,
+    Node, String, Float, Integer, Array, List, Tuple, Link, Overwrite, Wrap, Protocol,
 )
 from bigraph_schema.methods import (
     infer, set_default, default, serialize, realize, render,
@@ -160,6 +160,17 @@ def default(schema: UnumUnits):
 
 
 @dispatch
+def apply(schema: UnumUnits, state, update, path):
+    """Unum quantities use overwrite semantics, but only for actual
+    Unum updates — not for bare numeric defaults (0, 0.0)."""
+    if update is None:
+        return state, []
+    if isinstance(update, (int, float)) and update == 0 and state is not None:
+        return state, []
+    return update, []
+
+
+@dispatch
 def serialize(schema: UnumUnits, state):
     if isinstance(state, dict):
         return state
@@ -173,6 +184,18 @@ def serialize(schema: UnumUnits, state):
 @dispatch
 def resolve(schema: UnumUnits, update: UnumUnits, path=()):
     return schema
+
+
+@dispatch
+def resolve(schema: UnumUnits, update: Float, path=()):
+    """UnumUnits is more specific than Float — keep Unum."""
+    return schema
+
+
+@dispatch
+def resolve(schema: Float, update: UnumUnits, path=()):
+    """UnumUnits is more specific than Float — use Unum."""
+    return update
 
 
 @dispatch
@@ -268,8 +291,9 @@ def resolve(schema: Integer, update: Array, path=()):
 
 @dispatch
 def resolve(schema: Quantity, update: Quantity, path=()):
-    if schema.units == update.units:
+    if not schema.units or schema.units == update.units:
         return update
+    return schema
 
 
 @dispatch
@@ -280,6 +304,18 @@ def resolve(schema: Quantity, update: Integer, path=()):
 @dispatch
 def resolve(schema: Tuple, update: List, path=()):
     return schema
+
+
+@dispatch
+def apply(schema: Quantity, state, update, path):
+    """Quantities use overwrite semantics, but only for actual
+    Quantity updates — not for bare numeric defaults (0, 0.0)
+    which would erase a valid Quantity."""
+    if update is None:
+        return state, []
+    if isinstance(update, (int, float)) and update == 0 and state is not None:
+        return state, []
+    return update, []
 
 
 @dispatch
@@ -821,6 +857,146 @@ def divide(schema: UniqueArray, state, context=None, path=(), rng=None):
 
 
 # ============================================================================
+# SimData references — resolve at realize time from a sim_data pickle
+# ============================================================================
+
+# Global sim_data instance, set once at document load time via
+# set_sim_data(). Realize methods read from this.
+_sim_data = None
+_sim_data_path = None
+
+
+def set_sim_data(sim_data, path=None):
+    """Set the global sim_data instance for SimDataRef resolution."""
+    global _sim_data, _sim_data_path
+    _sim_data = sim_data
+    _sim_data_path = path
+
+
+def get_sim_data():
+    """Get the global sim_data instance, loading from path if needed."""
+    global _sim_data, _sim_data_path
+    if _sim_data is None and _sim_data_path is not None:
+        import pickle
+        with open(_sim_data_path, 'rb') as f:
+            _sim_data = pickle.load(f)
+    return _sim_data
+
+
+def _resolve_dotted_path(obj, path_str):
+    """Resolve a dotted attribute path with optional bracket indexing.
+
+    Examples:
+        'process.metabolism.stoichMatrix'
+        'internal_state.bulk_molecules.bulk_data["id"]'
+        'external_state.saved_media["minimal"]'
+    """
+    import re
+    current = obj
+    # Split on dots, but keep bracket expressions attached to their segment
+    segments = re.split(r'\.(?![^[]*\])', path_str)
+    for segment in segments:
+        # Check for bracket indexing: 'attr["key"]' or 'attr[0]'
+        bracket_match = re.match(r'([^[]+)\[(.+)\]$', segment)
+        if bracket_match:
+            attr_name = bracket_match.group(1)
+            key_str = bracket_match.group(2).strip('"\'')
+            # Resolve attribute first
+            if isinstance(current, dict):
+                current = current[attr_name]
+            else:
+                current = getattr(current, attr_name)
+            # Then index
+            if isinstance(current, dict):
+                current = current[key_str]
+            elif isinstance(current, np.ndarray) and current.dtype.names:
+                current = current[key_str]
+            else:
+                try:
+                    current = current[int(key_str)]
+                except (ValueError, TypeError):
+                    current = current[key_str]
+        elif isinstance(current, dict):
+            current = current[segment]
+        elif hasattr(current, segment):
+            current = getattr(current, segment)
+        else:
+            raise AttributeError(
+                f"Cannot resolve '{segment}' in path '{path_str}' "
+                f"on {type(current).__name__}")
+    return current
+
+
+@dataclass(kw_only=True)
+class SimDataRef(Wrap):
+    """Reference to a value in sim_data, resolved at realize time.
+
+    Parameterized: ``sim_data_ref[array[float]]`` carries the inner type
+    so the schema knows what the resolved value will be.
+
+    The state value is a dotted attribute path string, e.g.:
+        'process.metabolism.stoichMatrix'
+        'internal_state.bulk_molecules.bulk_data["id"]'
+
+    At realize time, the path is resolved against the global sim_data
+    instance and the actual value (ndarray, dict, etc.) is returned.
+    """
+    pass
+
+
+@realize.dispatch
+def realize(core, schema: SimDataRef, state, path=()):
+    if isinstance(state, dict) and 'path' in state:
+        ref_path = state['path']
+    elif isinstance(state, str):
+        ref_path = state
+    else:
+        return schema, state, []
+
+    sim_data = get_sim_data()
+    if sim_data is None:
+        raise RuntimeError(
+            f"SimDataRef at {path}: sim_data not loaded. "
+            f"Call set_sim_data() before realize.")
+
+    value = _resolve_dotted_path(sim_data, ref_path)
+    return schema, value, []
+
+
+@dataclass(kw_only=True)
+class SimDataMethod(Node):
+    """Reference to a callable method on sim_data, resolved at realize time.
+
+    Similar to SimDataRef but the resolved value is expected to be a
+    callable (bound method or function). No type parameter needed —
+    the resolved value is always callable.
+    """
+    pass
+
+
+@realize.dispatch
+def realize(core, schema: SimDataMethod, state, path=()):
+    if isinstance(state, dict) and 'path' in state:
+        ref_path = state['path']
+    elif isinstance(state, str):
+        ref_path = state
+    else:
+        return schema, state, []
+
+    sim_data = get_sim_data()
+    if sim_data is None:
+        raise RuntimeError(
+            f"SimDataMethod at {path}: sim_data not loaded.")
+
+    value = _resolve_dotted_path(sim_data, ref_path)
+    if not callable(value):
+        raise TypeError(
+            f"SimDataMethod at {path}: resolved value is "
+            f"{type(value).__name__}, not callable")
+    return schema, value, []
+
+
+# ============================================================================
 # Type registry
 # ============================================================================
 
@@ -836,4 +1012,6 @@ ECOLI_TYPES = {
     'process': ProcessLink,
     'bulk_array': BulkArray,
     'unique_array': UniqueArray,
+    'sim_data_ref': SimDataRef,
+    'sim_data_method': SimDataMethod,
 }

@@ -47,7 +47,7 @@ class TfUnbinding(Step):
         return {
             'bulk': 'bulk_array',
             'promoters': PROMOTER_ARRAY,
-            'global_time': 'float',
+            'global_time': 'float{0.0}',
             'timestep': 'integer',
             'next_update_time': 'overwrite[float]',
         }

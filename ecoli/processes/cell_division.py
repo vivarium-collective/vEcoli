@@ -134,8 +134,8 @@ class Division(Step):
 
     def outputs(self):
         return {
-            'agents': 'map[node]',
-            'division_threshold': 'overwrite[node]',
+            'agents': {},  # _divide sentinel writes here; agents schema already exists
+            'division_threshold': 'overwrite[boolean]',
         }
 
     def ports_schema(self):

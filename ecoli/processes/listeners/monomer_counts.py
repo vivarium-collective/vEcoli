@@ -36,8 +36,8 @@ class MonomerCounts(Step):
     topology = TOPOLOGY
 
     config_schema = {
-        'bulk_molecule_ids': 'list[string]',
-        'unique_ids': 'list[string]',
+        'bulk_molecule_ids': 'array[string]',
+        'unique_ids': 'array[string]',
         'complexation_molecule_ids': 'list[string]',
         'complexation_complex_ids': 'list[string]',
         'equilibrium_molecule_ids': 'list[string]',
@@ -60,6 +60,7 @@ class MonomerCounts(Step):
 
     def inputs(self):
         return {
+            'bulk': 'bulk_array',
             'unique': {
                 'active_ribosome': ACTIVE_RIBOSOME_ARRAY,
                 'active_RNAP': ACTIVE_RNAP_ARRAY,

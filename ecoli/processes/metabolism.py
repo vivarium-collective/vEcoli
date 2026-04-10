@@ -69,17 +69,42 @@ class Metabolism(Step):
 
     config_schema = {
         'get_import_constraints': 'method',
+        'get_biomass_as_concentrations': 'method',
+        'get_masses': 'method',
+        'get_ppGpp_conc': 'method',
+        'exchange_data_from_media': 'method',
         'nutrientToDoublingTime': 'map[float]',
         'use_trna_charging': 'boolean',
         'include_ppgpp': 'boolean',
         'mechanistic_aa_transport': 'boolean',
-        'aa_names': 'list[string]',
-        'exchange_molecules': 'list[string]',
+        'reduce_murein_objective': 'boolean{false}',
+        'aa_names': 'array[string]',
+        'aa_exchange_names': 'array[string]',
+        'amino_acid_ids': 'array[string]',
+        'base_reaction_ids': 'array[string]',
+        'catalyst_ids': 'array[string]',
+        'exchange_molecules': 'array[string]',
+        'removed_aa_uptake': 'array[boolean]',
+        'fba_reaction_ids_to_base_reaction_ids': 'map[integer]',
+        'linked_metabolites': 'maybe[map[node]]',
+        'stoichiometry': 'map[node]',
+        'maintenance_reaction': 'map[float]',
+        'concentration_updates': 'quote',
+        'current_timeline': 'maybe[node]',
+        'aa_targets_not_updated': 'set[string]',
         'media_id': 'string',
+        'ppgpp_id': 'string{ppgpp}',
         'imports': 'map[node]',
         'metabolism': 'map[node]',
         'seed': 'integer',
         'time_step': 'integer',
+        'avogadro': 'unum',
+        'cell_density': 'unum',
+        'cell_dry_mass_fraction': 'float{0.3}',
+        'dark_atp': 'unum',
+        'doubling_time': 'unum',
+        'ngam': 'unum',
+        'import_constraint_threshold': 'float{1e-5}',
     }
 
     def inputs(self):
@@ -88,14 +113,14 @@ class Metabolism(Step):
             'bulk_total': 'bulk_array',
             'listeners': {
                 'mass': {
-                    'cell_mass': 'float[fg]',
-                    'dry_mass': 'float[fg]',
-                    'rna_mass': 'float[fg]',
-                    'protein_mass': 'float[fg]',
+                    'cell_mass': {'_type': 'float[fg]', '_default': 0.0},
+                    'dry_mass': {'_type': 'float[fg]', '_default': 0.0},
+                    'rna_mass': {'_type': 'float[fg]', '_default': 0.0},
+                    'protein_mass': {'_type': 'float[fg]', '_default': 0.0},
                 },
             },
             'environment': {
-                'media_id': 'string',
+                'media_id': 'string{}',
                 'exchange_data': {
                     'constrained': 'map[float]',
                     'unconstrained': 'list[string]',
@@ -115,13 +140,15 @@ class Metabolism(Step):
     def outputs(self):
         return {
             'bulk': 'bulk_array',
-            'environment': {'exchange': 'map[float]'},
+            'environment': {
+                'exchange': 'map[integer]',
+            },
             'listeners': {
                 'fba_results': {
                     # Coefficient for flux→delta conversion (g*s/L)
-                    'coefficient': 'overwrite[float[g*s/L]]',
+                    'coefficient': {'_type': 'overwrite[float[g*s/L]]', '_default': 0.0},
                     # GTP from polypeptide elongation (count, dimensionless)
-                    'translation_gtp': 'overwrite[float]',
+                    'translation_gtp': 'overwrite[float]{0.0}',
                     # Concentration updates per molecule (mM = mmol/L)
                     'conc_updates': 'overwrite[array[float[mM]]]',
                     # Homeostatic target concentrations (mM)
@@ -131,7 +158,7 @@ class Metabolism(Step):
                     'reaction_fluxes': 'overwrite[array[float]]',
                     'external_exchange_fluxes': 'overwrite[array[float]]',
                     'base_reaction_fluxes': 'overwrite[array[float]]',
-                    'objective_value': 'overwrite[float]',
+                    'objective_value': 'overwrite[float]{0.0}',
                     'shadow_prices': 'overwrite[array[float]]',
                     'reduced_costs': 'overwrite[array[float]]',
                     'homeostatic_objective_values': 'overwrite[array[float]]',
@@ -140,14 +167,14 @@ class Metabolism(Step):
                     'catalyst_counts': 'overwrite[array[integer]]',
                     'delta_metabolites': 'overwrite[array[integer]]',
                     # Identifiers and constraint sets — flexible
-                    'media_id': 'overwrite[string]',
+                    'media_id': 'overwrite[string]{}',
                     'unconstrained_molecules': 'overwrite[list[string]]',
                     'constrained_molecules': 'overwrite[map[float]]',
                     'uptake_constraints': 'overwrite[array[float]]',
                 },
                 'enzyme_kinetics': {
                     # Counts→molar conversion (mmol/L = mM)
-                    'counts_to_molar': 'overwrite[float[mM]]',
+                    'counts_to_molar': {'_type': 'overwrite[float[mM]]', '_default': 0.0},
                     # Counts (dimensionless)
                     'metabolite_counts_init': 'overwrite[array[integer]]',
                     'metabolite_counts_final': 'overwrite[array[integer]]',

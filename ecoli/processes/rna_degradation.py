@@ -111,7 +111,7 @@ class RnaDegradation(PartitionedProcess):
             'bulk': 'bulk_array',
             'RNAs': RNA_ARRAY,
             'active_ribosome': ACTIVE_RIBOSOME_ARRAY,
-            'listeners': {'mass': {'cell_mass': 'float[fg]'}},
+            'listeners': {'mass': {'cell_mass': {'_type': 'float[fg]', '_default': 0.0}}},
             'timestep': 'integer',
         }
 
@@ -122,12 +122,12 @@ class RnaDegradation(PartitionedProcess):
             'listeners': {
                 'rna_degradation_listener': {
                     'count_rna_degraded': 'overwrite[array[integer]]',
-                    'nucleotides_from_degradation': 'overwrite[integer]',
+                    'nucleotides_from_degradation': 'overwrite[integer]{0}',
                     'count_RNA_degraded_per_cistron': 'overwrite[array[integer]]',
-                    'fraction_active_endoRNases': 'overwrite[float]',
-                    'diff_relative_first_order_decay': 'overwrite[float]',
+                    'fraction_active_endoRNases': 'overwrite[float]{0.0}',
+                    'diff_relative_first_order_decay': 'overwrite[float]{0.0}',
                     'fract_endo_rrna_counts': 'overwrite[array[float]]',
-                    'fragment_bases_digested': 'overwrite[integer]',
+                    'fragment_bases_digested': 'overwrite[integer]{0}',
                 },
             },
         }

@@ -47,7 +47,7 @@ class Equilibrium(PartitionedProcess):
     def inputs(self):
         return {
             'bulk': 'bulk_array',
-            'listeners': {'mass': {'cell_mass': 'float[fg]'}},
+            'listeners': {'mass': {'cell_mass': {'_type': 'float[fg]', '_default': 0.0}}},
             'timestep': 'integer',
         }
 

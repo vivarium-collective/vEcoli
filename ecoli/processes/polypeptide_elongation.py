@@ -198,73 +198,80 @@ class PolypeptideElongation(PartitionedProcess):
         }
 
     def outputs(self):
+        n_aa = len(self.config.get('amino_acids', []))
+        n_trna = len(self.config.get('uncharged_trna_names', []))
+        n_importers = len(getattr(self, 'aa_importers', []))
+        n_exporters = len(getattr(self, 'aa_exporters', []))
+        aa_f = [0.0] * n_aa
+        aa_i = [0] * n_aa
+        trna_f = [0.0] * n_trna
+        trna_i = [0] * n_trna
         return {
             'bulk': 'bulk_array',
             'active_ribosome': ACTIVE_RIBOSOME_ARRAY,
             'listeners': {
                 'growth_limits': {
-                    # Concentrations — micromolar (uM = umol/L)
-                    'synthetase_conc': 'overwrite[array[float[uM]]]',
-                    'uncharged_trna_conc': 'overwrite[array[float[uM]]]',
-                    'charged_trna_conc': 'overwrite[array[float[uM]]]',
-                    'aa_conc': 'overwrite[array[float[uM]]]',
-                    'ribosome_conc': 'overwrite[float[uM]]',
-                    'ppgpp_conc': 'overwrite[float[uM]]',
-                    'rela_conc': 'overwrite[float[uM]]',
-                    'spot_conc': 'overwrite[float[uM]]',
-                    # Concentration — millimolar (mM = mmol/L)
-                    'aa_supply_aa_conc': 'overwrite[array[float[mM]]]',
-                    # Count deltas and pool sizes
-                    'aa_count_diff': 'overwrite[array[float]]',
-                    'aas_used': 'overwrite[array[integer]]',
-                    'net_charged': 'overwrite[array[integer]]',
-                    'aa_allocated': 'overwrite[array[integer]]',
-                    'aa_pool_size': 'overwrite[array[integer]]',
-                    'aa_request_size': 'overwrite[array[float]]',
-                    'active_ribosome_allocated': 'overwrite[integer]',
-                    # Saturation fractions and supply
-                    'fraction_trna_charged': 'overwrite[array[float]]',
-                    'fraction_aa_to_elongate': 'overwrite[array[float]]',
-                    'aa_supply_fraction_fwd': 'overwrite[array[float]]',
-                    'aa_supply_fraction_rev': 'overwrite[array[float]]',
-                    'original_aa_supply': 'overwrite[array[float]]',
-                    'aa_in_media': 'overwrite[array[boolean]]',
-                    'aa_supply': 'overwrite[array[float]]',
-                    'aa_synthesis': 'overwrite[array[float]]',
-                    'aa_import': 'overwrite[array[float]]',
-                    'aa_export': 'overwrite[array[float]]',
-                    'aa_supply_enzymes_fwd': 'overwrite[array[integer]]',
-                    'aa_supply_enzymes_rev': 'overwrite[array[integer]]',
-                    'aa_importers': 'overwrite[array[integer]]',
-                    'aa_exporters': 'overwrite[array[integer]]',
-                    # ppGpp synthesis/degradation rates (umol/L/s)
-                    'rela_syn': 'overwrite[array[float]]',
-                    'spot_syn': 'overwrite[float]',
-                    'spot_deg': 'overwrite[float]',
-                    'spot_deg_inhibited': 'overwrite[array[float]]',
-                    # Charging
-                    'trna_charged': 'overwrite[array[integer]]',
-                    'ntp_used': 'overwrite[array[integer]]',  # written by transcript_elongation but lives here too
+                    # Concentrations — micromolar
+                    'synthetase_conc': {'_type': 'overwrite[array[float[uM]]]', '_default': aa_f},
+                    'uncharged_trna_conc': {'_type': 'overwrite[array[float[uM]]]', '_default': aa_f},
+                    'charged_trna_conc': {'_type': 'overwrite[array[float[uM]]]', '_default': aa_f},
+                    'aa_conc': {'_type': 'overwrite[array[float[uM]]]', '_default': aa_f},
+                    'ribosome_conc': {'_type': 'overwrite[float[uM]]', '_default': 0.0},
+                    'ppgpp_conc': {'_type': 'overwrite[float[uM]]', '_default': 0.0},
+                    'rela_conc': {'_type': 'overwrite[float[uM]]', '_default': 0.0},
+                    'spot_conc': {'_type': 'overwrite[float[uM]]', '_default': 0.0},
+                    # Concentration — millimolar
+                    'aa_supply_aa_conc': {'_type': 'overwrite[array[float[mM]]]', '_default': aa_f},
+                    # Count deltas and pool sizes (n_aa-length)
+                    'aa_count_diff': {'_type': 'overwrite[array[float]]', '_default': aa_f},
+                    'aas_used': {'_type': 'overwrite[array[integer]]', '_default': aa_i},
+                    'aa_allocated': {'_type': 'overwrite[array[integer]]', '_default': aa_i},
+                    'aa_pool_size': {'_type': 'overwrite[array[integer]]', '_default': aa_i},
+                    'aa_request_size': {'_type': 'overwrite[array[float]]', '_default': aa_f},
+                    'active_ribosome_allocated': 'overwrite[integer]{0}',
+                    # n_trna-length arrays
+                    'net_charged': {'_type': 'overwrite[array[integer]]', '_default': trna_i},
+                    'fraction_trna_charged': {'_type': 'overwrite[array[float]]', '_default': trna_f},
+                    'trna_charged': {'_type': 'overwrite[array[integer]]', '_default': trna_i},
+                    'ntp_used': {'_type': 'overwrite[array[integer]]', '_default': trna_i},
+                    # n_aa-length fractions and supply
+                    'fraction_aa_to_elongate': {'_type': 'overwrite[array[float]]', '_default': aa_f},
+                    'aa_supply_fraction_fwd': {'_type': 'overwrite[array[float]]', '_default': aa_f},
+                    'aa_supply_fraction_rev': {'_type': 'overwrite[array[float]]', '_default': aa_f},
+                    'original_aa_supply': {'_type': 'overwrite[array[float]]', '_default': aa_f},
+                    'aa_in_media': {'_type': 'overwrite[array[boolean]]', '_default': [False] * n_aa},
+                    'aa_supply': {'_type': 'overwrite[array[float]]', '_default': aa_f},
+                    'aa_synthesis': {'_type': 'overwrite[array[float]]', '_default': aa_f},
+                    'aa_import': {'_type': 'overwrite[array[float]]', '_default': aa_f},
+                    'aa_export': {'_type': 'overwrite[array[float]]', '_default': aa_f},
+                    'aa_supply_enzymes_fwd': {'_type': 'overwrite[array[integer]]', '_default': aa_i},
+                    'aa_supply_enzymes_rev': {'_type': 'overwrite[array[integer]]', '_default': aa_i},
+                    'aa_importers': {'_type': 'overwrite[array[integer]]', '_default': [0] * n_importers},
+                    'aa_exporters': {'_type': 'overwrite[array[integer]]', '_default': [0] * n_exporters},
+                    # ppGpp synthesis/degradation rates
+                    'rela_syn': {'_type': 'overwrite[array[float]]', '_default': aa_f},
+                    'spot_syn': 'overwrite[float]{0.0}',
+                    'spot_deg': 'overwrite[float]{0.0}',
+                    'spot_deg_inhibited': {'_type': 'overwrite[array[float]]', '_default': aa_f},
                 },
                 'ribosome_data': {
-                    # Read by polypeptide_initiation next timestep
-                    'effective_elongation_rate': 'overwrite[float[aa/s]]',
-                    'translation_supply': 'overwrite[array[float]]',
-                    'aa_count_in_sequence': 'overwrite[array[integer]]',
-                    'aa_counts': 'overwrite[array[float]]',
-                    'actual_elongations': 'overwrite[integer]',
-                    'actual_elongation_hist': 'overwrite[array[integer]]',
-                    'elongations_non_terminating_hist': 'overwrite[array[integer]]',
-                    'did_terminate': 'overwrite[integer]',
-                    'termination_loss': 'overwrite[integer]',
-                    'num_trpA_terminated': 'overwrite[integer]',
-                    'process_elongation_rate': 'overwrite[float[aa/s]]',
+                    'effective_elongation_rate': {'_type': 'overwrite[float[aa/s]]', '_default': 0.0},
+                    'translation_supply': {'_type': 'overwrite[array[float]]', '_default': aa_f},
+                    'aa_count_in_sequence': {'_type': 'overwrite[array[integer]]', '_default': aa_i},
+                    'aa_counts': {'_type': 'overwrite[array[float]]', '_default': aa_f},
+                    'actual_elongations': 'overwrite[integer]{0}',
+                    'actual_elongation_hist': {'_type': 'overwrite[array[integer]]', '_default': [0] * 22},
+                    'elongations_non_terminating_hist': {'_type': 'overwrite[array[integer]]', '_default': [0] * 22},
+                    'did_terminate': 'overwrite[integer]{0}',
+                    'termination_loss': 'overwrite[integer]{0}',
+                    'num_trpA_terminated': 'overwrite[integer]{0}',
+                    'process_elongation_rate': {'_type': 'overwrite[float[aa/s]]', '_default': 0.0},
                 },
             },
             'polypeptide_elongation': {
-                'gtp_to_hydrolyze': 'overwrite[float]',
-                'aa_count_diff': 'overwrite[array[float]]',
-                'aa_exchange_rates': 'overwrite[array[float]]',
+                'gtp_to_hydrolyze': 'overwrite[float]{0.0}',
+                'aa_count_diff': {'_type': 'overwrite[array[float]]', '_default': aa_f},
+                'aa_exchange_rates': {'_type': 'overwrite[array[float]]', '_default': aa_f},
             },
         }
 

@@ -33,41 +33,27 @@ class MassListener(Step):
     topology = TOPOLOGY
 
     config_schema = {
-        'cellDensity': {'_type': 'float', '_default': 1100.0},
-        'bulk_ids': 'list[string]',
-        'bulk_masses': {'_type': 'array[float]', '_default': None},
-        'unique_ids': 'list[string]',
-        'unique_masses': {'_type': 'array[float]', '_default': None},
-        'submass_to_idx': {'_type': 'map[integer]', '_default': {
-            "rRNA": 0,
-            "tRNA": 1,
-            "mRNA": 2,
-            "miscRNA": 3,
-            "nonspecific_RNA": 4,
-            "protein": 5,
-            "metabolite": 6,
-            "water": 7,
-            "DNA": 8,
-        }},
-        'compartment_indices': {'_type': 'map[list[integer]]', '_default': {
-            "projection": [],
-            "cytosol": [],
-            "extracellular": [],
-            "flagellum": [],
-            "membrane": [],
-            "outer_membrane": [],
-            "periplasm": [],
-            "pilus": [],
-            "inner_membrane": [],
-        }},
-        'compartment_id_to_index': 'map[integer]',
+        # Simple scalars — inline in document
+        'cellDensity': 'float{1100.0}',
+        'time_step': 'float{1.0}',
+        'emit_unique': 'boolean{false}',
+        'match_wcecoli': 'boolean{false}',
+        'condition': 'string',
+        'n_avogadro': 'unum',
+
+        # Small dicts — inline in document
         'compartment_abbrev_to_index': 'map[integer]',
-        'n_avogadro': {'_type': 'unum', '_default': 6.0221409e23},
-        'time_step': {'_type': 'float', '_default': 1.0},
-        'emit_unique': {'_type': 'boolean', '_default': False},
-        'match_wcecoli': {'_type': 'boolean', '_default': False},
-        'condition': {'_type': 'string', '_default': ''},
+        'compartment_id_to_index': 'map[integer]',
+        'submass_to_idx': 'map[integer]',
+        'compartment_indices': 'map[list[integer]]',
         'condition_to_doubling_time': 'map[unum]',
+        'expectedDryMassIncreaseDict': 'map[unum]',
+
+        # Large arrays — sim_data references (>10KB each)
+        'bulk_ids': 'sim_data_ref[array[string]]',        # 3MB
+        'bulk_masses': 'sim_data_ref[array[float]]',       # 1MB (computed)
+        'unique_ids': 'array[string]',                     # small (11 items)
+        'unique_masses': 'array[float]',                   # small (11 items)
     }
 
 
@@ -77,7 +63,7 @@ class MassListener(Step):
             'unique': 'map[node]',
             'listeners': {
                 'mass': {
-                    'dry_mass': 'float[fg]',
+                    'dry_mass': {'_type': 'float[fg]', '_default': 0.0},
                 },
             },
             'global_time': 'float',
@@ -89,39 +75,39 @@ class MassListener(Step):
             'listeners': {
                 'mass': {
                     # Cell + submass compartments — femtograms
-                    'cell_mass': 'overwrite[float[fg]]',
-                    'water_mass': 'overwrite[float[fg]]',
-                    'dry_mass': 'overwrite[float[fg]]',
-                    'rna_mass': 'overwrite[float[fg]]',
-                    'rRna_mass': 'overwrite[float[fg]]',
-                    'tRna_mass': 'overwrite[float[fg]]',
-                    'mRna_mass': 'overwrite[float[fg]]',
-                    'dna_mass': 'overwrite[float[fg]]',
-                    'protein_mass': 'overwrite[float[fg]]',
-                    'smallMolecule_mass': 'overwrite[float[fg]]',
+                    'cell_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
+                    'water_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
+                    'dry_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
+                    'rna_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
+                    'rRna_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
+                    'tRna_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
+                    'mRna_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
+                    'dna_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
+                    'protein_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
+                    'smallMolecule_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
                     # Compartment masses — also femtograms
-                    'projection_mass': 'overwrite[float[fg]]',
-                    'cytosol_mass': 'overwrite[float[fg]]',
-                    'extracellular_mass': 'overwrite[float[fg]]',
-                    'flagellum_mass': 'overwrite[float[fg]]',
-                    'membrane_mass': 'overwrite[float[fg]]',
-                    'outer_membrane_mass': 'overwrite[float[fg]]',
-                    'periplasm_mass': 'overwrite[float[fg]]',
-                    'pilus_mass': 'overwrite[float[fg]]',
-                    'inner_membrane_mass': 'overwrite[float[fg]]',
+                    'projection_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
+                    'cytosol_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
+                    'extracellular_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
+                    'flagellum_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
+                    'membrane_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
+                    'outer_membrane_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
+                    'periplasm_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
+                    'pilus_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
+                    'inner_membrane_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
                     # Volume — femtoliters
-                    'volume': 'overwrite[float[fL]]',
+                    'volume': {'_type': 'overwrite[float[fL]]', '_default': 0.0},
                     # Growth — fg per second
-                    'growth': 'overwrite[float[fg/s]]',
-                    'instantaneous_growth_rate': 'overwrite[float[1/s]]',
+                    'growth': {'_type': 'overwrite[float[fg/s]]', '_default': 0.0},
+                    'instantaneous_growth_rate': {'_type': 'overwrite[float[1/s]]', '_default': 0.0},
                     # Dimensionless ratios and fractions
-                    'protein_mass_fraction': 'overwrite[float]',
-                    'rna_mass_fraction': 'overwrite[float]',
-                    'dry_mass_fold_change': 'overwrite[float]',
-                    'protein_mass_fold_change': 'overwrite[float]',
-                    'rna_mass_fold_change': 'overwrite[float]',
-                    'small_molecule_fold_change': 'overwrite[float]',
-                    'expected_mass_fold_change': 'overwrite[float]',
+                    'protein_mass_fraction': 'overwrite[float]{0.0}',
+                    'rna_mass_fraction': 'overwrite[float]{0.0}',
+                    'dry_mass_fold_change': 'overwrite[float]{0.0}',
+                    'protein_mass_fold_change': 'overwrite[float]{0.0}',
+                    'rna_mass_fold_change': 'overwrite[float]{0.0}',
+                    'small_molecule_fold_change': 'overwrite[float]{0.0}',
+                    'expected_mass_fold_change': 'overwrite[float]{0.0}',
                 },
             },
         }

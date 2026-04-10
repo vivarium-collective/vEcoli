@@ -61,6 +61,9 @@ class Requester(Step):
 
     config_schema = {
         'process': 'node',
+        'time_step': 'float{1.0}',
+        '_parallel': 'boolean{false}',
+        'name': 'string',
     }
 
     def inputs(self):
@@ -75,28 +78,34 @@ class Requester(Step):
         return ports
 
     def outputs(self):
-        process = self.parameters.get("process")
+        process = self.config.get("process")
         result = {
             'request': {'_type': 'overwrite[map[list[integer]]]', '_default': {}},
             'process': 'quote',
             'next_update_time': 'overwrite[float]',
-            'listeners': 'map[map[overwrite[float]]]',
         }
-        # Include any non-bulk, non-listener ports that calculate_request
-        # writes to (e.g. polypeptide_elongation state).
+        # Pull the actual listener schema from the wrapped process so
+        # per-field types are preserved (not flattened to map[...]).
         if process is not None:
             proc_outputs = process.outputs()
+            listeners = proc_outputs.get('listeners')
+            if listeners:
+                result['listeners'] = listeners
             for key in proc_outputs:
-                if key not in result and key not in ('bulk', 'bulk_total'):
+                if key not in result and key not in ('bulk', 'bulk_total', 'listeners'):
                     result[key] = proc_outputs[key]
         return result
 
-    def __init__(self, parameters=None):
+    def __init__(self, parameters=None, core=None):
         assert isinstance(parameters["process"], PartitionedProcess)
         if parameters["process"].parallel:
             raise RuntimeError("PartitionedProcess objects cannot be parallelized.")
         parameters["name"] = f"{parameters['process'].name}_requester"
-        super().__init__(parameters)
+        super().__init__(parameters, core=core)
+        # Cache the request port keys — always just ['bulk'] for
+        # the standard partition setup. Previously set as a side
+        # effect of ports_schema(); now initialized eagerly.
+        self.cached_bulk_ports = ['bulk']
 
     def update_condition(self, timestep, states):
         """
@@ -192,6 +201,9 @@ class Evolver(Step):
 
     config_schema = {
         'process': 'node',
+        'time_step': 'float{1.0}',
+        '_parallel': 'boolean{false}',
+        'name': 'string',
     }
 
     def inputs(self):
@@ -218,10 +230,10 @@ class Evolver(Step):
             ports.pop(k, None)
         return ports
 
-    def __init__(self, parameters=None):
+    def __init__(self, parameters=None, core=None):
         assert isinstance(parameters["process"], PartitionedProcess)
         parameters["name"] = f"{parameters['process'].name}_evolver"
-        super().__init__(parameters)
+        super().__init__(parameters, core=core)
 
     def update_condition(self, timestep, states):
         """

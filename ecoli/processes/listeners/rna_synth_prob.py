@@ -34,10 +34,10 @@ class RnaSynthProb(Step):
     config_schema = {
         'time_step': 'float{1.0}',
         'emit_unique': 'boolean{false}',
-        'rna_ids': 'list[string]',
-        'gene_ids': 'list[string]',
+        'rna_ids': 'array[string]',
+        'gene_ids': 'array[string]',
         'tf_ids': 'list[string]',
-        'cistron_ids': 'list[string]',
+        'cistron_ids': 'array[string]',
         'cistron_tu_mapping_matrix': 'csr_matrix',
     }
 
@@ -48,7 +48,7 @@ class RnaSynthProb(Step):
                 'actual_rna_synth_prob': f'array[{self.n_TU},float]',
                 'target_rna_synth_prob': f'array[{self.n_TU},float]',
                 'n_bound_TF_per_TU': f'array[({self.n_TU}|{self.n_TF}),integer]',
-                'total_rna_init': 'integer',
+                'total_rna_init': 'integer{0}',
             },
             'promoters': PROMOTER_ARRAY,
             'genes': GENE_ARRAY,

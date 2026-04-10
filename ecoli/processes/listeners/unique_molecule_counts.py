@@ -29,8 +29,9 @@ class UniqueMoleculeCounts(Step):
 
     config_schema = {
         'time_step': 'float{1.0}',
+        'timestep': 'float{1.0}',
         'emit_unique': 'boolean{false}',
-        'unique_ids': 'list[string]',
+        'unique_ids': 'array[string]',
     }
 
 

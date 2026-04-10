@@ -14,7 +14,7 @@ class GlobalClock(Process):
 
     def inputs(self):
         return {
-            'global_time': 'float',
+            'global_time': 'float{0.0}',
             'next_update_time': 'map[float]',
         }
 

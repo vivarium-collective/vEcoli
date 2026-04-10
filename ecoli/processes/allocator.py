@@ -48,10 +48,12 @@ class Allocator(Step):
     topology = TOPOLOGY
 
     config_schema = {
-        'molecule_names': 'list[string]',
+        'molecule_names': 'array[string]',
         'process_names': 'list[string]',
         'custom_priorities': 'map[integer]',
         'seed': 'integer{0}',
+        'time_step': 'float{1.0}',
+        'emit_unique': 'boolean{false}',
     }
 
     processes: dict[str, Any] = {}

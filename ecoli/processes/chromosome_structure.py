@@ -84,8 +84,8 @@ class ChromosomeStructure(Step):
 
     config_schema = {
         # Load parameters
-        'rna_sequences': 'list[string]',
-        'protein_sequences': 'list[string]',
+        'rna_sequences': 'array[int8]',
+        'protein_sequences': 'array[int8]',
         'n_TUs': 'integer{1}',
         'n_TFs': 'integer{1}',
         'n_amino_acids': 'integer{1}',
@@ -107,9 +107,9 @@ class ChromosomeStructure(Step):
         'water': 'string{water}',
         'seed': 'integer{0}',
         'emit_unique': 'boolean{false}',
-        'rna_ids': 'list[string]',
+        'rna_ids': 'array[string]',
         'n_mature_rnas': 'integer{0}',
-        'mature_rna_ids': 'list[string]',
+        'mature_rna_ids': 'array[string]',
         'mature_rna_end_positions': 'list[integer]',
         'mature_rna_nt_counts': {'_type': 'node', '_default': []},
         'unprocessed_rna_index_mapping': 'map[integer]',

@@ -37,7 +37,7 @@ class RnapData(Step):
 
     config_schema = {
         'stable_RNA_indexes': 'array[integer]',
-        'cistron_ids': 'list[string]',
+        'cistron_ids': 'array[string]',
         'cistron_tu_mapping_matrix': 'csr_matrix',
         'time_step': 'float{1.0}',
         'emit_unique': 'boolean{false}',

@@ -34,7 +34,12 @@ class EcoliStep(VivariumStep, BigraphStep):
     vivarium Engine compatibility and delegates to ``update()``.
     """
 
-    config_schema = {}
+    # Base config fields inherited by all vEcoli steps/processes.
+    # Vivarium injects 'timestep' automatically; declaring it here
+    # ensures it survives realize/fill.
+    config_schema = {
+        'timestep': 'float{1.0}',
+    }
     _output_ports = None
     _input_only_ports = None
 
@@ -116,7 +121,9 @@ class EcoliProcess(VivariumProcess, BigraphProcess):
     Same bridge pattern as EcoliStep but for temporal processes.
     """
 
-    config_schema = {}
+    config_schema = {
+        'timestep': 'float{1.0}',
+    }
     _output_ports = None
 
     _defaults_from_schema = EcoliStep._defaults_from_schema

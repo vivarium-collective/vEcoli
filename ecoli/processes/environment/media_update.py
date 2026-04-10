@@ -27,13 +27,13 @@ class MediaUpdate(Step):
 
     def inputs(self):
         return {
-            'boundary': {'external': 'map[float]'},
-            'environment': {'media_id': 'string'},
+            'boundary': {'external': 'map[quantity[millimolar]]'},
+            'environment': {'media_id': 'string{}'},
         }
 
     def outputs(self):
         return {
-            'boundary': {'external': 'map[float]'},
+            'boundary': {'external': 'map[quantity[millimolar]]'},
         }
 
     def __init__(self, parameters=None):

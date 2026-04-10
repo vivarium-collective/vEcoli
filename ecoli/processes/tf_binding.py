@@ -50,7 +50,7 @@ class TfBinding(Step):
     config_schema = {
         'time_step': {'_type': 'integer', '_default': 1},
         'tf_ids': 'list[string]',
-        'rna_ids': 'list[string]',
+        'rna_ids': 'array[string]',
         'delta_prob': {'_type': 'node', '_default': {"deltaI": [], "deltaJ": [], "deltaV": []}},
         'n_avogadro': {'_type': 'unum', '_default': 6.02214076e23},
         'cell_density': {'_type': 'unum', '_default': 1100},
@@ -59,7 +59,7 @@ class TfBinding(Step):
         'active_to_bound': 'map[string]',
         'get_unbound': {'_type': 'method', '_default': None},
         'active_to_inactive_tf': 'map[string]',
-        'bulk_molecule_ids': 'list[string]',
+        'bulk_molecule_ids': 'array[string]',
         'bulk_mass_data': {'_type': 'unum', '_default': None},
         'seed': {'_type': 'integer', '_default': 0},
         'submass_to_idx': {'_type': 'map[integer]', '_default': {
@@ -88,7 +88,7 @@ class TfBinding(Step):
             },
             'timestep': 'float',
             'next_update_time': 'overwrite[float]',
-            'global_time': 'float',
+            'global_time': 'float{0.0}',
         }
 
     def outputs(self):

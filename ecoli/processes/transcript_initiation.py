@@ -207,21 +207,39 @@ class TranscriptInitiation(PartitionedProcess):
             'listeners': {
                 'rna_synth_prob': {
                     # Synthesis probabilities — dimensionless
-                    'target_rna_synth_prob': 'overwrite[array[float]]',
-                    'actual_rna_synth_prob': 'overwrite[array[float]]',
-                    'max_p': 'overwrite[float]',
-                    'tu_is_overcrowded': 'overwrite[array[boolean]]',
-                    'total_rna_init': 'overwrite[integer]',
+                    'target_rna_synth_prob': {
+                        '_type': 'overwrite[array[float]]',
+                        '_default': [0.0] * self.n_TUs,
+                    },
+                    'actual_rna_synth_prob': {
+                        '_type': 'overwrite[array[float]]',
+                        '_default': [0.0] * self.n_TUs,
+                    },
+                    'max_p': 'overwrite[float]{0.0}',
+                    'tu_is_overcrowded': {
+                        '_type': 'overwrite[array[boolean]]',
+                        '_default': [False] * self.n_TUs,
+                    },
+                    'total_rna_init': 'overwrite[integer]{0}',
                 },
                 'ribosome_data': {
                     # rRNA initiation counts and probabilities
-                    'rRNA_initiated_TU': 'overwrite[array[integer]]',
-                    'rRNA_init_prob_TU': 'overwrite[array[float]]',
-                    'total_rna_init': 'overwrite[integer]',
+                    'rRNA_initiated_TU': {
+                        '_type': 'overwrite[array[integer]]',
+                        '_default': [0] * len(self.idx_rRNA),
+                    },
+                    'rRNA_init_prob_TU': {
+                        '_type': 'overwrite[array[float]]',
+                        '_default': [0.0] * len(self.idx_rRNA),
+                    },
+                    'total_rna_init': 'overwrite[integer]{0}',
                 },
                 'rnap_data': {
-                    'did_initialize': 'overwrite[integer]',
-                    'rna_init_event': 'overwrite[array[integer]]',
+                    'did_initialize': 'overwrite[integer]{0}',
+                    'rna_init_event': {
+                        '_type': 'overwrite[array[integer]]',
+                        '_default': [0] * self.n_TUs,
+                    },
                 },
             },
         }

@@ -77,7 +77,7 @@ class PolypeptideInitiation(PartitionedProcess):
             'listeners': {
                 'ribosome_data': {
                     # Read back the previous timestep's effective rate
-                    'effective_elongation_rate': 'float',
+                    'effective_elongation_rate': 'float{0.0}',
                 },
             },
             'active_ribosome': ACTIVE_RIBOSOME_ARRAY,
@@ -92,17 +92,32 @@ class PolypeptideInitiation(PartitionedProcess):
             'active_ribosome': ACTIVE_RIBOSOME_ARRAY,
             'listeners': {
                 'ribosome_data': {
-                    'did_initialize': 'overwrite[integer]',
-                    'ribosome_init_event_per_monomer': 'overwrite[array[integer]]',
-                    'target_prob_translation_per_transcript': 'overwrite[array[float]]',
-                    'actual_prob_translation_per_transcript': 'overwrite[array[float]]',
-                    'mRNA_is_overcrowded': 'overwrite[array[boolean]]',
-                    'max_p': 'overwrite[float]',
-                    'max_p_per_protein': 'overwrite[array[float]]',
-                    'is_n_ribosomes_to_activate_reduced': 'overwrite[boolean]',
+                    'did_initialize': 'overwrite[integer]{0}',
+                    'ribosome_init_event_per_monomer': {
+                        '_type': 'overwrite[array[integer]]',
+                        '_default': [0] * len(self.monomer_ids),
+                    },
+                    'target_prob_translation_per_transcript': {
+                        '_type': 'overwrite[array[float]]',
+                        '_default': [0.0] * len(self.monomer_ids),
+                    },
+                    'actual_prob_translation_per_transcript': {
+                        '_type': 'overwrite[array[float]]',
+                        '_default': [0.0] * len(self.monomer_ids),
+                    },
+                    'mRNA_is_overcrowded': {
+                        '_type': 'overwrite[array[boolean]]',
+                        '_default': [False] * len(self.monomer_ids),
+                    },
+                    'max_p': 'overwrite[float]{0.0}',
+                    'max_p_per_protein': {
+                        '_type': 'overwrite[array[float]]',
+                        '_default': [0.0] * len(self.monomer_ids),
+                    },
+                    'is_n_ribosomes_to_activate_reduced': 'overwrite[boolean]{False}',
                     # Written by empty_update path
-                    'ribosomes_initialized': 'overwrite[integer]',
-                    'prob_translation_per_transcript': 'overwrite[float]',
+                    'ribosomes_initialized': 'overwrite[integer]{0}',
+                    'prob_translation_per_transcript': 'overwrite[float]{0.0}',
                 },
             },
         }

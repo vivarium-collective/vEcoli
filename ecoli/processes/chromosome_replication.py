@@ -89,8 +89,8 @@ class ChromosomeReplication(PartitionedProcess):
             'oriCs': ORIC_ARRAY,
             'chromosome_domains': CHROMOSOME_DOMAIN_ARRAY,
             'full_chromosomes': FULL_CHROMOSOME_ARRAY,
-            'listeners': {'mass': {'cell_mass': 'float[fg]'}},
-            'environment': {'media_id': 'string'},
+            'listeners': {'mass': {'cell_mass': {'_type': 'float[fg]', '_default': 0.0}}},
+            'environment': {'media_id': 'string{}'},
             'timestep': 'integer',
         }
 
@@ -104,9 +104,9 @@ class ChromosomeReplication(PartitionedProcess):
             'listeners': {
                 'replication_data': {
                     # Critical initiation mass — femtograms
-                    'critical_initiation_mass': 'overwrite[float[fg]]',
+                    'critical_initiation_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
                     # Cell mass / critical mass — dimensionless ratio
-                    'critical_mass_per_oriC': 'overwrite[float]',
+                    'critical_mass_per_oriC': 'overwrite[float]{0.0}',
                 },
             },
         }
