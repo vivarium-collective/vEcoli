@@ -272,6 +272,14 @@ class MassListener(Step):
         )
         return ports
 
+    def perform_update(self, states):
+        """v2 gate: run every timestep seconds."""
+        global_t = states.get("global_time")
+        timestep = states.get("timestep")
+        if global_t is None or timestep is None or timestep == 0:
+            return True
+        return (global_t % timestep) == 0
+
     def update_condition(self, timestep, states):
         return (states["global_time"] % states["timestep"]) == 0
 
@@ -434,6 +442,10 @@ class PostDivisionMassListener(MassListener):
     """
 
     name = "post-division-mass-listener"
+
+    def perform_update(self, states):
+        """v2 gate: always run (post-division runs once at start)."""
+        return True
 
     def update_condition(self, timestep, states):
         return self.first_time_step

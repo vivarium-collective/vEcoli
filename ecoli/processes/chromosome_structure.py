@@ -269,6 +269,14 @@ class ChromosomeStructure(Step):
 
         return ports
 
+    def perform_update(self, states):
+        """v2 gate: only run when next_update_time <= global_time."""
+        next_t = states.get("next_update_time")
+        global_t = states.get("global_time")
+        if next_t is None or global_t is None:
+            return True
+        return next_t <= global_t
+
     def update_condition(self, timestep, states):
         """
         See :py:meth:`~ecoli.processes.partition.Requester.update_condition`.

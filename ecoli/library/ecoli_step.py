@@ -92,6 +92,31 @@ class EcoliStep(VivariumStep, BigraphStep):
             # self.config and self.parameters are always equivalent.
             self._config = self.parameters
 
+    def perform_update(self, state):
+        """Gate for step execution in v2 composite engine.
+
+        Returns True if the step should run, False to skip.
+        Default: always run. Override in subclasses to implement
+        variable timestepping or conditional execution.
+
+        Named differently from v1's update_condition to avoid
+        collision — both methods coexist on dual-inheriting classes.
+        """
+        return True
+
+    def invoke(self, state, interval=None):
+        """Check perform_update before running.
+
+        In v1 vivarium, the engine checked update_condition before
+        calling next_update. In v2, invoke is called unconditionally
+        by the step network — so we gate here via perform_update.
+        """
+        from process_bigraph.composite import SyncUpdate
+        if not self.perform_update(state):
+            return SyncUpdate({})
+        update = self.update(state)
+        return SyncUpdate(update)
+
     def next_update(self, timestep, states):
         """vivarium Engine entry point — delegates to update()."""
         return self.update(states, timestep)

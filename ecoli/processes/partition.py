@@ -107,23 +107,16 @@ class Requester(Step):
         # effect of ports_schema(); now initialized eagerly.
         self.cached_bulk_ports = ['bulk']
 
+    def perform_update(self, states):
+        """v2 gate: only run when next_update_time <= global_time."""
+        next_t = states.get("next_update_time")
+        global_t = states.get("global_time")
+        if next_t is None or global_t is None:
+            return True  # missing ports — run by default
+        return next_t <= global_t
+
     def update_condition(self, timestep, states):
-        """
-        Implements variable timestepping for partitioned processes
-
-        Vivarium cycles through all :py:class:~vivarium.core.process.Step`
-        instances every time a :py:class:`~vivarium.core.process.Process`
-        instance updates the simulation state. When that happens, Vivarium
-        will only call the :py:meth:`~.Requester.next_update` method of this
-        Requester if ``update_condition`` returns True.
-
-        Each process has access to a process-specific ``next_update_time``
-        store and the ``global_time`` store. If the next update time is
-        less than or equal to the global time, the process runs. If the
-        next update time is ever earlier than the global time, this usually
-        indicates that the global clock process is running with too large
-        a timestep, preventing accurate timekeeping.
-        """
+        """v1 gate: same logic as perform_update, with warning."""
         if states["next_update_time"] <= states["global_time"]:
             if states["next_update_time"] < states["global_time"]:
                 warnings.warn(
@@ -235,10 +228,16 @@ class Evolver(Step):
         parameters["name"] = f"{parameters['process'].name}_evolver"
         super().__init__(parameters, core=core)
 
+    def perform_update(self, states):
+        """v2 gate: only run when next_update_time <= global_time."""
+        next_t = states.get("next_update_time")
+        global_t = states.get("global_time")
+        if next_t is None or global_t is None:
+            return True  # missing ports — run by default
+        return next_t <= global_t
+
     def update_condition(self, timestep, states):
-        """
-        See :py:meth:`~.Requester.update_condition`.
-        """
+        """v1 gate: same logic as perform_update, with warning."""
         if states["next_update_time"] <= states["global_time"]:
             if states["next_update_time"] < states["global_time"]:
                 warnings.warn(
