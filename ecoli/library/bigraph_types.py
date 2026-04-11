@@ -38,7 +38,7 @@ from bigraph_schema.schema import (
 from bigraph_schema.methods import (
     infer, set_default, default, serialize, realize, render,
     wrap_default, resolve, reify_schema, validate, merge_update,
-    apply, reconcile, divide,
+    apply, reconcile, divide, bundle, BundleContext,
 )
 from bigraph_schema.methods.handle_parameters import align_parameters
 
@@ -1292,3 +1292,120 @@ ECOLI_TYPES = {
     'shared_process': SharedProcess,
     'shared_process_ref': SharedProcessRef,
 }
+
+
+# ---------------------------------------------------------------------------
+# Bundle overrides — write large data directly to Parquet
+# ---------------------------------------------------------------------------
+
+@dispatch
+def bundle(schema: BulkArray, state, context: typing.Optional[BundleContext] = None):
+    """Bundle a BulkArray: write the structured array directly to Parquet."""
+    if not isinstance(state, np.ndarray) or not state.dtype.names:
+        return state
+    if context is not None and state.nbytes >= context.min_bytes:
+        return context.save_array(state, 'bulk')
+    return _serialize_structured_array(state)
+
+
+@dispatch
+def bundle(schema: UniqueArray, state, context: typing.Optional[BundleContext] = None):
+    """Bundle a UniqueArray: write the structured array directly to Parquet."""
+    if not isinstance(state, np.ndarray):
+        # MetadataArray wraps ndarray
+        if hasattr(state, 'base') and isinstance(
+                getattr(state, 'base', None), np.ndarray):
+            state = np.asarray(state)
+        elif hasattr(state, '__array__'):
+            state = np.asarray(state)
+        else:
+            return state
+    if not state.dtype.names:
+        return state
+    if context is not None and state.nbytes >= context.min_bytes:
+        return context.save_array(state, 'unique')
+    return _serialize_structured_array(state)
+
+
+@dispatch
+def bundle(schema: CSRMatrix, state, context: typing.Optional[BundleContext] = None):
+    """Bundle a CSRMatrix: write the sparse matrix data to Parquet."""
+    if isinstance(state, dict):
+        return state
+    if state is None:
+        return None
+    # Dense ndarray with CSRMatrix schema — save directly as array
+    if isinstance(state, np.ndarray):
+        if context is not None and state.nbytes >= context.min_bytes:
+            return context.save_array(state, 'csr_matrix')
+        return state.tolist()
+    if isinstance(state, csr_matrix):
+        # Convert CSR components to a single structured array for Parquet
+        total_bytes = state.data.nbytes + state.indices.nbytes + state.indptr.nbytes
+        if context is not None and total_bytes >= context.min_bytes:
+            # Store shape info in the marker and save data/indices/pointers
+            # as separate arrays in one combined array
+            combined = np.zeros(len(state.data) + len(state.indices) + len(state.indptr),
+                                dtype=np.int64)
+            d_end = len(state.data)
+            i_end = d_end + len(state.indices)
+            combined[:d_end] = state.data
+            combined[d_end:i_end] = state.indices
+            combined[i_end:] = state.indptr
+            marker = context.save_array(combined, 'csr_matrix')
+            marker['csr'] = True
+            marker['data_len'] = d_end
+            marker['indices_len'] = len(state.indices)
+            marker['matrix_shape'] = list(state.shape)
+            return marker
+        return {
+            'data': np.asarray(state.data).tolist(),
+            'indices': np.asarray(state.indices).tolist(),
+            'pointers': np.asarray(state.indptr).tolist()}
+    return serialize(schema, state)
+
+
+@dispatch
+def bundle(schema: UnumUnits, state, context: typing.Optional[BundleContext] = None):
+    """Bundle a Unum — same as serialize (scalars stay inline)."""
+    return serialize(schema, state)
+
+
+@dispatch
+def bundle(schema: Quantity, state, context: typing.Optional[BundleContext] = None):
+    """Bundle a Quantity — same as serialize (scalars stay inline)."""
+    return serialize(schema, state)
+
+
+@dispatch
+def bundle(schema: UnitsArray, state, context: typing.Optional[BundleContext] = None):
+    """Bundle a UnitStructArray — extract the underlying structured array."""
+    if isinstance(state, UnitStructArray):
+        inner = state.struct_array
+        if context is not None and inner.nbytes >= context.min_bytes:
+            marker = context.save_array(inner, 'units_array')
+            marker['units'] = str(state.units) if hasattr(state, 'units') else None
+            return marker
+        return serialize(schema, state)
+    return serialize(schema, state)
+
+
+@dispatch
+def bundle(schema: Method, state, context: typing.Optional[BundleContext] = None):
+    """Bundle a Method — same as serialize (small metadata dict)."""
+    return serialize(schema, state)
+
+
+@dispatch
+def bundle(schema: SharedProcess, state, context: typing.Optional[BundleContext] = None):
+    """Bundle a SharedProcess — recurse with bundle context."""
+    if state is None:
+        return None
+    if isinstance(state, dict):
+        result = {}
+        for key in schema.__dataclass_fields__:
+            if is_schema_field(schema, key) and key in state:
+                result[key] = bundle(
+                    getattr(schema, key), state[key], context)
+        return result
+    return str(state)
