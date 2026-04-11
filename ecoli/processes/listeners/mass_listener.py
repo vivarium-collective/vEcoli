@@ -39,15 +39,15 @@ class MassListener(Step):
         'emit_unique': 'boolean{false}',
         'match_wcecoli': 'boolean{false}',
         'condition': 'string',
-        'n_avogadro': 'unum',
+        'n_avogadro': 'unum[float,1/mol]',
 
         # Small dicts — inline in document
         'compartment_abbrev_to_index': 'map[integer]',
         'compartment_id_to_index': 'map[integer]',
         'submass_to_idx': 'map[integer]',
         'compartment_indices': 'map[list[integer]]',
-        'condition_to_doubling_time': 'map[unum]',
-        'expectedDryMassIncreaseDict': 'map[unum]',
+        'condition_to_doubling_time': 'map[unum[float,min]]',
+        'expectedDryMassIncreaseDict': 'map[unum[float,fg]]',
 
         # Large arrays — sim_data references (>10KB each)
         'bulk_ids': 'sim_data_ref[array[string]]',        # 3MB

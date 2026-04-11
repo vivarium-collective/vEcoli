@@ -39,7 +39,7 @@ class TwoComponentSystem(PartitionedProcess):
         'n_avogadro': 'float',
         'cell_density': 'float',
         'moleculesToNextTimeStep': 'method',
-        'moleculeNames': 'list[string]',
+        'moleculeNames': 'array[string]',
         'seed': 'integer',
     }
 

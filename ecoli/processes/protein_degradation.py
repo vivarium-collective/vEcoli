@@ -43,7 +43,7 @@ class ProteinDegradation(PartitionedProcess):
         'water_id': 'string',
         'amino_acid_ids': 'list[string]',
         'amino_acid_counts': 'array[integer]',
-        'protein_ids': 'list[string]',
+        'protein_ids': 'array[string]',
         'protein_lengths': 'array[integer]',
         'seed': 'integer',
     }

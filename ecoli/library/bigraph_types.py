@@ -33,7 +33,7 @@ from scipy.sparse._csr import csr_matrix
 from unum import Unum
 
 from bigraph_schema.schema import (
-    Node, String, Float, Integer, Array, List, Tuple, Link, Overwrite, Wrap, Protocol,
+    Node, String, Float, Integer, Array, List, Tuple, Map, Link, Overwrite, Wrap, Protocol,
 )
 from bigraph_schema.methods import (
     infer, set_default, default, serialize, realize, render,
@@ -79,10 +79,23 @@ def infer(core, value: typing.Callable, path: tuple = ()):
 def serialize(schema: Method, state):
     if isinstance(state, dict):
         return state
+    if state is None:
+        return None
+    if callable(state):
+        if hasattr(state, '__self__'):
+            return {
+                'module': state.__module__,
+                'instance': state.__self__.__class__.__name__,
+                'attribute': state.__func__.__name__}
+        else:
+            return {
+                'module': state.__module__,
+                'instance': None,
+                'attribute': state.__name__}
     return {
         'module': str(schema.module),
         'instance': str(schema.instance),
-        'attribute': schema.attribute}
+        'attribute': str(schema.attribute)}
 
 
 @dispatch
@@ -132,23 +145,31 @@ def unum_dimension(value):
 
 @dataclass(kw_only=True)
 class UnumUnits(Node):
-    """Wraps a Unum (or Pint) Quantity. Function bodies receive the
-    Quantity unchanged so dimensional arithmetic in process internals
-    keeps working — `_units` is documentary metadata describing the
-    expected pint-parseable unit string for the slot, validated at
-    wire build time but not converted at runtime."""
+    """Parameterized Unum type: ``unum[<magnitude_type>,<unit_string>]``.
+
+    Examples::
+
+        unum                          # scalar float magnitude, no unit annotation
+        unum[float,fg]                # scalar float, femtograms
+        unum[array[16321|9,float],g/mol]  # 2D array magnitude
+
+    The magnitude field carries the schema for the numeric payload
+    (Float, Array, etc.). serialize/realize dispatch on it so arrays
+    and scalars are handled without branches.
+    """
     _schema_keys = Node._schema_keys | frozenset({'_units'})
     _dimension: typing.Dict = field(default_factory=dict)
     units: typing.Dict = field(default_factory=dict)
-    magnitude: Node = field(default_factory=Node)
+    magnitude: Node = field(default_factory=lambda: Float())
     _units: str = ''
 
 
 @dispatch
 def infer(core, value: Unum, path: tuple = ()):
     dimension = unum_dimension(value)
-    magnitude, _ = infer(core, value.asNumber(), path + (value.strUnit(),))
-    schema = UnumUnits(_dimension=dimension, units=value._unit, magnitude=magnitude)
+    magnitude_schema, _ = infer(core, value.asNumber(), path + (value.strUnit(),))
+    schema = UnumUnits(
+        _dimension=dimension, units=value._unit, magnitude=magnitude_schema)
     return set_default(schema, value), []
 
 
@@ -175,7 +196,7 @@ def serialize(schema: UnumUnits, state):
     if isinstance(state, dict):
         return state
     if state is None:
-        return schema._default if schema._default else default(schema)
+        return None
     return {
         'units': state._unit,
         'magnitude': serialize(schema.magnitude, state.asNumber())}
@@ -202,25 +223,32 @@ def resolve(schema: Float, update: UnumUnits, path=()):
 def realize(core, schema: UnumUnits, encode, path=()):
     if isinstance(encode, Unum):
         return schema, encode, []
-    _, magnitude, _ = realize(core, schema.magnitude, encode['magnitude'], path=path)
-    return schema, Unum(encode['units'], magnitude), []
+    if isinstance(encode, (int, float)):
+        return schema, Unum(schema.units, encode), []
+    if isinstance(encode, dict) and 'units' in encode:
+        # Dict form from serialize: {'units': {...}, 'magnitude': ...}
+        _, magnitude, _ = realize(core, schema.magnitude, encode['magnitude'], path)
+        return schema, Unum(encode['units'], magnitude), []
+    return schema, encode, []
 
 
 @dispatch
 def render(schema: UnumUnits, defaults=False):
-    data = {
-        '_type': 'unum',
-        '_dimension': schema._dimension,
-        'units': schema.units,
-        'magnitude': render(schema.magnitude)}
+    mag_render = render(schema.magnitude)
     if schema._units:
-        data['_units'] = schema._units
-    return wrap_default(schema, data) if defaults else data
+        result = f'unum[{mag_render},{schema._units}]'
+    elif mag_render != 'float':
+        result = f'unum[{mag_render}]'
+    else:
+        result = 'unum'
+    return wrap_default(schema, result) if defaults else result
 
 
 @dispatch
 def align_parameters(schema: UnumUnits, parameters):
-    """unum[g/L] — single parameter is the documented unit string."""
+    """Handle unum[float,fg] or unum[fg] (single param = unit string)."""
+    if len(parameters) == 2:
+        return {'magnitude': parameters[0], '_units': parameters[1]}
     if len(parameters) == 1:
         return {'_units': parameters[0]}
     return {}
@@ -228,12 +256,13 @@ def align_parameters(schema: UnumUnits, parameters):
 
 @dispatch
 def reify_schema(core, schema: UnumUnits, parameters):
-    """Set documented unit string verbatim — does not enforce conversion.
-
-    Function bodies receive the Quantity unchanged. The unit string is
-    metadata that lets tooling and analyses know what dimension the
-    slot expects.
-    """
+    """Reify magnitude type and unit string from parameters."""
+    if 'magnitude' in parameters:
+        mag_param = parameters['magnitude']
+        if isinstance(mag_param, str):
+            schema.magnitude = core.access(mag_param)
+        elif isinstance(mag_param, Node):
+            schema.magnitude = mag_param
     if '_units' in parameters:
         units_param = parameters['_units']
         if isinstance(units_param, str):
@@ -255,7 +284,7 @@ def units_dict(value):
 @dataclass(kw_only=True)
 class Quantity(Node):
     units: typing.Dict = field(default_factory=dict)
-    magnitude: Node = field(default_factory=Node)
+    magnitude: Float = field(default_factory=Float)
 
 
 @dispatch
@@ -277,11 +306,12 @@ def default(schema: Quantity):
 def serialize(schema: Quantity, state):
     if isinstance(state, dict):
         return state
-    if isinstance(state, int):
-        return {'units': schema.units, 'magnitude': serialize(schema.magnitude, state)}
-    return {
-        'units': schema.units,
-        'magnitude': serialize(schema.magnitude, state.magnitude)}
+    if isinstance(state, (int, float)):
+        return {'units': schema.units, 'magnitude': state}
+    if isinstance(state, pint.Quantity):
+        units = dict(state.unit_items()) or schema.units
+        return {'units': units, 'magnitude': float(state.magnitude)}
+    return {'units': schema.units, 'magnitude': state}
 
 
 @dispatch
@@ -322,13 +352,22 @@ def apply(schema: Quantity, state, update, path):
 def realize(core, schema: Quantity, encode, path=()):
     if isinstance(encode, pint.Quantity):
         return schema, encode, []
-    if isinstance(encode, dict):
-        _, magnitude, _ = realize(
-            core, schema.magnitude, encode['magnitude'], path + ('magnitude',))
-        decode = (magnitude, tuple(schema.units.items()))
-    else:
+    if isinstance(encode, dict) and 'magnitude' in encode:
+        magnitude = encode['magnitude']
+        if isinstance(magnitude, str):
+            magnitude = float(magnitude)
+        decode = (magnitude, tuple(encode.get('units', schema.units).items()))
+        return schema, ureg.Quantity.from_tuple(decode), []
+    if isinstance(encode, (int, float)):
         decode = (encode, tuple(schema.units.items()))
-    return schema, ureg.Quantity.from_tuple(decode), []
+        return schema, ureg.Quantity.from_tuple(decode), []
+    if isinstance(encode, str):
+        # Parse string form: "2.1 millimolar"
+        try:
+            return schema, ureg.parse_expression(encode), []
+        except Exception:
+            pass
+    return schema, encode, []
 
 
 @dispatch
@@ -369,10 +408,17 @@ def infer(core, value: csr_matrix, path: tuple = ()):
 def serialize(schema: CSRMatrix, state):
     if isinstance(state, dict):
         return state
-    return {
-        'data': serialize(schema.data, state.data),
-        'indices': serialize(schema.indices, state.indices),
-        'pointers': serialize(schema.pointers, state.indptr)}
+    if state is None:
+        return None
+    if isinstance(state, csr_matrix):
+        return {
+            'data': np.asarray(state.data).tolist(),
+            'indices': np.asarray(state.indices).tolist(),
+            'pointers': np.asarray(state.indptr).tolist()}
+    # Already a plain array or other form — convert to list
+    if isinstance(state, np.ndarray):
+        return state.tolist()
+    return state
 
 
 @dispatch
@@ -417,7 +463,7 @@ def validate(core, schema: CSRMatrix, state):
 @dataclass(kw_only=True)
 class UnitsArray(Node):
     struct: Array = field(default_factory=Array)
-    units: UnumUnits = field(default_factory=UnumUnits)
+    units: Map = field(default_factory=lambda: Map(_value=UnumUnits()))
 
 
 @dispatch
@@ -575,6 +621,58 @@ class BulkArray(Array):
     pass
 
 
+def _serialize_structured_array(state):
+    """Serialize a structured numpy array to a JSON-safe dict."""
+    if not isinstance(state, np.ndarray) or not state.dtype.names:
+        return state
+    rows = []
+    for record in state:
+        row = []
+        for name in state.dtype.names:
+            val = record[name]
+            if isinstance(val, np.ndarray):
+                val = val.tolist()
+            elif hasattr(val, 'item'):
+                val = val.item()
+            row.append(val)
+        rows.append(row)
+    return {
+        '__structured_array__': True,
+        'dtype': str(state.dtype),
+        'data': rows,
+    }
+
+
+def _realize_structured_array(state):
+    """Realize a structured array from its serialized dict form."""
+    import ast
+    if isinstance(state, np.ndarray):
+        return state
+    if isinstance(state, dict) and state.get('__structured_array__'):
+        dtype = np.dtype(ast.literal_eval(state['dtype']))
+        return np.array([tuple(r) for r in state['data']], dtype=dtype)
+    return state
+
+
+@dispatch
+def serialize(schema: BulkArray, state):
+    return _serialize_structured_array(state)
+
+
+@dispatch
+def render(schema: BulkArray, defaults=False):
+    result = 'bulk_array'
+    return wrap_default(schema, result) if defaults else result
+
+
+@realize.dispatch
+def realize(core, schema: BulkArray, state, path=()):
+    if isinstance(state, np.ndarray):
+        return schema, state, []
+    state = _realize_structured_array(state)
+    return schema, state, []
+
+
 _BULK_APPLY_COUNT = [0]
 _BULK_TOTAL_DELTA = [0]
 
@@ -631,6 +729,30 @@ class UniqueArray(Array):
     them in order: set → add → delete.
     """
     pass
+
+
+@dispatch
+def serialize(schema: UniqueArray, state):
+    return _serialize_structured_array(state)
+
+
+@dispatch
+def render(schema: UniqueArray, defaults=False):
+    result = 'unique_array'
+    return wrap_default(schema, result) if defaults else result
+
+
+@realize.dispatch
+def realize(core, schema: UniqueArray, state, path=()):
+    if isinstance(state, np.ndarray):
+        return schema, state, []
+    state = _realize_structured_array(state)
+    if isinstance(state, np.ndarray):
+        from ecoli.library.schema import MetadataArray
+        if not isinstance(state, MetadataArray):
+            next_idx = int(state['unique_index'].max()) + 1 if len(state) > 0 else 0
+            state = MetadataArray(state, next_idx)
+    return schema, state, []
 
 
 def _get_free_indices(array, n_new):
@@ -1051,18 +1173,58 @@ def realize(core, schema: SharedProcess, state, path=()):
             mod = importlib.import_module(module_path)
             cls = getattr(mod, class_name)
         else:
-            # Fallback for other address formats
             return schema, state, []
     else:
         return schema, state, []
 
     instance = cls(config)
 
+    # Set core so serialize can access config_schema
+    if not hasattr(instance, 'core') or instance.core is None:
+        instance.core = core
+
     # Register for lookup by SharedProcessRef
     if process_id is not None:
         _shared_processes[process_id] = instance
 
+    # Store the address on the instance so serialize can recover it
+    instance._shared_address = address if isinstance(address, str) else f"local:!{cls.__module__}.{cls.__name__}"
+
     return schema, (instance,), []
+
+
+@dispatch
+def serialize(schema: SharedProcess, state):
+    """Serialize a SharedProcess back to its declaration dict."""
+    if isinstance(state, tuple) and len(state) > 0:
+        instance = state[0]
+        address = getattr(instance, '_shared_address', _class_address_from_instance(instance))
+        # Serialize config through the instance's config_schema
+        config = instance.parameters if hasattr(instance, 'parameters') else {}
+        instance_core = getattr(instance, 'core', None)
+        raw_schema = getattr(instance, 'config_schema', None)
+        if instance_core and raw_schema:
+            config_schema = instance_core.access(raw_schema)
+            config = serialize(config_schema, config)
+        return {
+            '_type': 'shared_process',
+            'address': address,
+            'config': config,
+        }
+    if isinstance(state, dict):
+        return state
+    return state
+
+
+@dispatch
+def render(schema: SharedProcess, defaults=False):
+    return 'shared_process'
+
+
+def _class_address_from_instance(instance):
+    """Generate a local:! address from an instance's class."""
+    cls = type(instance)
+    return f'local:!{cls.__module__}.{cls.__name__}'
 
 
 @dataclass(kw_only=True)

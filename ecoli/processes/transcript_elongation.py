@@ -90,8 +90,8 @@ class TranscriptElongation(PartitionedProcess):
     topology = TOPOLOGY
 
     config_schema = {
-        'rnaPolymeraseElongationRateDict': 'map[float]',
-        'rnaIds': 'list[string]',
+        'rnaPolymeraseElongationRateDict': 'map[unum[float,nucleotide/s]]',
+        'rnaIds': 'array[string]',
         'rnaLengths': 'array[integer]',
         'rnaSequences': 'array[integer]',
         'ntWeights': 'array[float]',

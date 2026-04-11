@@ -45,11 +45,26 @@ class MonomerCounts(Step):
         'monomer_ids': 'list[string]',
         'two_component_system_molecule_ids': 'list[string]',
         'two_component_system_complex_ids': 'list[string]',
-        'ribosome_50s_subunits': 'list[string]',
-        'ribosome_30s_subunits': 'list[string]',
-        'rnap_subunits': 'list[string]',
-        'replisome_trimer_subunits': 'list[string]',
-        'replisome_monomer_subunits': 'list[string]',
+        'ribosome_50s_subunits': {
+            'subunitIds': 'array[string]',
+            'subunitStoich': 'array[float]',
+        },
+        'ribosome_30s_subunits': {
+            'subunitIds': 'array[string]',
+            'subunitStoich': 'array[float]',
+        },
+        'rnap_subunits': {
+            'subunitIds': 'array[string]',
+            'subunitStoich': 'array[float]',
+        },
+        'replisome_trimer_subunits': {
+            'subunitIds': 'array[string]',
+            'subunitStoich': 'array[float]',
+        },
+        'replisome_monomer_subunits': {
+            'subunitIds': 'array[string]',
+            'subunitStoich': 'array[float]',
+        },
         'complexation_stoich': 'csr_matrix',
         'equilibrium_stoich': 'csr_matrix',
         'two_component_system_stoich': 'csr_matrix',

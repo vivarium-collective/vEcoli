@@ -74,14 +74,14 @@ class Requester(Step):
         ports['global_time'] = 'float{0.0}'
         ports['timestep'] = f'integer{{{timestep}}}'
         ports['next_update_time'] = f'float{{{float(timestep)}}}'
-        ports['process'] = 'quote'
+        ports['process'] = 'shared_process'
         return ports
 
     def outputs(self):
         process = self.config.get("process")
         result = {
             'request': {'_type': 'overwrite[map[list[integer]]]', '_default': {}},
-            'process': 'quote',
+            'process': 'shared_process',
             'next_update_time': 'overwrite[float]',
         }
         # Pull the actual listener schema from the wrapped process so
@@ -208,7 +208,7 @@ class Evolver(Step):
         ports['global_time'] = 'float{0.0}'
         ports['timestep'] = f'integer{{{timestep}}}'
         ports['next_update_time'] = f'float{{{float(timestep)}}}'
-        ports['process'] = 'quote'
+        ports['process'] = 'shared_process'
         return ports
 
     def outputs(self):
@@ -217,7 +217,7 @@ class Evolver(Step):
         # Evolver writes next_update_time and process in addition to
         # whatever the wrapped process declares.
         ports['next_update_time'] = 'overwrite[float]'
-        ports['process'] = 'quote'
+        ports['process'] = 'shared_process'
         # Evolver doesn't write to allocate, global_time, timestep
         for k in ('allocate', 'global_time', 'timestep'):
             ports.pop(k, None)
