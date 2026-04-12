@@ -164,8 +164,8 @@ class Metabolism(Step):
                     'homeostatic_objective_values': 'overwrite[array[float]]',
                     'kinetic_objective_values': 'overwrite[array[float]]',
                     # Counts (dimensionless)
-                    'catalyst_counts': 'overwrite[array[integer]]',
-                    'delta_metabolites': 'overwrite[array[integer]]',
+                    'catalyst_counts': 'overwrite[array[integer[64]]]',
+                    'delta_metabolites': 'overwrite[array[integer[64]]]',
                     # Identifiers and constraint sets — flexible
                     'media_id': 'overwrite[string]{}',
                     'unconstrained_molecules': 'overwrite[list[string]]',
@@ -176,9 +176,9 @@ class Metabolism(Step):
                     # Counts→molar conversion (mmol/L = mM)
                     'counts_to_molar': {'_type': 'overwrite[float[mM]]', '_default': 0.0},
                     # Counts (dimensionless)
-                    'metabolite_counts_init': 'overwrite[array[integer]]',
-                    'metabolite_counts_final': 'overwrite[array[integer]]',
-                    'enzyme_counts_init': 'overwrite[array[integer]]',
+                    'metabolite_counts_init': 'overwrite[array[integer[64]]]',
+                    'metabolite_counts_final': 'overwrite[array[integer[64]]]',
+                    'enzyme_counts_init': 'overwrite[array[integer[64]]]',
                     # Fluxes (mmol/L/s) — leave plain for now since
                     # the listener stores per-timestep values, not rates
                     'actual_fluxes': 'overwrite[array[float]]',

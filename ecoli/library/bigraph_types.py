@@ -1700,6 +1700,45 @@ def realize(core, schema: Method, state, path=()):
 
 
 # ============================================================================
+# Lazy-attr hooks for sim_data dataclasses
+# ============================================================================
+#
+# Some sim_data dataclasses lazily populate compiled-lambda attributes
+# on first use (e.g. reconstruction/.../process/metabolism.py sets
+# `_compiled_enzymes = None` in __init__, then compiles it on first
+# `get_kinetic_constraints` call). When a Composite is reconstructed
+# from a bundle, the sim_data object is rebuilt via __new__ + __dict__,
+# which bypasses __init__. If the lazy attr wasn't serialized (lambdas
+# can't be), the instance is missing the attribute entirely.
+#
+# We attach __post_realize__ to such classes here, at v2 module import
+# time, without modifying the shared v1 dataclass. The hook runs after
+# Object realize sets __dict__, and re-creates the missing attributes
+# from their source fields.
+
+def _install_sim_data_post_realize_hooks():
+    try:
+        from reconstruction.ecoli.dataclasses.process.metabolism import (
+            Metabolism as _MetabolismDataclass)
+    except Exception:
+        return
+
+    def __post_realize__(self):
+        # Mirror the None-init that __init__ does; get_kinetic_constraints
+        # will compile on first call. Only set if the attribute is missing
+        # (serialized state wins if it was present).
+        if not hasattr(self, '_compiled_enzymes'):
+            self._compiled_enzymes = None
+        if not hasattr(self, '_compiled_saturation'):
+            self._compiled_saturation = None
+
+    _MetabolismDataclass.__post_realize__ = __post_realize__
+
+
+_install_sim_data_post_realize_hooks()
+
+
+# ============================================================================
 # Type registry
 # ============================================================================
 
