@@ -109,6 +109,25 @@ def build_ecoli_document(core, sim_config):
     flow, configs, classes = _build_flow(
         sim_config, load_sim_data, configs, classes, partitioned, time_step)
 
+    # 3b. Extract each edge's interface (inputs/outputs) via a temporary
+    # instance BEFORE configs are rewritten into serializable refs.
+    # Bound-method instances must still be callable for __init__.
+    # Also keep the temp instance for the edge-type classification below.
+    interfaces = {}
+    temp_instances = {}
+    for name, cls in classes.items():
+        cfg = configs[name]
+        try:
+            inst = cls(cfg)
+            interfaces[name] = inst.interface()
+            temp_instances[name] = inst
+        except Exception as _err:
+            import traceback as _tb
+            print(f"[build_ecoli] interface() failed for {name}: {type(_err).__name__}: {_err}", flush=True)
+            _tb.print_exc()
+            interfaces[name] = {'inputs': {}, 'outputs': {}}
+            temp_instances[name] = None
+
     # 4. Get initial cell state from sim_data
     cell_state = _get_initial_state(load_sim_data, sim_config)
     _make_arrays_writeable(cell_state)
@@ -197,13 +216,9 @@ def build_ecoli_document(core, sim_config):
         edge_wires = topology.get(name, {})
         wires = _tuple_to_list(edge_wires) or {}
 
-        # Determine port schemas from a temporary instance.
-        # TODO: make inputs()/outputs() class methods to avoid this.
-        try:
-            instance = cls(config)
-            interface = instance.interface()
-        except Exception:
-            interface = {'inputs': {}, 'outputs': {}}
+        # Use the interface we extracted before _rewrite_refs mutated
+        # configs into serializable method refs.
+        interface = interfaces.get(name, {'inputs': {}, 'outputs': {}})
 
         input_ports = set(interface.get('inputs', {}).keys())
         output_ports = set(interface.get('outputs', {}).keys())
@@ -216,7 +231,8 @@ def build_ecoli_document(core, sim_config):
         # Determine edge type: Process (continuous-time) vs Step (event-driven)
         from ecoli.library.ecoli_step import EcoliProcess
         from process_bigraph import Process as BigraphProcess
-        if isinstance(instance, (EcoliProcess, BigraphProcess)) and not hasattr(instance, 'triggers'):
+        instance = temp_instances.get(name)
+        if instance is not None and isinstance(instance, (EcoliProcess, BigraphProcess)) and not hasattr(instance, 'triggers'):
             edge_type = 'process'
         else:
             edge_type = 'step'
@@ -359,6 +375,18 @@ def build_ecoli_document(core, sim_config):
             proc_name, {'bulk': []})
         cell_state.setdefault('allocate', {}).setdefault(
             proc_name, {'bulk': []})
+
+    # 9b. For non-partitioned Steps whose topology references a
+    # next_update_time store (e.g. Metabolism), initialize that store so
+    # the perform_update() gate in process-bigraph's run_steps correctly
+    # skips them at global_time=0.
+    for proc_name, ports in topology.items():
+        if proc_name in partitioned:
+            continue
+        nut_wire = ports.get('next_update_time') if isinstance(ports, dict) else None
+        if isinstance(nut_wire, (list, tuple)) and len(nut_wire) >= 2:
+            parent, key = nut_wire[0], nut_wire[1]
+            cell_state.setdefault(parent, {}).setdefault(key, float(time_step))
 
     # 9. Wire step layers (flow tokens + triggers)
     if flow:

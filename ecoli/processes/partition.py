@@ -26,29 +26,6 @@ from vivarium.library.dict_utils import deep_merge
 from ecoli.processes.registries import topology_registry
 
 
-def _typed_ports(ports_schema):
-    """Convert ports_schema keys to typed port dict using known types."""
-    result = {}
-    for key in ports_schema:
-        if key.startswith('_'):
-            continue
-        if key in ('bulk', 'bulk_total'):
-            result[key] = 'bulk_array'
-        elif key in UNIQUE_TYPES:
-            result[key] = UNIQUE_TYPES[key]
-        elif key == 'global_time':
-            result[key] = 'float'
-        elif key == 'timestep':
-            result[key] = 'integer'
-        elif key == 'next_update_time':
-            result[key] = 'float'
-        elif key in ('request', 'allocate', 'process', 'listeners'):
-            result[key] = 'node'
-        else:
-            result[key] = 'node'
-    return result
-
-
 class Requester(Step):
     """Requester Step
 
@@ -311,9 +288,9 @@ class PartitionedProcess(Process):
     appear in the delta returned by ``evolve_state()``.  All other ports
     are treated as input-only for the dependency graph.
 
-    For v2, subclasses should override ``inputs()`` and ``outputs()`` to
-    declare typed ports. The default implementations derive from
-    ``ports_schema()`` using ``_typed_ports()``.
+    For v2, subclasses must override ``inputs()`` and ``outputs()`` to
+    declare typed ports; the view is projected through those schemas so
+    processes see only the declared fields.
     """
 
     _output_ports = None
@@ -336,22 +313,15 @@ class PartitionedProcess(Process):
     def ports_schema(self):
         return {}
 
+    @abc.abstractmethod
     def inputs(self):
-        """All ports are inputs (process reads from all of them)."""
-        return _typed_ports(self.ports_schema())
+        """Declare the nested schema of state this process reads."""
+        return {}
 
+    @abc.abstractmethod
     def outputs(self):
-        """Output ports — what evolve_state actually writes to.
-
-        Uses _output_ports if defined, otherwise derives from
-        _input_only_ports. Falls back to all ports.
-        """
-        typed = _typed_ports(self.ports_schema())
-        if self._output_ports is not None:
-            return {k: v for k, v in typed.items() if k in self._output_ports}
-        if self._input_only_ports is not None:
-            return {k: v for k, v in typed.items() if k not in self._input_only_ports}
-        return typed
+        """Declare the nested schema of state this process writes."""
+        return {}
 
     @abc.abstractmethod
     def calculate_request(self, timestep, states):

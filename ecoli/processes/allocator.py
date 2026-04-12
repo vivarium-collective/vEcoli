@@ -63,6 +63,12 @@ class Allocator(Step):
             'request': 'map[map[list[integer]]]',
             'bulk': 'bulk_array',
             'allocator_rng': 'random_state',
+            'listeners': {
+                'atp': {
+                    'atp_requested': f'array[{self.n_processes},integer]',
+                    'atp_allocated_initial': f'array[{self.n_processes},integer]',
+                },
+            },
         }
 
     def outputs(self):

@@ -740,9 +740,14 @@ def apply(schema: BulkArray, state, update, path):
     """Apply sparse index updates to the 'count' field of a bulk array."""
     if isinstance(update, list):
         # Sparse index updates: [(index_array, count_delta), ...]
+        import os
+        trace = os.environ.get('BULK_TRACE')
         for idx, delta in update:
             _BULK_APPLY_COUNT[0] += 1
-            _BULK_TOTAL_DELTA[0] += int(delta.sum()) if hasattr(delta, 'sum') else int(delta)
+            d = int(delta.sum()) if hasattr(delta, 'sum') else int(delta)
+            _BULK_TOTAL_DELTA[0] += d
+            if trace:
+                print(f'[bulk_apply] path={path} delta={d} n={len(idx) if hasattr(idx,"__len__") else 1}', flush=True)
             state['count'][idx] += delta
         return state, []
 
