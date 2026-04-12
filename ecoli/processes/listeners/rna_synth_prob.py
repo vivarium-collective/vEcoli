@@ -38,7 +38,7 @@ class RnaSynthProb(Step):
         'gene_ids': 'array[string]',
         'tf_ids': 'list[string]',
         'cistron_ids': 'array[string]',
-        'cistron_tu_mapping_matrix': 'csr_matrix',
+        'cistron_tu_mapping_matrix': 'csr_matrix[4538|3277,integer[64]]',
     }
 
 

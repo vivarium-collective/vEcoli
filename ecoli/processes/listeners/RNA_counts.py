@@ -44,7 +44,7 @@ class RNACounts(Step):
         'mRNA_cistron_ids': 'array[string]',
         'cistron_is_rRNA': 'array[integer]',
         'rRNA_cistron_ids': 'array[string]',
-        'cistron_tu_mapping_matrix': 'csr_matrix',
+        'cistron_tu_mapping_matrix': 'csr_matrix[4538|3277,integer[64]]',
         'time_step': 'float{1.0}',
         'emit_unique': 'boolean{false}',
     }

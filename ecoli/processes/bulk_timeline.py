@@ -9,7 +9,7 @@ class BulkTimelineProcess(Process):
 
     config_schema = {
         'time_step': 'float{1.0}',
-        'timeline': 'node',
+        'timeline': 'map[integer,map[tuple[string],string]]',
     }
 
     defaults = {"time_step": 1.0, "timeline": []}

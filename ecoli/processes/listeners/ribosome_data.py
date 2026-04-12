@@ -36,7 +36,7 @@ class RibosomeData(Step):
     config_schema = {
         'monomer_ids': 'list[string]',
         'n_monomers': {'_type': 'integer', '_default': 0},
-        'rRNA_cistron_tu_mapping_matrix': 'csr_matrix',
+        'rRNA_cistron_tu_mapping_matrix': 'csr_matrix[22|7,integer[64]]',
         'rRNA_is_5S': 'array[integer]',
         'rRNA_is_16S': 'array[integer]',
         'rRNA_is_23S': 'array[integer]',

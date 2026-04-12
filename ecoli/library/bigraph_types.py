@@ -442,26 +442,57 @@ def realize(core, schema: CSRMatrix, encode, path=()):
         return schema, encode, []
     # Dense ndarray — the process stores it as dense, convert to CSR
     if isinstance(encode, np.ndarray):
-        return schema, csr_matrix(encode), []
+        return schema, csr_matrix(encode, shape=tuple(schema._shape) if schema._shape else None), []
     # List of lists — dense matrix from JSON
     if isinstance(encode, list):
         return schema, csr_matrix(np.array(encode)), []
-    # Dict form with data/indices/pointers (from serialize)
+    # Dict form {data, indices, pointers} — schema tells us the shape
     if isinstance(encode, dict) and 'data' in encode:
         inner = tuple(
             realize(core, getattr(schema, key), encode[key], path + (key,))[1]
             for key in ['data', 'indices', 'pointers'])
-        data, indices, pointers = inner
-        shape = tuple(schema._shape) if schema._shape else (
-            len(pointers) - 1,
-            int(indices.max()) + 1 if len(indices) > 0 else 0)
-        return schema, csr_matrix(inner, shape=shape), []
+        return schema, csr_matrix(inner, shape=tuple(schema._shape)), []
     return schema, encode, []
 
 
 @dispatch
+def align_parameters(schema: CSRMatrix, parameters):
+    """csr_matrix[rows|cols,dtype] — parse shape and dtype parameters."""
+    result = {}
+    # First parameter: shape string like '4538|3277' or a Tuple from parsing
+    if len(parameters) >= 1:
+        shape_param = parameters[0]
+        if isinstance(shape_param, Tuple):
+            result['_shape'] = tuple(int(v) for v in shape_param._values)
+        elif isinstance(shape_param, (tuple, list)):
+            result['_shape'] = tuple(int(v) for v in shape_param)
+    if len(parameters) >= 2:
+        result['_data'] = parameters[1]
+    return result
+
+
+@dispatch
 def reify_schema(core, schema: CSRMatrix, parameters):
+    if '_shape' in parameters:
+        schema._shape = parameters['_shape']
+    if '_data' in parameters:
+        data_param = parameters['_data']
+        from bigraph_schema.schema import schema_dtype
+        if isinstance(data_param, str):
+            resolved = core.access(data_param)
+            schema._data = schema_dtype(resolved) if hasattr(resolved, '_default') else np.dtype(data_param)
+        elif isinstance(data_param, Node):
+            schema._data = schema_dtype(data_param)
+        # Propagate the dtype to the data sub-array so realize produces
+        # correct types for data values. Indices/pointers are always int.
+        from bigraph_schema.schema import Array
+        schema.data = Array(_shape=(), _data=schema._data)
+        schema.indices = Array(_shape=(), _data=np.dtype('int64'))
+        schema.pointers = Array(_shape=(), _data=np.dtype('int64'))
+    # Legacy path: explicit key-value pairs like csr_matrix[data:array[float],...]
     for key, parameter in parameters.items():
+        if key in ('_shape', '_data'):
+            continue
         subkey = core.access(parameter)
         setattr(schema, key, subkey)
     return schema
@@ -526,10 +557,8 @@ def realize(core, schema: UnitsArray, encode, path=()):
 
 @dispatch
 def render(schema: UnitsArray, defaults=False):
-    data = {
-        'struct': render(schema.struct),
-        'units': render(schema.units)}
-    return wrap_default(schema, data) if defaults else data
+    result = 'units_array'
+    return wrap_default(schema, result) if defaults else result
 
 
 # ============================================================================
@@ -774,14 +803,16 @@ def render(schema: UniqueArray, defaults=False):
 
 @realize.dispatch
 def realize(core, schema: UniqueArray, state, path=()):
-    if isinstance(state, np.ndarray):
+    from ecoli.library.schema import MetadataArray
+    if isinstance(state, MetadataArray):
         return schema, state, []
+    if isinstance(state, np.ndarray):
+        next_idx = int(state['unique_index'].max()) + 1 if len(state) > 0 else 0
+        return schema, MetadataArray(state, next_idx), []
     state = _realize_structured_array(state)
     if isinstance(state, np.ndarray):
-        from ecoli.library.schema import MetadataArray
-        if not isinstance(state, MetadataArray):
-            next_idx = int(state['unique_index'].max()) + 1 if len(state) > 0 else 0
-            state = MetadataArray(state, next_idx)
+        next_idx = int(state['unique_index'].max()) + 1 if len(state) > 0 else 0
+        state = MetadataArray(state, next_idx)
     return schema, state, []
 
 
@@ -1694,7 +1725,9 @@ def bundle(schema: UniqueArray, state, context: typing.Optional[BundleContext] =
 
 @dispatch
 def bundle(schema: CSRMatrix, state, context: typing.Optional[BundleContext] = None):
-    """Bundle a CSRMatrix: write the sparse matrix data to Parquet."""
+    """Bundle a CSRMatrix: bundle the three component arrays (data,
+    indices, pointers) through their schemas. Shape comes from the
+    CSRMatrix schema, not from metadata markers."""
     if isinstance(state, dict):
         return state
     if state is None:
@@ -1705,28 +1738,12 @@ def bundle(schema: CSRMatrix, state, context: typing.Optional[BundleContext] = N
             return context.save_array(state, 'csr_matrix')
         return state.tolist()
     if isinstance(state, csr_matrix):
-        # Convert CSR components to a single structured array for Parquet
-        total_bytes = state.data.nbytes + state.indices.nbytes + state.indptr.nbytes
-        if context is not None and total_bytes >= context.min_bytes:
-            # Store shape info in the marker and save data/indices/pointers
-            # as separate arrays in one combined array
-            combined = np.zeros(len(state.data) + len(state.indices) + len(state.indptr),
-                                dtype=np.int64)
-            d_end = len(state.data)
-            i_end = d_end + len(state.indices)
-            combined[:d_end] = state.data
-            combined[d_end:i_end] = state.indices
-            combined[i_end:] = state.indptr
-            marker = context.save_array(combined, 'csr_matrix')
-            marker['csr'] = True
-            marker['data_len'] = d_end
-            marker['indices_len'] = len(state.indices)
-            marker['matrix_shape'] = list(state.shape)
-            return marker
+        # Bundle each CSR component through its schema (arrays go to parquet)
         return {
-            'data': np.asarray(state.data).tolist(),
-            'indices': np.asarray(state.indices).tolist(),
-            'pointers': np.asarray(state.indptr).tolist()}
+            'data': bundle(schema.data, state.data, context),
+            'indices': bundle(schema.indices, state.indices, context),
+            'pointers': bundle(schema.pointers, state.indptr, context),
+        }
     return serialize(schema, state)
 
 

@@ -25,7 +25,7 @@ class RnaMaturation(PartitionedProcess):
     topology = TOPOLOGY
 
     config_schema = {
-        'stoich_matrix': 'csr_matrix',
+        'stoich_matrix': 'csr_matrix[99|49,integer[64]]',
         'enzyme_matrix': 'array[integer]',
         'n_required_enzymes': 'array[integer]',
         'degraded_nt_counts': 'array[float]',

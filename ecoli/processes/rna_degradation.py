@@ -71,7 +71,7 @@ class RnaDegradation(PartitionedProcess):
         'rna_ids': 'list[string]',
         'mature_rna_ids': 'list[string]',
         'cistron_ids': 'array[string]',
-        'cistron_tu_mapping_matrix': 'csr_matrix',
+        'cistron_tu_mapping_matrix': 'csr_matrix[4538|3277,integer[64]]',
         'mature_rna_cistron_indexes': 'array[integer]',
         'all_rna_ids': 'list[string]',
         'n_total_RNAs': 'integer',
