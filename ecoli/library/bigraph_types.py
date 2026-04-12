@@ -288,7 +288,8 @@ def reify_schema(core, schema: UnumUnits, parameters):
 # Quantity type — pint Quantity (value + units)
 # ============================================================================
 
-ureg = pint.UnitRegistry()
+# Use the shared vivarium pint registry so all Quantities are compatible.
+from vivarium.library.units import units as ureg
 
 
 def units_dict(value):
@@ -515,10 +516,12 @@ def serialize(schema: UnitsArray, state):
 def realize(core, schema: UnitsArray, encode, path=()):
     if isinstance(encode, UnitStructArray):
         return schema, encode, []
-    inner = tuple(
-        realize(core, getattr(schema, key), encode[key], path + (key,))[1]
-        for key in ['struct', 'units'])
-    return schema, UnitStructArray(*inner), []
+    if isinstance(encode, dict) and 'struct' in encode:
+        inner = tuple(
+            realize(core, getattr(schema, key), encode[key], path + (key,))[1]
+            for key in ['struct', 'units'])
+        return schema, UnitStructArray(*inner), []
+    return schema, encode, []
 
 
 @dispatch
@@ -1204,6 +1207,12 @@ def realize(core, schema: SharedProcess, state, path=()):
     else:
         return schema, state, []
 
+    # Realize the config through the class's config_schema so that Unum,
+    # Method, SimDataObjectRef and other types get reconstructed properly.
+    config_schema = getattr(cls, 'config_schema', None)
+    if config_schema:
+        _, config = core.realize(config_schema, config)
+
     instance = cls(config)
 
     # Set core so serialize can access config_schema
@@ -1496,13 +1505,14 @@ def realize(core, schema: SimDataObjectStore, state, path=()):
     result = {}
     _sim_data_object_instances.clear()
     for key, encoded in state.items():
+        if isinstance(key, str) and key.startswith('_'):
+            continue
         _, instance = core.realize(Object(), encoded)
         result[key] = instance
         _sim_data_object_instances[key] = instance
     return schema, result, []
 
 
-@dataclass(kw_only=True)
 @dataclass(kw_only=True)
 class SimDataObjectRef(Node):
     """Reference to a sim_data object instance by store key.
@@ -1734,14 +1744,18 @@ def bundle(schema: Quantity, state, context: typing.Optional[BundleContext] = No
 
 @dispatch
 def bundle(schema: UnitsArray, state, context: typing.Optional[BundleContext] = None):
-    """Bundle a UnitStructArray — extract the underlying structured array."""
+    """Bundle a UnitStructArray — delegate to serialize.
+
+    serialize produces {'struct': ..., 'units': {...}} where struct is
+    the structured array (which bundle can write to parquet) and units
+    is a dict mapping field names to Unum values.
+    """
     if isinstance(state, UnitStructArray):
-        inner = state.struct_array
-        if context is not None and inner.nbytes >= context.min_bytes:
-            marker = context.save_array(inner, 'units_array')
-            marker['units'] = str(state.units) if hasattr(state, 'units') else None
-            return marker
-        return serialize(schema, state)
+        # Bundle the struct array through the Array schema (may go to parquet),
+        # and serialize the units dict inline
+        struct_bundled = bundle(schema.struct, state.struct_array, context)
+        units_serialized = serialize(schema.units, state.units)
+        return {'struct': struct_bundled, 'units': units_serialized}
     return serialize(schema, state)
 
 
@@ -1753,14 +1767,25 @@ def bundle(schema: Function, state, context: typing.Optional[BundleContext] = No
 
 @dispatch
 def bundle(schema: SharedProcess, state, context: typing.Optional[BundleContext] = None):
-    """Bundle a SharedProcess — recurse with bundle context."""
+    """Bundle a SharedProcess: produce the declaration dict, bundling
+    arrays in the config through the process's config_schema."""
     if state is None:
         return None
+    if isinstance(state, tuple) and len(state) > 0:
+        instance = state[0]
+        address = getattr(instance, '_shared_address',
+                          _class_address_from_instance(instance))
+        config = instance.parameters if hasattr(instance, 'parameters') else {}
+        instance_core = getattr(instance, 'core', None)
+        raw_schema = getattr(instance, 'config_schema', None)
+        if instance_core and raw_schema:
+            config_schema = instance_core.access(raw_schema)
+            config = bundle(config_schema, config, context)
+        return {
+            '_type': 'shared_process',
+            'address': address,
+            'config': config,
+        }
     if isinstance(state, dict):
-        result = {}
-        for key in schema.__dataclass_fields__:
-            if is_schema_field(schema, key) and key in state:
-                result[key] = bundle(
-                    getattr(schema, key), state[key], context)
-        return result
-    return str(state)
+        return state
+    return serialize(schema, state)

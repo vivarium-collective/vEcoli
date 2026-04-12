@@ -157,12 +157,11 @@ def build_ecoli_document(core, sim_config):
 
     # Now rewrite configs: replace bound methods and sim_data object
     # instances with references to the sim_data_objects store.
-    for name, config in configs.items():
+    def _rewrite_refs(config):
         if not isinstance(config, dict):
-            continue
+            return
         for key, val in list(config.items()):
             if callable(val) and hasattr(val, '__self__') and hasattr(val, '__func__'):
-                # Bound method → method ref
                 inst_id = id(val.__self__)
                 if inst_id in _instance_to_key:
                     config[key] = {
@@ -171,11 +170,15 @@ def build_ecoli_document(core, sim_config):
                         'attribute': val.__func__.__name__,
                     }
             elif id(val) in _instance_to_key:
-                # Direct sim_data object instance → object ref
                 config[key] = {
                     '_type': 'sim_data_object_ref',
                     'store_key': _instance_to_key[id(val)],
                 }
+
+    for name, config in configs.items():
+        _rewrite_refs(config)
+    for name, config in partitioned_configs.items():
+        _rewrite_refs(config)
 
     # 5c. Declare SharedProcess entries in the process store AFTER
     # sim_data_objects so realize() has bound method instances available.
@@ -414,9 +417,10 @@ def _resolve_process_configs(load_sim_data, config):
     for process_name, process_class in config["processes"].items():
         if issubclass(process_class, PartitionedProcess):
             parallel = process_configs[process_name].pop("_parallel", False)
-            # Save the original config for the SharedProcess declaration
-            partitioned_configs[process_name] = deepcopy(
-                process_configs[process_name])
+            # Save the config for the SharedProcess declaration — share the
+            # reference so bound method instances match the sim_data
+            # instances in the sim_data_objects store.
+            partitioned_configs[process_name] = process_configs[process_name]
             # Instantiate the PartitionedProcess (needed for Requester/Evolver config)
             process_instance = process_class(process_configs[process_name])
             req_config = {
