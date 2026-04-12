@@ -111,7 +111,7 @@ class ChromosomeStructure(Step):
         'n_mature_rnas': 'integer{0}',
         'mature_rna_ids': 'array[string]',
         'mature_rna_end_positions': 'array[float]',
-        'mature_rna_nt_counts': {'_type': 'node', '_default': []},
+        'mature_rna_nt_counts': 'array[integer[64]]',
         'unprocessed_rna_index_mapping': 'map[integer,integer]',
         'time_step': 'float{1.0}',
     }
