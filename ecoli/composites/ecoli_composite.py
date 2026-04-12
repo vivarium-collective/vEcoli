@@ -368,13 +368,23 @@ def build_ecoli_document(core, sim_config):
 
     # 9. Initialize per-process runtime state (except process store,
     # which was already declared in step 5b as SharedProcess entries).
+    # `allocate.<proc>.bulk` is a full-size int64 array at runtime; declare
+    # that explicitly so bundle() externalizes it to Parquet.
+    import numpy as _np
+    bulk_store = cell_state.get('bulk')
+    if isinstance(bulk_store, _np.ndarray):
+        n_bulk = len(bulk_store)
+    elif isinstance(bulk_store, dict):
+        n_bulk = len(bulk_store.get('id', []))
+    else:
+        n_bulk = 0
     for proc_name in partitioned:
         cell_state.setdefault('next_update_time', {}).setdefault(
             proc_name, float(time_step))
         cell_state.setdefault('request', {}).setdefault(
             proc_name, {'bulk': []})
         cell_state.setdefault('allocate', {}).setdefault(
-            proc_name, {'bulk': []})
+            proc_name, {'bulk': _np.zeros(n_bulk, dtype=_np.int64)})
 
     # 9b. For non-partitioned Steps whose topology references a
     # next_update_time store (e.g. Metabolism), initialize that store so

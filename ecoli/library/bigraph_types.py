@@ -1255,6 +1255,25 @@ def realize(core, schema: SharedProcess, state, path=()):
     if not hasattr(instance, 'core') or instance.core is None:
         instance.core = core
 
+    # Restore process-internal RandomState if we saved one. __init__
+    # reseeds random_state from self.seed (== state 0); if the
+    # checkpoint captured a later state, apply it so per-tick RNG
+    # streams resume bit-exactly.
+    rng_state = state.get('rng_state')
+    if rng_state and hasattr(instance, 'random_state') and isinstance(
+            instance.random_state, np.random.RandomState):
+        try:
+            instance.random_state.set_state((
+                rng_state['alg'],
+                np.asarray(rng_state['key'], dtype=np.uint32),
+                int(rng_state['pos']),
+                int(rng_state['has_gauss']),
+                float(rng_state['cached_gauss']),
+            ))
+        except Exception as e:
+            print(f"[SharedProcess] failed to restore rng_state for "
+                  f"{process_id}: {e}", flush=True)
+
     # Register for lookup by SharedProcessRef
     if process_id is not None:
         _shared_processes[process_id] = instance
@@ -1278,11 +1297,24 @@ def serialize(schema: SharedProcess, state):
         if instance_core and raw_schema:
             config_schema = instance_core.access(raw_schema)
             config = serialize(config_schema, config)
-        return {
+        result = {
             '_type': 'shared_process',
             'address': address,
             'config': config,
         }
+        # Capture process-internal RandomState so reload resumes the
+        # same RNG stream rather than restarting at seed=0.
+        rng = getattr(instance, 'random_state', None)
+        if isinstance(rng, np.random.RandomState):
+            alg, key, pos, has_gauss, cached = rng.get_state()
+            result['rng_state'] = {
+                'alg': alg,
+                'key': key.tolist(),
+                'pos': int(pos),
+                'has_gauss': int(has_gauss),
+                'cached_gauss': float(cached),
+            }
+        return result
     if isinstance(state, dict):
         return state
     return state
@@ -1803,11 +1835,22 @@ def bundle(schema: SharedProcess, state, context: typing.Optional[BundleContext]
         if instance_core and raw_schema:
             config_schema = instance_core.access(raw_schema)
             config = bundle(config_schema, config, context)
-        return {
+        result = {
             '_type': 'shared_process',
             'address': address,
             'config': config,
         }
+        rng = getattr(instance, 'random_state', None)
+        if isinstance(rng, np.random.RandomState):
+            alg, key, pos, has_gauss, cached = rng.get_state()
+            result['rng_state'] = {
+                'alg': alg,
+                'key': key.tolist(),
+                'pos': int(pos),
+                'has_gauss': int(has_gauss),
+                'cached_gauss': float(cached),
+            }
+        return result
     if isinstance(state, dict):
         return state
     return serialize(schema, state)
