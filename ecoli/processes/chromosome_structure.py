@@ -97,7 +97,7 @@ class ChromosomeStructure(Step):
         # Get placeholder value for chromosome domains without children
         'no_child_place_holder': 'integer{-1}',
         # Load bulk molecule views
-        'inactive_RNAPs': 'list[string]',
+        'inactive_RNAPs': 'string',
         'fragmentBases': 'list[string]',
         'ppi': 'string{ppi}',
         'active_tfs': 'list[string]',

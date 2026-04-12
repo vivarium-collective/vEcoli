@@ -127,9 +127,58 @@ def build_ecoli_document(core, sim_config):
             unique_topology = configs[name].get("unique_topo", {})
             topology[name] = {k: v for k, v in unique_topology.items()}
 
-    # 5b. Declare SharedProcess entries in the process store BEFORE step
-    # declarations so realize() instantiates them first (SharedProcessRef
-    # in Requester/Evolver configs must find the instance at realize time).
+    # 5b. Build sim_data_objects store FIRST — bound method refs in
+    # SharedProcess and step configs need these instances at realize time.
+    sd = load_sim_data.sim_data
+    sim_data_objects = {}
+    # Map from instance id to store key for deduplication
+    _instance_to_key = {}
+    _sim_data_paths = {
+        'external_state': sd.external_state,
+        'mass': sd.mass,
+        'growth_rate_parameters': sd.growth_rate_parameters,
+        'getter': sd.getter,
+        'transcription': sd.process.transcription,
+        'transcription_regulation': sd.process.transcription_regulation,
+        'replication': sd.process.replication,
+        'translation': sd.process.translation,
+        'metabolism_data': sd.process.metabolism,
+        'equilibrium_data': sd.process.equilibrium,
+        'two_component_system': sd.process.two_component_system,
+        # Nested objects that are also referenced directly in configs
+        'concentration_updates': sd.process.metabolism.concentration_updates,
+    }
+    for key, instance in _sim_data_paths.items():
+        if instance is not None:
+            sim_data_objects[key] = instance
+            _instance_to_key[id(instance)] = key
+    sim_data_objects['_type'] = 'sim_data_object_store'
+    cell_state['sim_data_objects'] = sim_data_objects
+
+    # Now rewrite configs: replace bound methods and sim_data object
+    # instances with references to the sim_data_objects store.
+    for name, config in configs.items():
+        if not isinstance(config, dict):
+            continue
+        for key, val in list(config.items()):
+            if callable(val) and hasattr(val, '__self__') and hasattr(val, '__func__'):
+                # Bound method → method ref
+                inst_id = id(val.__self__)
+                if inst_id in _instance_to_key:
+                    config[key] = {
+                        '_type': 'method',
+                        'instance_path': ['sim_data_objects', _instance_to_key[inst_id]],
+                        'attribute': val.__func__.__name__,
+                    }
+            elif id(val) in _instance_to_key:
+                # Direct sim_data object instance → object ref
+                config[key] = {
+                    '_type': 'sim_data_object_ref',
+                    'store_key': _instance_to_key[id(val)],
+                }
+
+    # 5c. Declare SharedProcess entries in the process store AFTER
+    # sim_data_objects so realize() has bound method instances available.
     for proc_name in partitioned:
         proc_class = sim_config["processes"][proc_name]
         proc_config = partitioned_configs.get(proc_name, {})

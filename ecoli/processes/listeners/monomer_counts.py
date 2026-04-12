@@ -57,17 +57,11 @@ class MonomerCounts(Step):
             'subunitIds': 'array[string]',
             'subunitStoich': 'array[float]',
         },
-        'replisome_trimer_subunits': {
-            'subunitIds': 'array[string]',
-            'subunitStoich': 'array[float]',
-        },
-        'replisome_monomer_subunits': {
-            'subunitIds': 'array[string]',
-            'subunitStoich': 'array[float]',
-        },
-        'complexation_stoich': 'csr_matrix',
-        'equilibrium_stoich': 'csr_matrix',
-        'two_component_system_stoich': 'csr_matrix',
+        'replisome_trimer_subunits': 'list[string]',
+        'replisome_monomer_subunits': 'list[string]',
+        'complexation_stoich': 'array[2678|1118,float]',
+        'equilibrium_stoich': 'array[108|39,float]',
+        'two_component_system_stoich': 'array[41|18,float]',
         'emit_unique': 'boolean{false}',
         'time_step': 'float{1.0}',
     }

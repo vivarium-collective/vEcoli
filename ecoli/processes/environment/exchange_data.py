@@ -19,7 +19,7 @@ class ExchangeData(Step):
     topology = TOPOLOGY
 
     config_schema = {
-        'external_state': {'_type': 'node', '_default': None},
+        'external_state': 'sim_data_object_ref',
         'environment_molecules': 'list[string]',
         'saved_media': 'map[string]',
         'time_step': 'float{1.0}',

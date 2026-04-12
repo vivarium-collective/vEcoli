@@ -49,34 +49,44 @@ from wholecell.utils.unit_struct_array import UnitStructArray
 
 
 # ============================================================================
-# Method type — serializable callables
+# Function type — serializable standalone callables (not bound to an instance)
 # ============================================================================
 
 @dataclass(kw_only=True)
-class Method(Node):
+class Function(Node):
     module: String = field(default_factory=String)
-    instance: object = field(default_factory=object)
+    instance: typing.Optional[str] = None
     attribute: String = field(default_factory=String)
 
 
 @dispatch
 def infer(core, value: typing.Callable, path: tuple = ()):
-    if hasattr(value, '__self__'):
-        data = {
-            'module': value.__module__,
-            'instance': value.__self__.__class__.__name__,
-            'attribute': value.__func__.__name__}
-    else:
+    if hasattr(value, '__self__') and hasattr(value, '__func__'):
+        # Bound method → Method type (references an instance)
+        return set_default(Method(), value), []
+    elif (hasattr(value, '__code__')
+          and getattr(value.__code__, 'co_filename', '') == '<string>'):
+        # Dynamic function created via exec (e.g. from build_ode) —
+        # can't be imported by name, must be rebuilt from sympy source.
+        return set_default(DerivedFunction(), value), []
+    elif hasattr(value, '__name__') and hasattr(value, '__module__'):
+        # Standalone function → Function type
         data = {
             'module': value.__module__,
             'instance': None,
             'attribute': value.__name__}
-    method = Method(**data)
-    return set_default(method, value), []
+        return set_default(Function(**data), value), []
+    else:
+        # Callable object (e.g. CubicSpline, functors) → Object type
+        from bigraph_schema.schema import Object
+        cls = type(value)
+        class_path = f'{cls.__module__}.{cls.__name__}'
+        schema = Object(_class=class_path)
+        return set_default(schema, value), []
 
 
 @dispatch
-def serialize(schema: Method, state):
+def serialize(schema: Function, state):
     if isinstance(state, dict):
         return state
     if state is None:
@@ -99,7 +109,7 @@ def serialize(schema: Method, state):
 
 
 @dispatch
-def realize(core, schema: Method, encode, path=()):
+def realize(core, schema: Function, encode, path=()):
     if callable(encode):
         return schema, encode, []
     elif isinstance(encode, dict):
@@ -117,13 +127,9 @@ def realize(core, schema: Method, encode, path=()):
 
 
 @dispatch
-def render(schema: Method, defaults=False):
-    data = {
-        '_type': 'method',
-        'module': schema.module,
-        'instance': str(schema.instance),
-        'attribute': schema.attribute}
-    return wrap_default(schema, data) if defaults else data
+def render(schema: Function, defaults=False):
+    result = 'function'
+    return wrap_default(schema, result) if defaults else result
 
 
 # ============================================================================
@@ -246,11 +252,19 @@ def render(schema: UnumUnits, defaults=False):
 
 @dispatch
 def align_parameters(schema: UnumUnits, parameters):
-    """Handle unum[float,fg] or unum[fg] (single param = unit string)."""
+    """Handle unum[magnitude_type,unit_string] or unum[unit_string].
+
+    If a single parameter is a Node (schema type), it's the magnitude type.
+    If it's a string, it's the unit annotation.
+    Two parameters: first is magnitude, second is units.
+    """
     if len(parameters) == 2:
         return {'magnitude': parameters[0], '_units': parameters[1]}
     if len(parameters) == 1:
-        return {'_units': parameters[0]}
+        p = parameters[0]
+        if isinstance(p, Node):
+            return {'magnitude': p}
+        return {'_units': p}
     return {}
 
 
@@ -425,10 +439,23 @@ def serialize(schema: CSRMatrix, state):
 def realize(core, schema: CSRMatrix, encode, path=()):
     if isinstance(encode, csr_matrix):
         return schema, encode, []
-    inner = tuple(
-        realize(core, getattr(schema, key), encode[key], path + (key,))[1]
-        for key in ['data', 'indices', 'pointers'])
-    return schema, csr_matrix(inner, shape=schema._shape), []
+    # Dense ndarray — the process stores it as dense, convert to CSR
+    if isinstance(encode, np.ndarray):
+        return schema, csr_matrix(encode), []
+    # List of lists — dense matrix from JSON
+    if isinstance(encode, list):
+        return schema, csr_matrix(np.array(encode)), []
+    # Dict form with data/indices/pointers (from serialize)
+    if isinstance(encode, dict) and 'data' in encode:
+        inner = tuple(
+            realize(core, getattr(schema, key), encode[key], path + (key,))[1]
+            for key in ['data', 'indices', 'pointers'])
+        data, indices, pointers = inner
+        shape = tuple(schema._shape) if schema._shape else (
+            len(pointers) - 1,
+            int(indices.max()) + 1 if len(indices) > 0 else 0)
+        return schema, csr_matrix(inner, shape=shape), []
+    return schema, encode, []
 
 
 @dispatch
@@ -1247,6 +1274,25 @@ class SharedProcessRef(Node):
     pass
 
 
+@dispatch
+def serialize(schema: SharedProcessRef, state):
+    """Serialize a SharedProcessRef: extract the process name from the instance."""
+    if isinstance(state, str):
+        return state
+    if isinstance(state, dict):
+        return state
+    # It's a PartitionedProcess instance — return its name
+    if hasattr(state, 'name'):
+        return state.name
+    return str(state)
+
+
+@dispatch
+def bundle(schema: SharedProcessRef, state, context: typing.Optional[BundleContext] = None):
+    """Bundle a SharedProcessRef: same as serialize — just the process name."""
+    return serialize(schema, state)
+
+
 @realize.dispatch
 def realize(core, schema: SharedProcessRef, state, path=()):
     # Already resolved to an instance
@@ -1272,6 +1318,310 @@ def realize(core, schema: SharedProcessRef, state, path=()):
 
 
 # ============================================================================
+# Method — pointer to a method on a sim_data_objects instance
+# ============================================================================
+
+# Global registry of sim_data object instances, populated during realize
+# of the sim_data_objects store.
+_sim_data_object_instances: typing.Dict[str, typing.Any] = {}
+
+
+@dataclass(kw_only=True)
+class SimDataObjectStore(Node):
+    """Store for sim_data object instances used by bound method references.
+
+    On realize, each entry is realized as an Object type (reconstructing
+    the Python instance from serialized __dict__), then registered in
+    ``_sim_data_object_instances`` so Method can find them.
+    """
+    pass
+
+
+@dispatch
+def render(schema: SimDataObjectStore, defaults=False):
+    return 'sim_data_object_store'
+
+
+# ============================================================================
+# SympyMatrix type — language-agnostic serialization of sympy matrices
+# ============================================================================
+
+@dataclass(kw_only=True)
+class SympyMatrix(Node):
+    """A sympy Matrix serialized as element-wise srepr strings.
+
+    Serialized form::
+
+        {"rows": 39, "cols": 1,
+         "elements": ["Add(Mul(Indexed(...), ...), ...)", ...]}
+
+    On realize, reconstructs the sympy Matrix from the srepr strings.
+    """
+    pass
+
+
+@dispatch
+def render(schema: SympyMatrix, defaults=False):
+    return 'sympy_matrix'
+
+
+@dispatch
+def serialize(schema: SympyMatrix, state):
+    if state is None:
+        return None
+    if isinstance(state, dict):
+        return state
+    import sympy as sp
+    rows, cols = state.shape
+    elements = [sp.srepr(state[i, j]) for i in range(rows) for j in range(cols)]
+    return {'rows': rows, 'cols': cols, 'elements': elements}
+
+
+@dispatch
+def bundle(schema: SympyMatrix, state, context: typing.Optional[BundleContext] = None):
+    return serialize(schema, state)
+
+
+@realize.dispatch
+def realize(core, schema: SympyMatrix, state, path=()):
+    if state is None:
+        return schema, None, []
+    if not isinstance(state, dict):
+        return schema, state, []
+    import sympy
+    ns = vars(sympy)
+    rows = state['rows']
+    cols = state['cols']
+    elements = [eval(e, {'__builtins__': {}}, ns) for e in state['elements']]
+    matrix = sympy.Matrix(rows, cols, elements)
+    return schema, matrix, []
+
+
+import sympy as _sympy
+
+@dispatch
+def infer(core, value: _sympy.MatrixBase, path: tuple = ()):
+    """Infer a sympy Matrix as a SympyMatrix type."""
+    return set_default(SympyMatrix(), value), []
+
+
+# ============================================================================
+# DerivedFunction — a function derived from a sibling field
+# ============================================================================
+
+@dataclass(kw_only=True)
+class DerivedFunction(Node):
+    """A function that is derived from another field via a builder function.
+
+    Serialized form::
+
+        {"source_field": "symbolic_rates",
+         "builder": "wholecell.utils.build_ode.rates",
+         "index": 0}
+
+    On realize (handled by Object realize), the builder is imported,
+    called with the realized source field value, and the result (or
+    element at index) replaces this placeholder.
+    """
+    _schema_keys = Node._schema_keys | frozenset({'_source_field', '_builder', '_index'})
+    _source_field: str = ''
+    _builder: str = ''
+    _index: int = -1  # -1 means use full result, >=0 means index into tuple
+
+
+@dispatch
+def render(schema: DerivedFunction, defaults=False):
+    return 'derived_function'
+
+
+@dispatch
+def serialize(schema: DerivedFunction, state):
+    """Serialize: store the derivation recipe, not the function."""
+    if isinstance(state, dict):
+        return state
+    return {
+        'source_field': schema._source_field,
+        'builder': schema._builder,
+        'index': schema._index,
+    }
+
+
+@dispatch
+def bundle(schema: DerivedFunction, state, context: typing.Optional[BundleContext] = None):
+    return serialize(schema, state)
+
+
+@realize.dispatch
+def realize(core, schema: DerivedFunction, state, path=()):
+    """Realize returns the recipe dict — Object realize handles the actual rebuild."""
+    if callable(state):
+        return schema, state, []
+    return schema, state, []
+
+
+@dispatch
+def serialize(schema: SimDataObjectStore, state):
+    """Serialize the store — each value as an Object."""
+    if not isinstance(state, dict):
+        return state
+    from bigraph_schema.schema import Object
+    result = {}
+    for key, instance in state.items():
+        if isinstance(key, str) and key.startswith('_'):
+            continue
+        result[key] = serialize(Object(), instance)
+    return result
+
+
+@dispatch
+def bundle(schema: SimDataObjectStore, state, context: typing.Optional[BundleContext] = None):
+    """Bundle the store — each value as an Object."""
+    if not isinstance(state, dict):
+        return state
+    from bigraph_schema.schema import Object
+    result = {}
+    for key, instance in state.items():
+        if isinstance(key, str) and key.startswith('_'):
+            continue
+        result[key] = bundle(Object(), instance, context)
+    return result
+
+
+@realize.dispatch
+def realize(core, schema: SimDataObjectStore, state, path=()):
+    """Realize each entry as an Object and register in the global registry."""
+    if not isinstance(state, dict):
+        return schema, state, []
+    from bigraph_schema.schema import Object
+    result = {}
+    _sim_data_object_instances.clear()
+    for key, encoded in state.items():
+        _, instance = core.realize(Object(), encoded)
+        result[key] = instance
+        _sim_data_object_instances[key] = instance
+    return schema, result, []
+
+
+@dataclass(kw_only=True)
+@dataclass(kw_only=True)
+class SimDataObjectRef(Node):
+    """Reference to a sim_data object instance by store key.
+
+    Document form::
+
+        {"_type": "sim_data_object_ref",
+         "store_key": "external_state"}
+
+    On realize(), looks up the instance in ``_sim_data_object_instances``.
+    """
+    pass
+
+
+@dispatch
+def render(schema: SimDataObjectRef, defaults=False):
+    return 'sim_data_object_ref'
+
+
+@dispatch
+def serialize(schema: SimDataObjectRef, state):
+    if isinstance(state, dict):
+        return state
+    # Find the instance in the registry
+    inst_id = id(state)
+    for key, inst in _sim_data_object_instances.items():
+        if id(inst) == inst_id:
+            return {'store_key': key}
+    return state
+
+
+@dispatch
+def bundle(schema: SimDataObjectRef, state, context: typing.Optional[BundleContext] = None):
+    return serialize(schema, state)
+
+
+@realize.dispatch
+def realize(core, schema: SimDataObjectRef, state, path=()):
+    if isinstance(state, dict):
+        store_key = state.get('store_key')
+        if store_key:
+            instance = _sim_data_object_instances.get(store_key)
+            if instance is None:
+                raise RuntimeError(
+                    f"SimDataObjectRef at {path}: store_key '{store_key}' "
+                    f"not found. Available: {sorted(_sim_data_object_instances.keys())}")
+            return schema, instance, []
+    # Already an instance
+    return schema, state, []
+
+
+class Method(Node):
+    """Reference to a bound method on a sim_data_objects instance.
+
+    Document form::
+
+        {"_type": "method",
+         "instance_path": ["sim_data_objects", "transcription"],
+         "attribute": "make_elongation_rates"}
+
+    On realize(), looks up the instance in ``_sim_data_object_instances``
+    and returns ``getattr(instance, attribute)`` — a bound method.
+    """
+    pass
+
+
+@dispatch
+def serialize(schema: Method, state):
+    """Serialize: if it's a bound method, extract path + attribute."""
+    if isinstance(state, dict):
+        return state
+    if callable(state) and hasattr(state, '__self__'):
+        # Find the instance in the registry
+        inst_id = id(state.__self__)
+        for key, inst in _sim_data_object_instances.items():
+            if id(inst) == inst_id:
+                return {
+                    'instance_path': ['sim_data_objects', key],
+                    'attribute': state.__func__.__name__,
+                }
+        # Not found in registry — fall back to Function serialize
+        return serialize(Function(), state)
+    if callable(state):
+        return serialize(Function(), state)
+    return state
+
+
+@dispatch
+def bundle(schema: Method, state, context: typing.Optional[BundleContext] = None):
+    return serialize(schema, state)
+
+
+@dispatch
+def render(schema: Method, defaults=False):
+    return 'method'
+
+
+@realize.dispatch
+def realize(core, schema: Method, state, path=()):
+    """Resolve a bound method ref by looking up the instance and binding."""
+    if callable(state):
+        return schema, state, []
+    if isinstance(state, dict):
+        instance_path = state.get('instance_path', [])
+        attribute = state.get('attribute')
+        if len(instance_path) >= 2 and attribute:
+            store_key = instance_path[1]
+            instance = _sim_data_object_instances.get(store_key)
+            if instance is None:
+                raise RuntimeError(
+                    f"Method at {path}: instance '{store_key}' "
+                    f"not found in sim_data_objects. "
+                    f"Available: {sorted(_sim_data_object_instances.keys())}")
+            method = getattr(instance, attribute)
+            return schema, method, []
+    return schema, state, []
+
+
+# ============================================================================
 # Type registry
 # ============================================================================
 
@@ -1280,6 +1630,7 @@ ECOLI_TYPES = {
     'quantity': Quantity,
     'csr_matrix': CSRMatrix,
     'units_array': UnitsArray,
+    'function': Function,
     'method': Method,
     'step_instance': StepInstance,
     'process_instance': ProcessInstance,
@@ -1291,6 +1642,10 @@ ECOLI_TYPES = {
     'sim_data_method': SimDataMethod,
     'shared_process': SharedProcess,
     'shared_process_ref': SharedProcessRef,
+    'sympy_matrix': SympyMatrix,
+    'derived_function': DerivedFunction,
+    'sim_data_object_store': SimDataObjectStore,
+    'sim_data_object_ref': SimDataObjectRef,
 }
 
 
@@ -1391,8 +1746,8 @@ def bundle(schema: UnitsArray, state, context: typing.Optional[BundleContext] = 
 
 
 @dispatch
-def bundle(schema: Method, state, context: typing.Optional[BundleContext] = None):
-    """Bundle a Method — same as serialize (small metadata dict)."""
+def bundle(schema: Function, state, context: typing.Optional[BundleContext] = None):
+    """Bundle a Function — same as serialize (small metadata dict)."""
     return serialize(schema, state)
 
 
