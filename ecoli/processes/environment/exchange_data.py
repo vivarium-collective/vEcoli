@@ -1,3 +1,5 @@
+from typing import Any
+
 from ecoli.processes.registries import topology_registry
 from ecoli.library.ecoli_step import EcoliStep as Step
 from vivarium.library.units import units
@@ -23,6 +25,13 @@ class ExchangeData(Step):
         'environment_molecules': 'list[string]',
         'saved_media': 'map[string]',
         'time_step': 'float{1.0}',
+    }
+
+    defaults: dict[str, Any] = {
+        "external_state": None,
+        "environment_molecules": [],
+        "saved_media": {},
+        "time_step": 1,
     }
 
     def inputs(self):

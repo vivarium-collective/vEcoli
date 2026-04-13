@@ -56,6 +56,8 @@ class Allocator(Step):
         'emit_unique': 'boolean{false}',
     }
 
+    defaults: dict[str, Any] = {}
+
     processes: dict[str, Any] = {}
 
     def inputs(self):

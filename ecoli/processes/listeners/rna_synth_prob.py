@@ -41,6 +41,11 @@ class RnaSynthProb(Step):
         'cistron_tu_mapping_matrix': 'csr_matrix[4538|3277,integer[64]]',
     }
 
+    defaults = {
+        "time_step": 1,
+        "emit_unique": False,
+    }
+
 
     def inputs(self):
         return {

@@ -49,6 +49,13 @@ class RNACounts(Step):
         'emit_unique': 'boolean{false}',
     }
 
+    defaults = {
+        "rna_ids": [],
+        "mrna_indexes": [],
+        "time_step": 1,
+        "emit_unique": False,
+    }
+
 
     def inputs(self):
         return {

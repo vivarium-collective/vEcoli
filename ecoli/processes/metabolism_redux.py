@@ -95,6 +95,47 @@ class MetabolismRedux(Step):
         'time_step': 'float{1.0}',
     }
 
+    defaults = {
+        "stoich_dict": {},
+        "reaction_catalysts": {},
+        # TODO (Cyrus) -- get these passed in, subset of the stoichimetry
+        "kinetic_rates": [],
+        "media_id": "minimal",
+        "imports": {},
+        "concentration_updates": None,
+        "maintenance_reaction": {},
+        "nutrient_to_doubling_time": {},
+        "use_trna_charging": False,
+        "include_ppgpp": False,
+        "mechanistic_aa_transport": False,
+        "aa_targets_not_updated": set(),
+        "import_constraint_threshold": 0,
+        "exchange_molecules": [],
+        "non_growth_associated_maintenance": 8.39 * units.mmol / (units.g * units.h),
+        "avogadro": 6.02214076e23 / units.mol,
+        "cell_density": 1100 * units.g / units.L,
+        "dark_atp": 33.565052868380675 * units.mmol / units.g,
+        "cell_dry_mass_fraction": 0.3,
+        "get_biomass_as_concentrations": lambda doubling_time: {},
+        "ppgpp_id": "ppgpp",
+        "get_ppGpp_conc": lambda media: 0.0,
+        "exchange_data_from_media": lambda media: [],
+        "get_masses": lambda exchanges: [],
+        "doubling_time": 44.0 * units.min,
+        "amino_acid_ids": {},
+        "linked_metabolites": None,
+        "aa_exchange_names": [],
+        "removed_aa_uptake": [],
+        "seed": 0,
+        "base_reaction_ids": [],
+        "fba_reaction_ids_to_base_reaction_ids": [],
+        "constraints_to_disable": [],
+        "kinetic_objective_weight": 1e-7,
+        "kinetic_objective_weight_in_range": 1e-10,
+        "secretion_penalty_coeff": 1e-3,
+        "time_step": 1,
+    }
+
 
     def inputs(self):
         return {

@@ -44,6 +44,16 @@ class RibosomeData(Step):
         'emit_unique': 'boolean{false}',
     }
 
+    defaults = {
+        "n_monomers": [],
+        "rRNA_cistron_tu_mapping_matrix": [],
+        "rRNA_is_5S": [],
+        "rRNA_is_16S": [],
+        "rRNA_is_23S": [],
+        "time_step": 1,
+        "emit_unique": False,
+    }
+
 
     def inputs(self):
         return {

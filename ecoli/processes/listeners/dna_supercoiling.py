@@ -36,6 +36,12 @@ class DnaSupercoiling(Step):
         'time_step': 'float{1.0}',
     }
 
+    defaults = {
+        "relaxed_DNA_base_pairs_per_turn": 0,
+        "emit_unique": False,
+        "time_step": 1,
+    }
+
 
     def inputs(self):
         return {

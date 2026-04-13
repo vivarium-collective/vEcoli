@@ -116,6 +116,40 @@ class ChromosomeStructure(Step):
         'time_step': 'float{1.0}',
     }
 
+    defaults = {
+        # Load parameters
+        "rna_sequences": [],
+        "protein_sequences": [],
+        "n_TUs": 1,
+        "n_TFs": 1,
+        "n_amino_acids": 1,
+        "n_fragment_bases": 1,
+        "replichore_lengths": [0, 0],
+        "relaxed_DNA_base_pairs_per_turn": 1,
+        "terC_index": -1,
+        "calculate_superhelical_densities": False,
+        # Get placeholder value for chromosome domains without children
+        "no_child_place_holder": -1,
+        # Load bulk molecule views
+        "inactive_RNAPs": [],
+        "fragmentBases": [],
+        "ppi": "ppi",
+        "active_tfs": [],
+        "ribosome_30S_subunit": "30S",
+        "ribosome_50S_subunit": "50S",
+        "amino_acids": [],
+        "water": "water",
+        "seed": 0,
+        "emit_unique": False,
+        "rna_ids": [],
+        "n_mature_rnas": 0,
+        "mature_rna_ids": [],
+        "mature_rna_end_positions": [],
+        "mature_rna_nt_counts": [],
+        "unprocessed_rna_index_mapping": {},
+        "time_step": 1.0,
+    }
+
 
     def inputs(self):
         return {

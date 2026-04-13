@@ -43,6 +43,8 @@ class Requester(Step):
         'name': 'string',
     }
 
+    defaults = {"process": None}
+
     def inputs(self):
         process = self.config.get("process")
         ports = process.inputs()
@@ -176,6 +178,8 @@ class Evolver(Step):
         '_parallel': 'boolean{false}',
         'name': 'string',
     }
+
+    defaults = {"process": None}
 
     def inputs(self):
         process = self.config.get("process")

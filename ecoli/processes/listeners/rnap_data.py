@@ -43,6 +43,14 @@ class RnapData(Step):
         'emit_unique': 'boolean{false}',
     }
 
+    defaults = {
+        "stable_RNA_indexes": [],
+        "cistron_ids": [],
+        "cistron_tu_mapping_matrix": [],
+        "time_step": 1,
+        "emit_unique": False,
+    }
+
 
     def inputs(self):
         return {

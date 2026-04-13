@@ -56,6 +56,42 @@ class MassListener(Step):
         'unique_masses': 'array[float]',                   # small (11 items)
     }
 
+    defaults = {
+        "cellDensity": 1100.0,
+        "bulk_ids": [],
+        "bulk_masses": np.zeros([1, 9]),
+        "unique_ids": [],
+        "unique_masses": np.zeros([1, 9]),
+        "submass_to_idx": {
+            "rRNA": 0,
+            "tRNA": 1,
+            "mRNA": 2,
+            "miscRNA": 3,
+            "nonspecific_RNA": 4,
+            "protein": 5,
+            "metabolite": 6,
+            "water": 7,
+            "DNA": 8,
+        },
+        "compartment_indices": {
+            "projection": [],
+            "cytosol": [],
+            "extracellular": [],
+            "flagellum": [],
+            "membrane": [],
+            "outer_membrane": [],
+            "periplasm": [],
+            "pilus": [],
+            "inner_membrane": [],
+        },
+        "compartment_id_to_index": {},
+        "compartment_abbrev_to_index": {},
+        "n_avogadro": 6.0221409e23,  # 1/mol
+        "time_step": 1.0,
+        "emit_unique": False,
+        "match_wcecoli": False,
+    }
+
 
     def inputs(self):
         return {

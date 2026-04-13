@@ -25,6 +25,8 @@ class MediaUpdate(Step):
         'media_id': 'string{minimal}',
     }
 
+    defaults = {"saved_media": {}, "time_step": 1, "media_id": "minimal"}
+
     def inputs(self):
         return {
             'boundary': {'external': 'map[quantity[millimolar]]'},

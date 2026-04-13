@@ -66,6 +66,28 @@ class MonomerCounts(Step):
         'time_step': 'float{1.0}',
     }
 
+    defaults = {
+        "bulk_molecule_ids": [],
+        "unique_ids": [],
+        "complexation_molecule_ids": [],
+        "complexation_complex_ids": [],
+        "equilibrium_molecule_ids": [],
+        "equilibrium_complex_ids": [],
+        "monomer_ids": [],
+        "two_component_system_molecule_ids": [],
+        "two_component_system_complex_ids": [],
+        "ribosome_50s_subunits": [],
+        "ribosome_30s_subunits": [],
+        "rnap_subunits": [],
+        "replisome_trimer_subunits": [],
+        "replisome_monomer_subunits": [],
+        "complexation_stoich": [],
+        "equilibrium_stoich": [],
+        "two_component_system_stoich": [],
+        "emit_unique": False,
+        "time_step": 1,
+    }
+
 
     def inputs(self):
         return {

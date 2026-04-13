@@ -34,6 +34,7 @@ from unum import Unum
 
 from bigraph_schema.schema import (
     Node, String, Float, Integer, Array, List, Tuple, Map, Link, Overwrite, Wrap, Protocol,
+    Function, Quantity,
 )
 from bigraph_schema.methods import (
     infer, set_default, default, serialize, realize, render,
@@ -45,21 +46,14 @@ from bigraph_schema import capture_object_state, restore_object_value
 from bigraph_schema.methods.bundle import register_derived_function_resolver
 
 from vivarium.core.process import Process as VivariumProcess, Step as VivariumStep
-from process_bigraph import Step as BigraphStep, Process as BigraphProcess, StepLink, ProcessLink
+from process_bigraph import Step as BigraphStep, Process as BigraphProcess
 
 from wholecell.utils.unit_struct_array import UnitStructArray
 
 
-# ============================================================================
-# Function type — serializable standalone callables (not bound to an instance)
-# ============================================================================
-
-@dataclass(kw_only=True)
-class Function(Node):
-    module: String = field(default_factory=String)
-    instance: typing.Optional[str] = None
-    attribute: String = field(default_factory=String)
-
+# Function type now lives in bigraph_schema. The infer dispatch below
+# routes vEcoli-specific callables (bound methods → Method, exec'd
+# lambdas → DerivedFunction) before falling back to Function/Object.
 
 @dispatch
 def infer(core, value: typing.Callable, path: tuple = ()):
@@ -72,7 +66,7 @@ def infer(core, value: typing.Callable, path: tuple = ()):
         # can't be imported by name, must be rebuilt from sympy source.
         return set_default(DerivedFunction(), value), []
     elif hasattr(value, '__name__') and hasattr(value, '__module__'):
-        # Standalone function → Function type
+        # Standalone function → Function type (in bigraph_schema)
         data = {
             'module': value.__module__,
             'instance': None,
@@ -85,59 +79,6 @@ def infer(core, value: typing.Callable, path: tuple = ()):
         class_path = f'{cls.__module__}.{cls.__name__}'
         schema = Object(_class=class_path)
         return set_default(schema, value), []
-
-
-@dispatch
-def serialize(schema: Function, state):
-    if isinstance(state, dict):
-        return state
-    if state is None:
-        return None
-    if callable(state):
-        if hasattr(state, '__self__'):
-            return {
-                'module': state.__module__,
-                'instance': state.__self__.__class__.__name__,
-                'attribute': state.__func__.__name__}
-        else:
-            return {
-                'module': state.__module__,
-                'instance': None,
-                'attribute': state.__name__}
-    return {
-        'module': str(schema.module),
-        'instance': str(schema.instance),
-        'attribute': str(schema.attribute)}
-
-
-@dispatch
-def realize(core, schema: Function, encode, path=()):
-    if callable(encode):
-        return schema, encode, []
-    if not isinstance(encode, dict):
-        # Nothing we can do — no function reference, pass through.
-        return schema, encode, []
-    # Require a real module/attribute pair. The schema's field types
-    # (String nodes) are NOT valid fallbacks — their str() produces
-    # `'String(_default=None)'` which isn't an importable module.
-    module_name = encode.get('module')
-    attribute_name = encode.get('attribute')
-    if not module_name or not attribute_name:
-        return schema, encode, []
-    instance_name = encode.get('instance')
-    mod = importlib.import_module(module_name)
-    if instance_name and instance_name != 'None':
-        cls = getattr(mod, instance_name)
-        func = getattr(cls, attribute_name)
-    else:
-        func = getattr(mod, attribute_name)
-    return schema, func, []
-
-
-@dispatch
-def render(schema: Function, defaults=False):
-    result = 'function'
-    return wrap_default(schema, result) if defaults else result
 
 
 # ============================================================================
@@ -347,21 +288,18 @@ def reify_schema(core, schema: UnumUnits, parameters):
 
 
 # ============================================================================
-# Quantity type — pint Quantity (value + units)
+# Quantity type — moved to bigraph_schema. Configure to use vivarium's
+# shared pint registry so vEcoli Quantities created via vivarium and
+# via the framework interoperate.
 # ============================================================================
 
-# Use the shared vivarium pint registry so all Quantities are compatible.
 from vivarium.library.units import units as ureg
+from bigraph_schema.units import set_quantity_registry
+set_quantity_registry(ureg)
 
 
 def units_dict(value):
     return {key: subvalue for key, subvalue in value.unit_items()}
-
-
-@dataclass(kw_only=True)
-class Quantity(Node):
-    units: typing.Dict = field(default_factory=dict)
-    magnitude: Float = field(default_factory=Float)
 
 
 @dispatch
@@ -380,18 +318,6 @@ def default(schema: Quantity):
 
 
 @dispatch
-def serialize(schema: Quantity, state):
-    if isinstance(state, dict):
-        return state
-    if isinstance(state, (int, float)):
-        return {'units': schema.units, 'magnitude': state}
-    if isinstance(state, pint.Quantity):
-        units = dict(state.unit_items()) or schema.units
-        return {'units': units, 'magnitude': float(state.magnitude)}
-    return {'units': schema.units, 'magnitude': state}
-
-
-@dispatch
 def resolve(schema: Integer, update: Array, path=()):
     return update
 
@@ -401,26 +327,6 @@ def resolve(schema: Quantity, update: Quantity, path=()):
     if not schema.units or schema.units == update.units:
         return update
     return schema
-
-
-@dispatch
-def divide(schema: Quantity, state, context=None, path=(), rng=None):
-    """Same unit-aware split as ``UnumUnits``. pint Quantity exposes
-    ``.dimensionality`` directly so we compute the scale factor from
-    that without re-parsing."""
-    if state is None:
-        return None, None
-    if not isinstance(state, pint.Quantity):
-        return state, state
-    dim = dict(state.dimensionality)
-    mass = float(dim.get('[mass]', 0))
-    substance = float(dim.get('[substance]', 0))
-    length = float(dim.get('[length]', 0))
-    scale = mass + substance + length / 3.0
-    if scale > 0:
-        half = state / 2
-        return half, half
-    return state, state
 
 
 @dispatch
@@ -443,37 +349,6 @@ def apply(schema: Quantity, state, update, path):
     if isinstance(update, (int, float)) and update == 0 and state is not None:
         return state, []
     return update, []
-
-
-@dispatch
-def realize(core, schema: Quantity, encode, path=()):
-    if isinstance(encode, pint.Quantity):
-        return schema, encode, []
-    if isinstance(encode, dict) and 'magnitude' in encode:
-        magnitude = encode['magnitude']
-        if isinstance(magnitude, str):
-            magnitude = float(magnitude)
-        decode = (magnitude, tuple(encode.get('units', schema.units).items()))
-        return schema, ureg.Quantity.from_tuple(decode), []
-    if isinstance(encode, (int, float)):
-        decode = (encode, tuple(schema.units.items()))
-        return schema, ureg.Quantity.from_tuple(decode), []
-    if isinstance(encode, str):
-        # Parse string form: "2.1 millimolar"
-        try:
-            return schema, ureg.parse_expression(encode), []
-        except Exception:
-            pass
-    return schema, encode, []
-
-
-@dispatch
-def render(schema: Quantity, defaults=False):
-    data = {
-        '_type': 'quantity',
-        'units': schema.units,
-        'magnitude': render(schema.magnitude)}
-    return wrap_default(schema, data) if defaults else data
 
 
 # ============================================================================
@@ -645,65 +520,10 @@ def render(schema: UnitsArray, defaults=False):
     return wrap_default(schema, result) if defaults else result
 
 
-# ============================================================================
-# Process instance types — for schema inference on vivarium instances
-# ============================================================================
-
-@dataclass(kw_only=True)
-class FunctionInstance(Node):
-    _inputs: Node = field(default_factory=Node)
-    _outputs: Node = field(default_factory=Node)
-    address: String = field(default_factory=String)
-    config: Node = field(default_factory=Node)
-
-
-@dataclass(kw_only=True)
-class StepInstance(FunctionInstance):
-    priority: Float = field(default_factory=Float)
-
-
-@dataclass(kw_only=True)
-class ProcessInstance(FunctionInstance):
-    interval: Float = field(default_factory=Float)
-
-
-def function_instance_data(core, value, path):
-    if not hasattr(value, 'core'):
-        value.core = core
-
-    config = value.parameters
-    if hasattr(value, 'config_schema') and value.config_schema:
-        config_schema = value.config_schema
-    else:
-        # Don't infer config — it's expensive and contains opaque
-        # simData objects. Use Quote to pass it through untouched.
-        from bigraph_schema.schema import Quote, Node
-        config_schema = Quote(_value=Node())
-
-    ports_schema = translate_ports(
-        core, value.ports_schema(), path=path + ('ports',))
-
-    return {
-        '_inputs': ports_schema,
-        '_outputs': ports_schema,
-        'address': Protocol(_default=f'local:{value.name}'),
-        'config': config_schema}
-
-
-@dispatch
-def infer(core, value: VivariumStep, path: tuple = ()):
-    data = function_instance_data(core, value, path)
-    data['priority'] = Float(_default=value.parameters.get('priority', 0.0))
-    instance = StepInstance(**data)
-    return set_default(instance, value), []
-
-
-@dispatch
-def infer(core, value: VivariumProcess, path: tuple = ()):
-    data = function_instance_data(core, value, path)
-    data['interval'] = Float(_default=value.parameters.get('timestep', 1.0))
-    instance = ProcessInstance(**data)
-    return set_default(instance, value), []
+# StepInstance/ProcessInstance/FunctionInstance and their infer
+# dispatches were never exercised in the v2 build path — the composite
+# document declares processes as ``StepLink``/``ProcessLink`` directly,
+# never via ``infer()`` on a live vivarium instance. Removed.
 
 
 # ============================================================================
@@ -1269,159 +1089,21 @@ def realize(core, schema: SimDataMethod, state, path=()):
 
 
 # ============================================================================
-# SharedProcess — shared process instances referenced by ID
+# SharedProcess / SharedProcessRef — moved to process_bigraph.types.process.
+# Re-exported below so existing imports keep working.
 # ============================================================================
 
-# Global registry mapping process_id → instantiated PartitionedProcess.
-# Populated by realize(SharedProcess), read by realize(SharedProcessRef).
-_shared_processes: dict[str, object] = {}
+from process_bigraph.types.process import (
+    SharedProcess,
+    SharedProcessRef,
+    _shared_processes,
+    clear_shared_processes,
+    _class_address_from_instance,
+)
 
-
-def clear_shared_processes():
-    """Clear the shared process registry (e.g. between simulations)."""
-    _shared_processes.clear()
-
-
-@dataclass(kw_only=True)
-class SharedProcess(Node):
-    """A shared process instance declared in the document's ``process`` store.
-
-    Document form::
-
-        {"_type": "shared_process",
-         "address": "local:!ecoli.processes.equilibrium.Equilibrium",
-         "config": { ... }}
-
-    On ``realize()``, the class is imported from ``address``, instantiated
-    with ``config``, wrapped as ``(instance,)`` (the tuple format that
-    Requester/Evolver ``update()`` expects), and registered in the global
-    ``_shared_processes`` dict keyed by the last path segment (the
-    process name).
-    """
-    pass
-
-
-@realize.dispatch
-def realize(core, schema: SharedProcess, state, path=()):
-    # Already realized — (instance,) tuple or bare instance
-    if isinstance(state, tuple) and len(state) > 0:
-        return schema, state, []
-    if not isinstance(state, dict):
-        return schema, state, []
-
-    address = state.get('address')
-    config = state.get('config', {})
-    process_id = path[-1] if path else state.get('process_id')
-
-    if address is None:
-        return schema, state, []
-
-    # Import the class from address (same protocol as realize_link)
-    if isinstance(address, str):
-        if address.startswith('local:!'):
-            module_path, class_name = address[7:].rsplit('.', 1)
-            mod = importlib.import_module(module_path)
-            cls = getattr(mod, class_name)
-        else:
-            return schema, state, []
-    else:
-        return schema, state, []
-
-    # Realize the config through the class's config_schema so that Unum,
-    # Method, SimDataObjectRef and other types get reconstructed properly.
-    config_schema = getattr(cls, 'config_schema', None)
-    if config_schema:
-        _, config = core.realize(config_schema, config)
-
-    instance = cls(config)
-
-    # Set core so serialize can access config_schema
-    if not hasattr(instance, 'core') or instance.core is None:
-        instance.core = core
-
-    # Restore process-internal RandomState if we saved one. __init__
-    # reseeds random_state from self.seed (== state 0); if the
-    # checkpoint captured a later state, apply it so per-tick RNG
-    # streams resume bit-exactly.
-    rng_state = state.get('rng_state')
-    if rng_state and hasattr(instance, 'random_state') and isinstance(
-            instance.random_state, np.random.RandomState):
-        try:
-            instance.random_state.set_state((
-                rng_state['alg'],
-                np.asarray(rng_state['key'], dtype=np.uint32),
-                int(rng_state['pos']),
-                int(rng_state['has_gauss']),
-                float(rng_state['cached_gauss']),
-            ))
-        except Exception as e:
-            print(f"[SharedProcess] failed to restore rng_state for "
-                  f"{process_id}: {e}", flush=True)
-
-    # Restore mid-tick bookkeeping attrs that __init__ resets but the
-    # running simulation mutates. Keeping them in sync with the saved
-    # snapshot is what lets load+run match continue-in-place.
-    internal = state.get('internal_state') or {}
-    for attr_name, saved_value in internal.items():
-        try:
-            setattr(instance, attr_name, _restore_internal_value(saved_value))
-        except Exception as e:
-            print(f"[SharedProcess] failed to restore {attr_name} for "
-                  f"{process_id}: {e}", flush=True)
-
-    # Register for lookup by SharedProcessRef
-    if process_id is not None:
-        _shared_processes[process_id] = instance
-
-    # Store the address on the instance so serialize can recover it
-    instance._shared_address = address if isinstance(address, str) else f"local:!{cls.__module__}.{cls.__name__}"
-
-    return schema, (instance,), []
-
-
-@dispatch
-def serialize(schema: SharedProcess, state):
-    """Serialize a SharedProcess back to its declaration dict."""
-    if isinstance(state, tuple) and len(state) > 0:
-        instance = state[0]
-        address = getattr(instance, '_shared_address', _class_address_from_instance(instance))
-        # Serialize config through the instance's config_schema
-        config = instance.parameters if hasattr(instance, 'parameters') else {}
-        instance_core = getattr(instance, 'core', None)
-        raw_schema = getattr(instance, 'config_schema', None)
-        if instance_core and raw_schema:
-            config_schema = instance_core.access(raw_schema)
-            config = serialize(config_schema, config)
-        result = {
-            '_type': 'shared_process',
-            'address': address,
-            'config': config,
-        }
-        # Capture process-internal RandomState so reload resumes the
-        # same RNG stream rather than restarting at seed=0.
-        rng = getattr(instance, 'random_state', None)
-        if isinstance(rng, np.random.RandomState):
-            alg, key, pos, has_gauss, cached = rng.get_state()
-            result['rng_state'] = {
-                'alg': alg,
-                'key': key.tolist(),
-                'pos': int(pos),
-                'has_gauss': int(has_gauss),
-                'cached_gauss': float(cached),
-            }
-        internal = _capture_internal_state(instance)
-        if internal:
-            result['internal_state'] = internal
-        return result
-    if isinstance(state, dict):
-        return state
-    return state
-
-
-# `capture_object_state` and `restore_object_value` now live in
-# bigraph_schema and are imported at the top of this module.
 
 def _capture_internal_state(instance):
+    """vEcoli's wrapper around the framework's ``capture_object_state``."""
     import os
     return capture_object_state(
         instance, debug=bool(os.environ.get('INTERNAL_DEBUG')))
@@ -1431,109 +1113,6 @@ def _restore_internal_value(value):
     return restore_object_value(value)
 
 
-@dispatch
-def render(schema: SharedProcess, defaults=False):
-    return 'shared_process'
-
-
-@divide.dispatch
-def divide(schema: SharedProcess, state, context=None, path=(), rng=None):
-    """Each daughter gets a FRESH process instance.
-
-    Without this, ``divide(Node)`` would share the mother's instance
-    by reference between both daughters. That instance carries
-    per-tick state (``request_set``, ``n_unique_RNAs_to_deactivate``,
-    etc.) computed against mother's full state, which becomes
-    inconsistent against either daughter's split state — and any
-    cross-daughter state mutation through the shared instance
-    corrupts the other.
-
-    We serialize the mother's declaration (address + config), drop
-    the mid-tick rng/internal snapshots (they belong to mother), and
-    return that dict for each daughter. ``realize(SharedProcess)``
-    re-instantiates from address+config on the next pass.
-    """
-    if state is None:
-        return None, None
-    declaration = serialize(schema, state)
-    if isinstance(declaration, dict):
-        # Strip mid-tick mother state so the daughters bootstrap clean.
-        declaration = {k: v for k, v in declaration.items()
-                       if k not in ('rng_state', 'internal_state')}
-        # Each daughter gets its own dict so realize doesn't share the
-        # registered instance across daughters via _shared_processes.
-        # Tag with the daughter's path key so process_id differs.
-        return dict(declaration), dict(declaration)
-    return state, state
-
-
-def _class_address_from_instance(instance):
-    """Generate a local:! address from an instance's class."""
-    cls = type(instance)
-    return f'local:!{cls.__module__}.{cls.__name__}'
-
-
-@dataclass(kw_only=True)
-class SharedProcessRef(Node):
-    """Reference to a shared process instance by ID.
-
-    Used in Requester/Evolver ``config_schema`` so that ``realize()``
-    resolves the reference to the actual ``PartitionedProcess`` instance
-    before ``__init__`` is called.
-
-    Document form (in config)::
-
-        {"process": {"_type": "shared_process_ref",
-                      "process_id": "ecoli-equilibrium"}}
-
-    Or as a bare string when the config_schema declares the type::
-
-        {"process": "ecoli-equilibrium"}
-    """
-    pass
-
-
-@dispatch
-def serialize(schema: SharedProcessRef, state):
-    """Serialize a SharedProcessRef: extract the process name from the instance."""
-    if isinstance(state, str):
-        return state
-    if isinstance(state, dict):
-        return state
-    # It's a PartitionedProcess instance — return its name
-    if hasattr(state, 'name'):
-        return state.name
-    return str(state)
-
-
-@dispatch
-def bundle(schema: SharedProcessRef, state, context: typing.Optional[BundleContext] = None):
-    """Bundle a SharedProcessRef: same as serialize — just the process name."""
-    return serialize(schema, state)
-
-
-@realize.dispatch
-def realize(core, schema: SharedProcessRef, state, path=()):
-    # Already resolved to an instance
-    if not isinstance(state, (str, dict)):
-        return schema, state, []
-
-    if isinstance(state, dict):
-        process_id = state.get('process_id')
-    else:
-        process_id = state
-
-    if process_id is None:
-        return schema, state, []
-
-    instance = _shared_processes.get(process_id)
-    if instance is None:
-        raise RuntimeError(
-            f"SharedProcessRef at {path}: process_id '{process_id}' "
-            f"not found. Available: {sorted(_shared_processes.keys())}. "
-            f"Ensure SharedProcess entries in the 'process' store are "
-            f"realized before step declarations.")
-    return schema, instance, []
 
 
 # ============================================================================
@@ -1941,22 +1520,18 @@ register_derived_function_resolver(_ecoli_derived_function_resolver)
 # ============================================================================
 
 ECOLI_TYPES = {
+    # 'function', 'quantity' come from bigraph_schema.BASE_TYPES.
+    # 'step', 'process', 'shared_process', 'shared_process_ref' come from
+    # process_bigraph.types.process via package discovery.
+    # vEcoli only registers vEcoli-specific types below.
     'unum': UnumUnits,
-    'quantity': Quantity,
     'csr_matrix': CSRMatrix,
     'units_array': UnitsArray,
-    'function': Function,
     'method': Method,
-    'step_instance': StepInstance,
-    'process_instance': ProcessInstance,
-    'step': StepLink,
-    'process': ProcessLink,
     'bulk_array': BulkArray,
     'unique_array': UniqueArray,
     'sim_data_ref': SimDataRef,
     'sim_data_method': SimDataMethod,
-    'shared_process': SharedProcess,
-    'shared_process_ref': SharedProcessRef,
     'sympy_matrix': SympyMatrix,
     'derived_function': DerivedFunction,
     'sim_data_object_store': SimDataObjectStore,
@@ -2061,41 +1636,3 @@ def bundle(schema: Function, state, context: typing.Optional[BundleContext] = No
     return serialize(schema, state)
 
 
-@dispatch
-def bundle(schema: SharedProcess, state, context: typing.Optional[BundleContext] = None):
-    """Bundle a SharedProcess: produce the declaration dict, bundling
-    arrays in the config through the process's config_schema."""
-    if state is None:
-        return None
-    if isinstance(state, tuple) and len(state) > 0:
-        instance = state[0]
-        address = getattr(instance, '_shared_address',
-                          _class_address_from_instance(instance))
-        config = instance.parameters if hasattr(instance, 'parameters') else {}
-        instance_core = getattr(instance, 'core', None)
-        raw_schema = getattr(instance, 'config_schema', None)
-        if instance_core and raw_schema:
-            config_schema = instance_core.access(raw_schema)
-            config = bundle(config_schema, config, context)
-        result = {
-            '_type': 'shared_process',
-            'address': address,
-            'config': config,
-        }
-        rng = getattr(instance, 'random_state', None)
-        if isinstance(rng, np.random.RandomState):
-            alg, key, pos, has_gauss, cached = rng.get_state()
-            result['rng_state'] = {
-                'alg': alg,
-                'key': key.tolist(),
-                'pos': int(pos),
-                'has_gauss': int(has_gauss),
-                'cached_gauss': float(cached),
-            }
-        internal = _capture_internal_state(instance)
-        if internal:
-            result['internal_state'] = internal
-        return result
-    if isinstance(state, dict):
-        return state
-    return serialize(schema, state)

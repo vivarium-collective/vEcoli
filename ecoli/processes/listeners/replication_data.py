@@ -37,6 +37,8 @@ class ReplicationData(Step):
         'emit_unique': 'boolean{false}',
     }
 
+    defaults = {"time_step": 1, "emit_unique": False}
+
 
     def inputs(self):
         return {

@@ -34,6 +34,11 @@ class UniqueMoleculeCounts(Step):
         'unique_ids': 'array[string]',
     }
 
+    defaults = {
+        "time_step": 1,
+        "emit_unique": False,
+    }
+
 
     def inputs(self):
         return {
