@@ -902,6 +902,52 @@ class EcoliSim:
         self.generated_initial_state = None
         self.ecoli = None
 
+        # If `composite_checkpoint_at` is set, run to that absolute
+        # sim-time, save a bundle to `composite_checkpoint_dir`, then
+        # stop. Used for pre-division iteration: run once to
+        # near-division, then reload + short-run repeatedly to
+        # exercise division logic without paying the full cell-cycle
+        # wall time each iteration. When combined with
+        # `initial_state_file`, picks up from the loaded bundle and
+        # only runs the remaining interval.
+        checkpoint_at = self.config.get('composite_checkpoint_at')
+        checkpoint_dir = self.config.get('composite_checkpoint_dir')
+        if checkpoint_at is not None and checkpoint_dir:
+            current_t = float(ecoli.state.get('global_time', 0.0))
+            interval = float(checkpoint_at) - current_t
+            if interval < 0:
+                raise ValueError(
+                    f"composite_checkpoint_at={checkpoint_at} is earlier "
+                    f"than current global_time={current_t}")
+            print(f"Running composite from t={current_t} to "
+                  f"sim-t={checkpoint_at}s ({interval}s interval)...",
+                  flush=True)
+            t0 = _time.time()
+            # Save the SINGLE-CELL pre-division state. If division
+            # fires before checkpoint_at we want to halt and save the
+            # mother so the checkpoint can be reused for iteration.
+            # Poll agent count between short runs; stop when >1 agent.
+            if interval > 0:
+                poll_s = min(60.0, interval)
+                end_t = current_t + interval
+                while float(ecoli.state.get('global_time', 0.0)) < end_t:
+                    remaining = end_t - float(
+                        ecoli.state.get('global_time', 0.0))
+                    step = min(poll_s, remaining)
+                    ecoli.run(step)
+                    if len(ecoli.state.get('agents', {})) > 1:
+                        print(f"  division fired before checkpoint_at; "
+                              f"halting at t="
+                              f"{ecoli.state.get('global_time', 0.0)}s",
+                              flush=True)
+                        break
+            elapsed = _time.time() - t0
+            print(f"  reached t={ecoli.state.get('global_time', 0.0)} "
+                  f"in {elapsed:.2f}s wall; "
+                  f"saving bundle → {checkpoint_dir}/", flush=True)
+            ecoli.save_bundle(checkpoint_dir)
+            return
+
         print(f"Running composite for {self.max_duration}s...", flush=True)
         t0 = _time.time()
         divided = False
@@ -909,6 +955,13 @@ class EcoliSim:
             ecoli.run(float(self.max_duration))
         except DivisionDetected:
             divided = True
+        # Composite engine has no StopAfterDivision — detect division
+        # by post-run agent count. The _divide sentinel walks through
+        # apply and leaves two daughters where the mother used to be.
+        if not divided:
+            agents = ecoli.state.get("agents", {})
+            if len(agents) >= 2:
+                divided = True
         elapsed = _time.time() - t0
         print(f"Completed in {elapsed:.2f} seconds, divided={divided}", flush=True)
 

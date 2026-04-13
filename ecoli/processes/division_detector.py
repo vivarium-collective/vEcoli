@@ -15,10 +15,17 @@ class DivisionDetector(Step):
     name = "division-detector"
 
     config_schema = {
-        'division_threshold': 'node',
-        'division_variable': 'node',
-        'chromosome_path': 'node',
-        'dry_mass_inc_dict': 'node',
+        # See Division.config_schema in cell_division.py for the
+        # rationale behind these union / map types — same
+        # polymorphism applies here.
+        'division_threshold': 'union[boolean,string,float]',
+        # division_variable is either a boolean (divide flag from
+        # MarkDPeriod) or a float (dry mass).
+        'division_variable': 'union[boolean,float]',
+        # Wire path tuple passed through config so downstream knows
+        # where to read the full_chromosomes store.
+        'chromosome_path': 'list[string]',
+        'dry_mass_inc_dict': 'map[unum[fg]]',
         'division_mass_multiplier': 'float{1.0}',
     }
 
@@ -38,16 +45,16 @@ class DivisionDetector(Step):
 
     def inputs(self):
         return {
-            'division_variable': 'node',
+            'division_variable': 'union[boolean,float]',
             'full_chromosomes': 'unique_array',
             'media_id': 'string',
-            'division_threshold': 'node',
+            'division_threshold': 'union[boolean,string,float]',
         }
 
     def outputs(self):
         return {
             'division_trigger': 'overwrite[boolean]',
-            'division_threshold': 'overwrite[node]',
+            'division_threshold': 'overwrite[union[boolean,string,float]]',
         }
 
     def ports_schema(self):

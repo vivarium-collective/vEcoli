@@ -597,18 +597,21 @@ def _build_flow(config, load_sim_data, configs, classes, partitioned, time_step)
 
     # Division steps
     if config.get("divide"):
-        import ecoli.composites.ecoli_master as _ecoli_master
+        from ecoli.processes.cell_division import (
+            CompositeDivision, daughter_phylogeny_id)
+        # v2 uses CompositeDivision (skips the v1 Composer roundtrip —
+        # the framework handles daughter state reconstruction via
+        # type-driven _divide_state and Link instantiation).
         division_config = {
             "division_threshold": config["division_threshold"],
             "agent_id": config["agent_id"],
-            "composer": _ecoli_master.Ecoli,
-            "composer_config": config,
             "dry_mass_inc_dict":
                 load_sim_data.sim_data.expectedDryMassIncreaseDict,
             "seed": config["seed"],
+            "daughter_ids_function": daughter_phylogeny_id,
         }
         configs["division"] = division_config
-        classes["division"] = Division
+        classes["division"] = CompositeDivision
 
         if config.get("d_period"):
             configs["mark_d_period"] = {}

@@ -91,12 +91,27 @@ class Division(Step):
 
     config_schema = {
         'agent_id': 'string',
-        'composer': 'node',
-        'composer_config': 'node',
-        'division_threshold': 'node',
-        'dry_mass_inc_dict': 'node',
+        # composer is a class reference (e.g. Ecoli composer) that
+        # Division instantiates on divide. Declared as Function so the
+        # import path round-trips through bundle.
+        'composer': 'function',
+        # composer_config is the per-run sim config used to rebuild
+        # daughter composites. A shallow map[string → node] keeps
+        # the top-level string keys typed while leaving the
+        # heterogeneous sub-values opaque.
+        'composer_config': 'map[node]',
+        # division_threshold can be:
+        #   - boolean (config default placeholder)
+        #   - string "mass_distribution" (dynamic-mass mode flag)
+        #   - float (explicit mass threshold, set after first tick in
+        #     mass_distribution mode)
+        'division_threshold': 'union[boolean,string,float]',
+        # dry_mass_inc_dict maps media_id → Unum[fg] mass increase.
+        'dry_mass_inc_dict': 'map[unum[fg]]',
         'seed': 'integer{0}',
-        'daughter_ids_function': 'node',
+        # daughter_ids_function generates daughter agent_ids at
+        # division time.
+        'daughter_ids_function': 'function',
     }
 
     defaults: Dict[str, Any] = {
@@ -126,16 +141,20 @@ class Division(Step):
 
     def inputs(self):
         return {
-            'division_variable': 'boolean',
+            # division_variable is either the dry_mass (float, when
+            # wired to 'dry_mass') or the divide flag (boolean, when
+            # wired to 'divide' via MarkDPeriod's output).
+            'division_variable': 'union[boolean,float]',
             'full_chromosome': 'unique_array',
             'media_id': 'string',
-            'division_threshold': 'node',
+            'division_threshold': 'union[boolean,string,float]',
         }
 
     def outputs(self):
         return {
             'agents': {},  # _divide sentinel writes here; agents schema already exists
-            'division_threshold': 'overwrite[boolean]',
+            # Same polymorphism as the input (see config_schema).
+            'division_threshold': 'overwrite[union[boolean,string,float]]',
         }
 
     def ports_schema(self):
@@ -209,6 +228,83 @@ class Division(Step):
 
     def next_update(self, timestep, states):
         return self.update(states, timestep)
+
+
+class CompositeDivision(Division):
+    """v2-native subclass of Division.
+
+    In process-bigraph, the ``_divide`` sentinel triggers a
+    type-driven state split (``_handle_divide_sentinel`` →
+    ``_divide_state``) that regenerates daughter stores and re-wires
+    Link edges from the schema itself. The v1 Composer machinery
+    (``self.composer(config).generate()``) is not needed — the
+    framework pulls fresh instances directly from the schema.
+
+    So this subclass:
+      - drops ``composer`` and ``composer_config`` from its config
+      - doesn't call ``generate()`` or build daughter composite dicts
+      - emits a minimal ``_divide`` sentinel with just daughter keys,
+        which is the format the v2 framework actually consumes
+    """
+
+    name = "ecoli-cell-division"
+
+    config_schema = {
+        'agent_id': 'string',
+        'division_threshold': 'union[boolean,string,float]',
+        'dry_mass_inc_dict': 'map[unum[fg]]',
+        'seed': 'integer{0}',
+        'daughter_ids_function': 'function',
+    }
+
+    def __init__(self, parameters=None):
+        # Bypass Division.__init__ (which requires composer /
+        # composer_config). Do Step.__init__ directly and populate
+        # just the v2-relevant attributes.
+        parameters = parameters or {}
+        Step.__init__(self, parameters)
+        self.agent_id = self.parameters["agent_id"]
+        self.random_state = np.random.RandomState(seed=self.parameters["seed"])
+
+        self.division_mass_multiplier = 1
+        if self.parameters["division_threshold"] == "mass_distribution":
+            division_random_seed = (
+                binascii.crc32(b"CellDivision", self.parameters["seed"]) & 0xFFFFFFFF
+            )
+            division_random_state = np.random.RandomState(seed=division_random_seed)
+            self.division_mass_multiplier = division_random_state.normal(
+                loc=1.0, scale=0.1
+            )
+        self.dry_mass_inc_dict = self.parameters["dry_mass_inc_dict"]
+
+    def update(self, states, interval=None):
+        if states["division_threshold"] == "mass_distribution":
+            current_media_id = states["media_id"]
+            return {
+                "division_threshold": (
+                    states["division_variable"]
+                    + self.dry_mass_inc_dict[current_media_id].asNumber(units.fg)
+                    * self.division_mass_multiplier
+                )
+            }
+
+        division_variable = states["division_variable"]
+        if (division_variable >= states["division_threshold"]) and (
+            states["full_chromosome"]["_entryState"].sum() >= 2
+        ):
+            daughter_ids = self.parameters["daughter_ids_function"](self.agent_id)
+            print(f"DIVIDE! MOTHER {self.agent_id} -> DAUGHTERS {daughter_ids}")
+            # v2 framework only needs the daughter keys; state split
+            # is schema-driven via _divide_state.
+            return {
+                "agents": {
+                    "_divide": {
+                        "mother": self.agent_id,
+                        "daughters": [{"key": did} for did in daughter_ids],
+                    }
+                }
+            }
+        return {}
 
 
 class DivisionDetected(Exception):

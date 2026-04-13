@@ -42,6 +42,7 @@ from bigraph_schema.methods import (
 )
 from bigraph_schema.methods.handle_parameters import align_parameters
 from bigraph_schema import capture_object_state, restore_object_value
+from bigraph_schema.methods.bundle import register_derived_function_resolver
 
 from vivarium.core.process import Process as VivariumProcess, Step as VivariumStep
 from process_bigraph import Step as BigraphStep, Process as BigraphProcess, StepLink, ProcessLink
@@ -113,18 +114,24 @@ def serialize(schema: Function, state):
 def realize(core, schema: Function, encode, path=()):
     if callable(encode):
         return schema, encode, []
-    elif isinstance(encode, dict):
-        module_name = encode.get('module') or str(schema.module)
-        instance_name = encode.get('instance') or str(schema.instance)
-        attribute_name = encode.get('attribute') or str(schema.attribute)
-        mod = importlib.import_module(module_name)
-        if instance_name and instance_name != 'None':
-            cls = getattr(mod, instance_name)
-            func = getattr(cls, attribute_name)
-        else:
-            func = getattr(mod, attribute_name)
-        return schema, func, []
-    return schema, encode, []
+    if not isinstance(encode, dict):
+        # Nothing we can do — no function reference, pass through.
+        return schema, encode, []
+    # Require a real module/attribute pair. The schema's field types
+    # (String nodes) are NOT valid fallbacks — their str() produces
+    # `'String(_default=None)'` which isn't an importable module.
+    module_name = encode.get('module')
+    attribute_name = encode.get('attribute')
+    if not module_name or not attribute_name:
+        return schema, encode, []
+    instance_name = encode.get('instance')
+    mod = importlib.import_module(module_name)
+    if instance_name and instance_name != 'None':
+        cls = getattr(mod, instance_name)
+        func = getattr(cls, attribute_name)
+    else:
+        func = getattr(mod, attribute_name)
+    return schema, func, []
 
 
 @dispatch
@@ -1766,6 +1773,62 @@ def _install_sim_data_post_realize_hooks():
 
 
 _install_sim_data_post_realize_hooks()
+
+
+# ============================================================================
+# Derived function resolver — vEcoli-specific naming conventions
+# ============================================================================
+#
+# sim_data dataclasses cache lazily-compiled ODE rate/derivative lambdas
+# alongside their sympy source expressions. The bundle machinery in
+# bigraph_schema needs to know how to reconstruct these lambdas from
+# the source fields on load. Rather than baking vEcoli conventions
+# into the framework, we register a resolver here.
+
+def _ecoli_derived_function_resolver(key, obj_dict):
+    """Map a DerivedFunction field name + parent __dict__ to its
+    sympy source field and the wholecell builder function.
+
+    Conventions (vEcoli / wholecell):
+    - Field name containing 'jacobian' → source is 'symbolic_rates_jacobian'
+    - Otherwise → source is 'symbolic_rates'
+    - Builder is selected from the compiled function's argument signature:
+        ('t', 'y', 'kf', 'kr') → wholecell.utils.build_ode.rates[_jacobian]
+        ('y', 't')             → wholecell.utils.build_ode.derivatives[_jacobian]
+    """
+    if 'jacobian' in key:
+        source_field = 'symbolic_rates_jacobian'
+    else:
+        source_field = 'symbolic_rates'
+
+    if source_field not in obj_dict:
+        return None, None, None
+
+    value = obj_dict[key]
+    func = value[0] if isinstance(value, tuple) else value
+    if not callable(func) or not hasattr(func, '__code__'):
+        return None, None, None
+
+    args = func.__code__.co_varnames[:func.__code__.co_argcount]
+    if args == ('t', 'y', 'kf', 'kr'):
+        builder = (
+            'wholecell.utils.build_ode.rates_jacobian'
+            if 'jacobian' in key else
+            'wholecell.utils.build_ode.rates'
+        )
+    elif args == ('y', 't'):
+        builder = (
+            'wholecell.utils.build_ode.derivatives_jacobian'
+            if 'jacobian' in key else
+            'wholecell.utils.build_ode.derivatives'
+        )
+    else:
+        return None, None, None
+
+    return source_field, builder, isinstance(value, tuple)
+
+
+register_derived_function_resolver(_ecoli_derived_function_resolver)
 
 
 # ============================================================================

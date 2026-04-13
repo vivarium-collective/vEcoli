@@ -1991,7 +1991,7 @@ def calculate_trna_charging(
     return new_fraction_charged, v_rib, total_synthesis, total_import, total_export
 
 
-@njit(error_model="numpy")
+@njit(error_model="numpy", cache=True)
 def dcdt_jit(
     t,
     c,
