@@ -143,7 +143,7 @@ class RnapData(Step):
             return True
         return False
 
-    def update(self, states, interval=None):
+    def next_update(self, timestep, states):
         # Read coordinates of all active RNAPs
         coordinates, domain_indexes, RNAP_unique_indexes = attrs(
             states["active_RNAPs"], ["coordinates", "domain_index", "unique_index"]
@@ -163,15 +163,9 @@ class RnapData(Step):
 
         RNA_index_counts = dict(zip(*np.unique(ribosome_RNA_index, return_counts=True)))
 
-        try:
-            partial_RNA_to_RNAP_mapping, _ = get_mapping_arrays(
-                partial_RNA_RNAP_indexes, RNAP_unique_indexes
-            )
-        except IndexError:
-            # State inconsistency — RNAs and RNAPs may be out of sync
-            # when updates are applied in different order than v1.
-            # Use identity mapping as fallback.
-            partial_RNA_to_RNAP_mapping = np.arange(len(partial_RNA_RNAP_indexes))
+        partial_RNA_to_RNAP_mapping, _ = get_mapping_arrays(
+            partial_RNA_RNAP_indexes, RNAP_unique_indexes
+        )
 
         update = {
             "listeners": {

@@ -487,7 +487,7 @@ class MetabolismRedux(Step):
             return True
         return False
 
-    def update(self, states, interval=None):
+    def next_update(self, timestep, states):
         # Initialize indices
         if self.homeostatic_metabolite_idx is None:
             bulk_ids = states["bulk"]["id"]
@@ -633,7 +633,7 @@ class MetabolismRedux(Step):
             )
             aa_in_media[self.removed_aa_uptake] = False
             exchange_rates = (
-                states["polypeptide_elongation"]["aa_exchange_rates"] * self.timestep
+                states["polypeptide_elongation"]["aa_exchange_rates"] * timestep
             )
             aa_uptake_package = (
                 exchange_rates[aa_in_media],

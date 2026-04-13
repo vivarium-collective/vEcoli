@@ -526,11 +526,7 @@ class Metabolism(Step):
             return True
         return False
 
-    def update(self, states, interval=None):
-        timestep = states.get('timestep', 1)
-        return self._do_update(timestep, states)
-
-    def _do_update(self, timestep, states):
+    def next_update(self, timestep, states):
         # At t=0, convert all strings to indices
         if self.metabolite_idx is None:
             self.metabolite_idx = bulk_name_to_idx(

@@ -119,12 +119,8 @@ class MassListener(Step):
         # molecule indexes and masses
         self.bulk_ids = self.parameters["bulk_ids"]
         self.bulk_masses = self.parameters["bulk_masses"]
-        if self.bulk_masses is None:
-            self.bulk_masses = np.zeros([1, 9])
         self.unique_ids = self.parameters["unique_ids"]
         self.unique_masses = self.parameters["unique_masses"]
-        if self.unique_masses is None:
-            self.unique_masses = np.zeros([1, 9])
 
         self.submass_listener_indices = {
             "rna": np.array(
@@ -283,7 +279,7 @@ class MassListener(Step):
     def update_condition(self, timestep, states):
         return (states["global_time"] % states["timestep"]) == 0
 
-    def update(self, states, interval=None):
+    def next_update(self, timestep, states):
         if self.bulk_idx is None:
             bulk_ids = states["bulk"]["id"]
             self.bulk_idx = bulk_name_to_idx(self.bulk_ids, bulk_ids)

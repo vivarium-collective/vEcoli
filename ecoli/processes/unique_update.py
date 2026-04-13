@@ -33,5 +33,5 @@ class UniqueUpdate(Step):
             for unique_mol in self.unique_topo
         }
 
-    def update(self, states, interval=None):
+    def next_update(self, timestep, states):
         return {unique_mol: {"update": True} for unique_mol in self.unique_topo.keys()}

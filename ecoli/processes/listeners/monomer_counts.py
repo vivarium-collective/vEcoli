@@ -190,7 +190,7 @@ class MonomerCounts(Step):
     def update_condition(self, timestep, states):
         return (states["global_time"] % states["timestep"]) == 0
 
-    def update(self, states, interval=None):
+    def next_update(self, timestep, states):
         if self.monomer_idx is None:
             bulk_ids = states["bulk"]["id"]
             self.bulk_molecule_idx = bulk_name_to_idx(self.bulk_molecule_ids, bulk_ids)

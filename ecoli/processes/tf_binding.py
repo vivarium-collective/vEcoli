@@ -235,7 +235,7 @@ class TfBinding(Step):
             return True
         return False
 
-    def update(self, states, interval=None):
+    def next_update(self, timestep, states):
         # At t=0, convert all strings to indices
         if self.active_tf_idx is None:
             bulk_ids = states["bulk"]["id"]

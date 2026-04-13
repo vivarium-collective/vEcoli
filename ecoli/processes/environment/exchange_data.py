@@ -62,7 +62,7 @@ class ExchangeData(Step):
             },
         }
 
-    def update(self, states, interval=None):
+    def next_update(self, timestep, states):
         env_concs = {
             mol: states["boundary"]["external"][mol]
             for mol in self.environment_molecules

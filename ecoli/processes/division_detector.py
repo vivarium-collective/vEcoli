@@ -77,7 +77,7 @@ class DivisionDetector(Step):
             },
         }
 
-    def update(self, states, interval=None):
+    def next_update(self, timestep, states):
         update = {}
         division_threshold = states["division_threshold"]
         if division_threshold == "mass_distribution":
@@ -92,6 +92,3 @@ class DivisionDetector(Step):
         ):
             update["division_trigger"] = True
         return update
-
-    def next_update(self, timestep, states):
-        return self.update(states, timestep)

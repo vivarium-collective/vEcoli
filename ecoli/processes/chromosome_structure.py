@@ -293,7 +293,7 @@ class ChromosomeStructure(Step):
             return True
         return False
 
-    def update(self, states, interval=None):
+    def next_update(self, timestep, states):
         # At t=0, convert all strings to indices
         if self.inactive_RNAPs_idx is None:
             self.fragmentBasesIdx = bulk_name_to_idx(

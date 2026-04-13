@@ -132,7 +132,7 @@ class RNACounts(Step):
     def update_condition(self, timestep, states):
         return (states["global_time"] % states["timestep"]) == 0
 
-    def update(self, states, interval=None):
+    def next_update(self, timestep, states):
         # Get attributes of mRNAs
         TU_indexes, can_translate, is_full_transcript = attrs(
             states["RNAs"], ["TU_index", "can_translate", "is_full_transcript"]

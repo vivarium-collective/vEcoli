@@ -51,7 +51,7 @@ class MarkDPeriod(Step):
             },
         }
 
-    def update(self, states, interval=None):
+    def next_update(self, timestep, states):
         division_time, has_triggered_division = attrs(
             states["full_chromosome"], ["division_time", "has_triggered_division"]
         )
@@ -72,9 +72,6 @@ class MarkDPeriod(Step):
                 "divide": True,
             }
         return {}
-
-    def next_update(self, timestep, states):
-        return self.update(states, timestep)
 
 
 class Division(Step):
@@ -173,7 +170,7 @@ class Division(Step):
             },
         }
 
-    def update(self, states, interval=None):
+    def next_update(self, timestep, states):
         if states["division_threshold"] == "mass_distribution":
             current_media_id = states["media_id"]
             return {
@@ -225,9 +222,6 @@ class Division(Step):
                 }
             }
         return {}
-
-    def next_update(self, timestep, states):
-        return self.update(states, timestep)
 
 
 class CompositeDivision(Division):
@@ -346,8 +340,5 @@ class StopAfterDivision(Process):
             raise DivisionDetected("More than one cell in agents store.")
         return False
 
-    def update(self, states, interval=None):
-        return {}
-
     def next_update(self, timestep, states):
-        return {}
+        raise RuntimeError("This should never be called.")

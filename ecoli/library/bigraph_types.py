@@ -1436,6 +1436,37 @@ def render(schema: SharedProcess, defaults=False):
     return 'shared_process'
 
 
+@divide.dispatch
+def divide(schema: SharedProcess, state, context=None, path=(), rng=None):
+    """Each daughter gets a FRESH process instance.
+
+    Without this, ``divide(Node)`` would share the mother's instance
+    by reference between both daughters. That instance carries
+    per-tick state (``request_set``, ``n_unique_RNAs_to_deactivate``,
+    etc.) computed against mother's full state, which becomes
+    inconsistent against either daughter's split state — and any
+    cross-daughter state mutation through the shared instance
+    corrupts the other.
+
+    We serialize the mother's declaration (address + config), drop
+    the mid-tick rng/internal snapshots (they belong to mother), and
+    return that dict for each daughter. ``realize(SharedProcess)``
+    re-instantiates from address+config on the next pass.
+    """
+    if state is None:
+        return None, None
+    declaration = serialize(schema, state)
+    if isinstance(declaration, dict):
+        # Strip mid-tick mother state so the daughters bootstrap clean.
+        declaration = {k: v for k, v in declaration.items()
+                       if k not in ('rng_state', 'internal_state')}
+        # Each daughter gets its own dict so realize doesn't share the
+        # registered instance across daughters via _shared_processes.
+        # Tag with the daughter's path key so process_id differs.
+        return dict(declaration), dict(declaration)
+    return state, state
+
+
 def _class_address_from_instance(instance):
     """Generate a local:! address from an instance's class."""
     cls = type(instance)

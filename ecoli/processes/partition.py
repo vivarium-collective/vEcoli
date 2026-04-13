@@ -132,10 +132,11 @@ class Requester(Step):
         self.cached_bulk_ports = list(ports["request"].keys())
         return ports
 
-    def update(self, states, interval=None):
-        proc_state = states.get("process")
-        if proc_state is None or (isinstance(proc_state, (list, tuple)) and len(proc_state) == 0):
-            return {}
+    def next_update(self, timestep, states):
+        proc_state = states["process"]
+        # v1 wires "process" as ``(instance,)`` tuple; v2's
+        # SharedProcessRef.realize returns the bare instance. Tolerate
+        # both so the same code runs on either engine.
         process = proc_state[0] if isinstance(proc_state, (list, tuple)) else proc_state
         request = process.calculate_request(states["timestep"], states)
         process.request_set = True
@@ -252,15 +253,13 @@ class Evolver(Step):
         }
         return ports
 
-    def update(self, states, interval=None):
+    def next_update(self, timestep, states):
         allocations = states.pop("allocate")
         for key, value in allocations.items():
             if isinstance(value, list):
                 value = np.array(value)
             states[key] = value
-        proc_state = states.get("process")
-        if proc_state is None or (isinstance(proc_state, (list, tuple)) and len(proc_state) == 0):
-            return {}
+        proc_state = states["process"]
         process = proc_state[0] if isinstance(proc_state, (list, tuple)) else proc_state
 
         # If the Requester has not run yet, skip the Evolver's update to
@@ -331,12 +330,7 @@ class PartitionedProcess(Process):
     def evolve_state(self, timestep, states):
         return {}
 
-    def update(self, states, interval=None):
-        timestep = states.get('timestep', interval or 1)
-        return self._do_update(timestep, states)
-
-    def _do_update(self, timestep, states):
-        """Combined request + evolve for standalone (non-partitioned) use."""
+    def next_update(self, timestep, states):
         if self.request_only:
             return self.calculate_request(timestep, states)
         if self.evolve_only:

@@ -129,7 +129,7 @@ class RnaSynthProb(Step):
     def update_condition(self, timestep, states):
         return (states["global_time"] % states["timestep"]) == 0
 
-    def update(self, states, interval=None):
+    def next_update(self, timestep, states):
         TU_indexes, all_coordinates, all_domains, bound_TFs = attrs(
             states["promoters"], ["TU_index", "coordinates", "domain_index", "bound_TF"]
         )

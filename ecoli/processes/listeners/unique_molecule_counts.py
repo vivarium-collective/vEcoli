@@ -94,7 +94,7 @@ class UniqueMoleculeCounts(Step):
     def update_condition(self, timestep, states):
         return (states["global_time"] % states["timestep"]) == 0
 
-    def update(self, states, interval=None):
+    def next_update(self, timestep, states):
         return {
             "listeners": {
                 "unique_molecule_counts": {

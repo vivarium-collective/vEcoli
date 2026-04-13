@@ -52,7 +52,7 @@ class MediaUpdate(Step):
             "environment": {"media_id": {"_default": ""}},
         }
 
-    def update(self, states, interval=None):
+    def next_update(self, timestep, states):
         if states["environment"]["media_id"] == self.curr_media_id:
             return {}
 

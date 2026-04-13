@@ -166,7 +166,7 @@ class RibosomeData(Step):
             return True
         return False
 
-    def update(self, states, interval=None):
+    def next_update(self, timestep, states):
         # Get attributes of RNAs and ribosomes
         (is_full_transcript_RNA, unique_index_RNA, can_translate, TU_index) = attrs(
             states["RNAs"],

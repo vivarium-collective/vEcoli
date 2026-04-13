@@ -47,10 +47,10 @@ class GlobalClock(Process):
             for next_update_time in view["next_update_time"].values()
         )
 
-    def update(self, states, interval):
+    def next_update(self, timestep, states):
         """
-        The interval that we increment global_time by is the same minimum time step
+        The timestep that we increment global_time by is the same minimum time step
         that we calculated in calculate_timestep. This guarantees that we never
         accidentally skip over a process update time.
         """
-        return {"global_time": interval}
+        return {"global_time": timestep}

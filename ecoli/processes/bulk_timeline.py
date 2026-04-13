@@ -44,9 +44,6 @@ class BulkTimelineProcess(Process):
                 ports[port] = 'node'
         return ports
 
-    def update(self, states, interval=None):
-        return self._compute(states, interval or self.parameters.get('time_step', 1.0))
-
     def ports_schema(self):
         schema = {
             "bulk": numpy_schema("bulk"),
@@ -55,7 +52,7 @@ class BulkTimelineProcess(Process):
         other_ports = {port: {} for port in self.timeline_ports}
         return {**schema, **other_ports}
 
-    def _compute(self, states, timestep):
+    def next_update(self, timestep, states):
         time = states["global"]["time"]
         update = {"global": {"time": timestep}}
         new_timeline = self.timeline.copy()
@@ -95,6 +92,3 @@ class BulkTimelineProcess(Process):
             break
         self.timeline = new_timeline
         return update
-
-    def next_update(self, timestep, states):
-        return self._compute(states, timestep)

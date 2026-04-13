@@ -98,7 +98,7 @@ class ReplicationData(Step):
     def update_condition(self, timestep, states):
         return (states["global_time"] % states["timestep"]) == 0
 
-    def update(self, states, interval=None):
+    def next_update(self, timestep, states):
         fork_coordinates, fork_domains, fork_unique_index = attrs(
             states["active_replisomes"], ["coordinates", "domain_index", "unique_index"]
         )
