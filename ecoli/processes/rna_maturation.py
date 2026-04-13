@@ -26,10 +26,10 @@ class RnaMaturation(PartitionedProcess):
 
     config_schema = {
         'stoich_matrix': 'csr_matrix[99|49,integer[64]]',
-        'enzyme_matrix': 'array[integer]',
-        'n_required_enzymes': 'array[integer]',
+        'enzyme_matrix': 'array[integer[64]]',
+        'n_required_enzymes': 'array[integer[64]]',
         'degraded_nt_counts': 'array[float]',
-        'n_ppi_added': 'array[integer]',
+        'n_ppi_added': 'array[integer[64]]',
         'main_23s_rRNA_id': 'string',
         'main_16s_rRNA_id': 'string',
         'main_5s_rRNA_id': 'string',
@@ -62,9 +62,9 @@ class RnaMaturation(PartitionedProcess):
                 'rna_maturation_listener': {
                     'total_maturation_events': 'overwrite[integer]{0}',
                     'total_degraded_ntps': 'overwrite[integer]{0}',
-                    'unprocessed_rnas_consumed': 'overwrite[array[integer]]',
-                    'mature_rnas_generated': 'overwrite[array[integer]]',
-                    'maturation_enzyme_counts': 'overwrite[array[integer]]',
+                    'unprocessed_rnas_consumed': 'overwrite[array[integer[64]]]',
+                    'mature_rnas_generated': 'overwrite[array[integer[64]]]',
+                    'maturation_enzyme_counts': 'overwrite[array[integer[64]]]',
                 },
             },
         }

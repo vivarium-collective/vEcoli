@@ -39,7 +39,7 @@ class Complexation(PartitionedProcess):
     topology = TOPOLOGY
 
     config_schema = {
-        'stoichiometry': 'array[integer]',
+        'stoichiometry': 'array[integer[64]]',
         'rates': 'array[float]',
         'molecule_names': 'list[string]',
         'seed': 'integer',
@@ -58,7 +58,7 @@ class Complexation(PartitionedProcess):
             'bulk': 'bulk_array',
             'listeners': {
                 'complexation_listener': {
-                    'complexation_events': 'overwrite[array[integer]]',
+                    'complexation_events': 'overwrite[array[integer[64]]]',
                 },
             },
         }

@@ -36,7 +36,7 @@ class Equilibrium(PartitionedProcess):
         'jit': 'boolean',
         'n_avogadro': 'float',
         'cell_density': 'float',
-        'stoichMatrix': 'array[integer]',
+        'stoichMatrix': 'array[integer[64]]',
         'fluxesAndMoleculesToSS': 'method',
         'moleculeNames': 'list[string]',
         'seed': 'integer',

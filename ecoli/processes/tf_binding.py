@@ -51,7 +51,12 @@ class TfBinding(Step):
         'time_step': {'_type': 'integer', '_default': 1},
         'tf_ids': 'list[string]',
         'rna_ids': 'array[string]',
-        'delta_prob': {'_type': 'node', '_default': {"deltaI": [], "deltaJ": [], "deltaV": []}},
+        'delta_prob': {
+            'deltaI': 'array[integer[64]]',
+            'deltaJ': 'array[integer[64]]',
+            'deltaV': 'array[float[64]]',
+            'shape': 'tuple[integer,integer]',
+        },
         'n_avogadro': {'_type': 'unum[float,1/mol]', '_default': 6.02214076e23},
         'cell_density': {'_type': 'unum[float,g/L]', '_default': 1100},
         'p_promoter_bound_tf': {'_type': 'method', '_default': None},

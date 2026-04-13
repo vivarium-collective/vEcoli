@@ -37,9 +37,9 @@ class RibosomeData(Step):
         'monomer_ids': 'list[string]',
         'n_monomers': {'_type': 'integer', '_default': 0},
         'rRNA_cistron_tu_mapping_matrix': 'csr_matrix[22|7,integer[64]]',
-        'rRNA_is_5S': 'array[integer]',
-        'rRNA_is_16S': 'array[integer]',
-        'rRNA_is_23S': 'array[integer]',
+        'rRNA_is_5S': 'array[boolean]',
+        'rRNA_is_16S': 'array[boolean]',
+        'rRNA_is_23S': 'array[boolean]',
         'time_step': 'float{1.0}',
         'emit_unique': 'boolean{false}',
     }
@@ -49,7 +49,7 @@ class RibosomeData(Step):
         return {
             'listeners': {
                 'ribosome_data': {
-                    'rRNA_initiated_TU': f'array[{self.n_rRNA_TUs},integer]',
+                    'rRNA_initiated_TU': f'array[{self.n_rRNA_TUs},integer[64]]',
                     'rRNA_init_prob_TU': f'array[{self.n_rRNA_TUs},float]',
                 },
             },
@@ -65,14 +65,14 @@ class RibosomeData(Step):
             'listeners': {
                 'ribosome_data': {
                     # Counts (dimensionless integers)
-                    'n_ribosomes_per_transcript': f'array[{self.n_monomers},integer]',
-                    'n_ribosomes_on_partial_mRNA_per_transcript': f'array[{self.n_monomers},integer]',
+                    'n_ribosomes_per_transcript': f'array[{self.n_monomers},integer[64]]',
+                    'n_ribosomes_on_partial_mRNA_per_transcript': f'array[{self.n_monomers},integer[64]]',
                     'total_rRNA_initiated': 'overwrite[integer]{0}',
                     'rRNA5S_initiated': 'overwrite[integer]{0}',
                     'rRNA16S_initiated': 'overwrite[integer]{0}',
                     'rRNA23S_initiated': 'overwrite[integer]{0}',
-                    'mRNA_TU_index': 'array[integer]',
-                    'n_ribosomes_on_each_mRNA': 'array[integer]',
+                    'mRNA_TU_index': 'array[integer[64]]',
+                    'n_ribosomes_on_each_mRNA': 'array[integer[64]]',
                     # Probabilities (dimensionless floats in [0,1])
                     'total_rRNA_init_prob': 'overwrite[float]{0.0}',
                     'rRNA5S_init_prob': 'overwrite[float]{0.0}',

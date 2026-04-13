@@ -59,16 +59,16 @@ class RnaSynthProb(Step):
     def outputs(self):
         return {
             'rna_synth_prob': {
-                'promoter_copy_number': f'array[{self.n_TU},integer]',
-                'gene_copy_number': f'array[{self.n_cistron},integer]',
-                'bound_TF_indexes': 'array[integer]',
-                'bound_TF_coordinates': 'array[integer]',
+                'promoter_copy_number': f'array[{self.n_TU},integer[64]]',
+                'gene_copy_number': f'array[{self.n_cistron},integer[64]]',
+                'bound_TF_indexes': 'array[integer[64]]',
+                'bound_TF_coordinates': 'array[integer[64]]',
                 'bound_TF_domains': 'array[integer]',
                 # Probabilities — dimensionless floats in [0, 1]
                 'expected_rna_init_per_cistron': f'array[{self.n_cistron},float]',
                 'actual_rna_synth_prob_per_cistron': f'array[{self.n_cistron},float]',
                 'target_rna_synth_prob_per_cistron': f'array[{self.n_cistron},float]',
-                'n_bound_TF_per_cistron': f'array[{self.n_cistron},integer]',
+                'n_bound_TF_per_cistron': f'array[{self.n_cistron},integer[16]]',
             },
         }
 

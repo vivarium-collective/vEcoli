@@ -11,7 +11,10 @@ class UniqueUpdate(Step):
 
     config_schema = {
         'emit_unique': 'boolean{false}',
-        'unique_topo': 'map[string]',
+        # unique_topo values are path tuples like ('unique', 'DnaA_box'),
+        # NOT scalar strings. Declaring them as 'map[string]' stringifies
+        # the tuples on save → 'map[tuple[string]]' preserves structure.
+        'unique_topo': 'map[tuple[string]]',
     }
 
     def inputs(self):

@@ -50,7 +50,7 @@ class PolypeptideInitiation(PartitionedProcess):
     topology = TOPOLOGY
 
     config_schema = {
-        'protein_lengths': 'array[integer]',
+        'protein_lengths': 'array[integer[64]]',
         'translation_efficiencies': 'array[float]',
         'active_ribosome_fraction': 'map[float]',
         'elongation_rates': 'map[unum[float,amino_acid/s]]',
@@ -60,7 +60,7 @@ class PolypeptideInitiation(PartitionedProcess):
         'cistron_start_end_pos_in_tu': 'map[tuple[integer,integer],tuple[integer,integer]]',
         'tu_ids': 'array[string]',
         'active_ribosome_footprint_size': 'unum[nt]',
-        'cistron_to_monomer_mapping': 'array[integer]',
+        'cistron_to_monomer_mapping': 'array[integer[64]]',
         'cistron_tu_mapping_matrix': 'csr_matrix[4538|3277,integer[64]]',
         'monomer_index_to_cistron_index': 'map[integer,integer]',
         'monomer_index_to_tu_indexes': 'map[integer,array[integer]]',
@@ -94,7 +94,7 @@ class PolypeptideInitiation(PartitionedProcess):
                 'ribosome_data': {
                     'did_initialize': 'overwrite[integer]{0}',
                     'ribosome_init_event_per_monomer': {
-                        '_type': 'overwrite[array[integer]]',
+                        '_type': 'overwrite[array[integer[64]]]',
                         '_default': [0] * len(self.monomer_ids),
                     },
                     'target_prob_translation_per_transcript': {

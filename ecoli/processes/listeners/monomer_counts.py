@@ -82,7 +82,7 @@ class MonomerCounts(Step):
     def outputs(self):
         return {
             'listeners': {
-                'monomer_counts': f'array[{self.n_monomers},integer]',
+                'monomer_counts': f'array[{self.n_monomers},integer[64]]',
             },
         }
 

@@ -42,9 +42,9 @@ class ProteinDegradation(PartitionedProcess):
         'raw_degradation_rate': 'array[float]',
         'water_id': 'string',
         'amino_acid_ids': 'list[string]',
-        'amino_acid_counts': 'array[integer]',
+        'amino_acid_counts': 'array[integer[64]]',
         'protein_ids': 'array[string]',
-        'protein_lengths': 'array[integer]',
+        'protein_lengths': 'array[integer[64]]',
         'seed': 'integer',
     }
 

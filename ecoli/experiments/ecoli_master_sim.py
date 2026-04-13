@@ -839,9 +839,18 @@ class EcoliSim:
         composite document is assembled by
         :py:func:`ecoli.composites.ecoli_composite.build_composite_native`
         without instantiating the v1 vivarium composer.
+
+        Division and daughter handoff mirror the vivarium path:
+        - If ``config['initial_state_file']`` points at a v2 bundle
+          directory, the composite is loaded from that bundle instead
+          of built from sim_data.
+        - On ``DivisionDetected``, one bundle per daughter is written
+          under ``config['daughter_outdir']`` (``daughter_state_{i}/``)
+          so the next generation can reload via ``--initial_state_file``.
         """
         from ecoli.composites.ecoli_composite import build_composite_native
         from ecoli.library.bigraph_types import ECOLI_TYPES
+        from ecoli.processes.cell_division import DivisionDetected
         from process_bigraph import Composite
         from bigraph_schema import allocate_core
         import time as _time
@@ -865,15 +874,24 @@ class EcoliSim:
         core = allocate_core()
         core.register_types(ECOLI_TYPES)
 
-        print("Building composite document directly from sim_data...", flush=True)
-        t0 = _time.time()
-        state = build_composite_native(core, self.config)
-        print(f"  Built in {_time.time()-t0:.2f}s", flush=True)
+        initial_bundle = self.config.get("initial_state_file")
+        if initial_bundle and os.path.isdir(
+                self.config.get("initial_state_file")
+                if os.path.isabs(initial_bundle) else initial_bundle):
+            print(f"Loading composite from bundle {initial_bundle}...", flush=True)
+            t0 = _time.time()
+            ecoli = Composite.load_bundle(initial_bundle, core=core)
+            print(f"  Loaded in {_time.time()-t0:.2f}s", flush=True)
+        else:
+            print("Building composite document directly from sim_data...", flush=True)
+            t0 = _time.time()
+            state = build_composite_native(core, self.config)
+            print(f"  Built in {_time.time()-t0:.2f}s", flush=True)
 
-        print("Creating composite (with realize)...", flush=True)
-        t0 = _time.time()
-        ecoli = Composite({'schema': {}, 'state': state}, core=core)
-        print(f"  Composite created in {_time.time()-t0:.2f}s", flush=True)
+            print("Creating composite (with realize)...", flush=True)
+            t0 = _time.time()
+            ecoli = Composite({'schema': {}, 'state': state}, core=core)
+            print(f"  Composite created in {_time.time()-t0:.2f}s", flush=True)
 
         # Steps should only run when triggered by global_clock,
         # not from initial state. Clear to_run so the first cycle
@@ -886,9 +904,42 @@ class EcoliSim:
 
         print(f"Running composite for {self.max_duration}s...", flush=True)
         t0 = _time.time()
-        ecoli.run(float(self.max_duration))
+        divided = False
+        try:
+            ecoli.run(float(self.max_duration))
+        except DivisionDetected:
+            divided = True
         elapsed = _time.time() - t0
-        print(f"Completed in {elapsed:.2f} seconds", flush=True)
+        print(f"Completed in {elapsed:.2f} seconds, divided={divided}", flush=True)
+
+        if divided and self.daughter_outdir:
+            self._save_composite_daughters(ecoli)
+
+    def _save_composite_daughters(self, ecoli):
+        """Write each daughter as its own bundle directory under
+        ``daughter_outdir`` (mirrors the per-daughter JSON files v1
+        writes in ``update_experiment``). Also records the division
+        time and daughter paths for Nextflow."""
+        import copy as _copy
+        agents = ecoli.state.get("agents", {})
+        if len(agents) != 2:
+            print(f"  WARNING: expected 2 daughters post-divide, got {len(agents)}")
+        non_agent_state = {k: v for k, v in ecoli.state.items() if k != "agents"}
+        for i, (agent_id, agent_state) in enumerate(sorted(agents.items())):
+            daughter_dir = f"{self.daughter_outdir.rstrip('/')}/daughter_state_{i}"
+            # Prune the composite to this single daughter and save as bundle.
+            original_agents = ecoli.state["agents"]
+            try:
+                ecoli.state["agents"] = {agent_id: agent_state}
+                ecoli.save_bundle(daughter_dir)
+            finally:
+                ecoli.state["agents"] = original_agents
+            with open(f"daughter_state_{i}_uri.txt", "w") as f:
+                f.write(daughter_dir)
+        with open("division_time.sh", "w") as f:
+            f.write(f"export division_time={ecoli.state.get('global_time', 0.0)}")
+        print(f"  wrote {len(agents)} daughter bundle(s) to "
+              f"{self.daughter_outdir}", flush=True)
 
     def run(self):
         """Create and run an EcoliSim experiment. If the simulation reaches

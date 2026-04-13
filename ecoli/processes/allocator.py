@@ -65,8 +65,8 @@ class Allocator(Step):
             'allocator_rng': 'random_state',
             'listeners': {
                 'atp': {
-                    'atp_requested': f'array[{self.n_processes},integer]',
-                    'atp_allocated_initial': f'array[{self.n_processes},integer]',
+                    'atp_requested': f'array[{self.n_processes},integer[64]]',
+                    'atp_allocated_initial': f'array[{self.n_processes},integer[64]]',
                 },
             },
         }
@@ -78,8 +78,8 @@ class Allocator(Step):
             'listeners': {
                 'atp': {
                     # length n_processes; written as numpy arrays
-                    'atp_requested': f'array[{self.n_processes},integer]',
-                    'atp_allocated_initial': f'array[{self.n_processes},integer]',
+                    'atp_requested': f'array[{self.n_processes},integer[64]]',
+                    'atp_allocated_initial': f'array[{self.n_processes},integer[64]]',
                 },
             },
         }

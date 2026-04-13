@@ -90,7 +90,7 @@ class ChromosomeStructure(Step):
         'n_TFs': 'integer{1}',
         'n_amino_acids': 'integer{1}',
         'n_fragment_bases': 'integer{1}',
-        'replichore_lengths': {'_type': 'array[integer]', '_default': [0, 0]},
+        'replichore_lengths': 'array[integer[64]]',
         'relaxed_DNA_base_pairs_per_turn': 'integer{1}',
         'terC_index': 'integer{-1}',
         'calculate_superhelical_densities': 'boolean{false}',
@@ -122,7 +122,7 @@ class ChromosomeStructure(Step):
             'bulk': 'bulk_array',
             'listeners': {
                 'rnap_data': {
-                    'active_rnap_n_bound_ribosomes': 'array[integer]',
+                    'active_rnap_n_bound_ribosomes': 'array[integer[64]]',
                 },
             },
             'active_replisomes': ACTIVE_REPLISOME_ARRAY,
@@ -146,7 +146,7 @@ class ChromosomeStructure(Step):
             'bulk': 'bulk_array',
             'listeners': {
                 'rnap_data': {
-                    'active_rnap_n_bound_ribosomes': 'array[integer]',
+                    'active_rnap_n_bound_ribosomes': 'array[integer[64]]',
                 },
             },
             'active_replisomes': ACTIVE_REPLISOME_ARRAY,

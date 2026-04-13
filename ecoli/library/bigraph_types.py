@@ -41,6 +41,7 @@ from bigraph_schema.methods import (
     apply, reconcile, divide, bundle, BundleContext,
 )
 from bigraph_schema.methods.handle_parameters import align_parameters
+from bigraph_schema import capture_object_state, restore_object_value
 
 from vivarium.core.process import Process as VivariumProcess, Step as VivariumStep
 from process_bigraph import Step as BigraphStep, Process as BigraphProcess, StepLink, ProcessLink
@@ -484,11 +485,13 @@ def reify_schema(core, schema: CSRMatrix, parameters):
         elif isinstance(data_param, Node):
             schema._data = schema_dtype(data_param)
         # Propagate the dtype to the data sub-array so realize produces
-        # correct types for data values. Indices/pointers are always int.
+        # correct types for data values. scipy's csr_matrix uses int32
+        # for indices and indptr (unless the matrix is >2B elements),
+        # so declare that explicitly rather than int64.
         from bigraph_schema.schema import Array
         schema.data = Array(_shape=(), _data=schema._data)
-        schema.indices = Array(_shape=(), _data=np.dtype('int64'))
-        schema.pointers = Array(_shape=(), _data=np.dtype('int64'))
+        schema.indices = Array(_shape=(), _data=np.dtype('int32'))
+        schema.pointers = Array(_shape=(), _data=np.dtype('int32'))
     # Legacy path: explicit key-value pairs like csr_matrix[data:array[float],...]
     for key, parameter in parameters.items():
         if key in ('_shape', '_data'):
@@ -1274,6 +1277,17 @@ def realize(core, schema: SharedProcess, state, path=()):
             print(f"[SharedProcess] failed to restore rng_state for "
                   f"{process_id}: {e}", flush=True)
 
+    # Restore mid-tick bookkeeping attrs that __init__ resets but the
+    # running simulation mutates. Keeping them in sync with the saved
+    # snapshot is what lets load+run match continue-in-place.
+    internal = state.get('internal_state') or {}
+    for attr_name, saved_value in internal.items():
+        try:
+            setattr(instance, attr_name, _restore_internal_value(saved_value))
+        except Exception as e:
+            print(f"[SharedProcess] failed to restore {attr_name} for "
+                  f"{process_id}: {e}", flush=True)
+
     # Register for lookup by SharedProcessRef
     if process_id is not None:
         _shared_processes[process_id] = instance
@@ -1314,10 +1328,26 @@ def serialize(schema: SharedProcess, state):
                 'has_gauss': int(has_gauss),
                 'cached_gauss': float(cached),
             }
+        internal = _capture_internal_state(instance)
+        if internal:
+            result['internal_state'] = internal
         return result
     if isinstance(state, dict):
         return state
     return state
+
+
+# `capture_object_state` and `restore_object_value` now live in
+# bigraph_schema and are imported at the top of this module.
+
+def _capture_internal_state(instance):
+    import os
+    return capture_object_state(
+        instance, debug=bool(os.environ.get('INTERNAL_DEBUG')))
+
+
+def _restore_internal_value(value):
+    return restore_object_value(value)
 
 
 @dispatch
@@ -1844,9 +1874,14 @@ def bundle(schema: UnitsArray, state, context: typing.Optional[BundleContext] = 
     is a dict mapping field names to Unum values.
     """
     if isinstance(state, UnitStructArray):
-        # Bundle the struct array through the Array schema (may go to parquet),
-        # and serialize the units dict inline
-        struct_bundled = bundle(schema.struct, state.struct_array, context)
+        # Sync schema.struct._data with the actual structured dtype so the
+        # bundle(Array) strict-dtype check sees them as matching. A bare
+        # `units_array` schema starts with a default float64 _data that
+        # doesn't reflect the UnitStructArray's real named-field dtype.
+        struct = state.struct_array
+        if isinstance(struct, np.ndarray) and schema.struct._data != struct.dtype:
+            schema.struct._data = struct.dtype
+        struct_bundled = bundle(schema.struct, struct, context)
         units_serialized = serialize(schema.units, state.units)
         return {'struct': struct_bundled, 'units': units_serialized}
     return serialize(schema, state)
@@ -1889,6 +1924,9 @@ def bundle(schema: SharedProcess, state, context: typing.Optional[BundleContext]
                 'has_gauss': int(has_gauss),
                 'cached_gauss': float(cached),
             }
+        internal = _capture_internal_state(instance)
+        if internal:
+            result['internal_state'] = internal
         return result
     if isinstance(state, dict):
         return state

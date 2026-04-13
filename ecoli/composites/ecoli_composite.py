@@ -21,7 +21,11 @@ from copy import deepcopy
 
 import numpy as np
 
-from bigraph_schema import deep_merge
+from bigraph_schema import (
+    deep_merge, class_address as _class_address,
+    make_arrays_writeable as _make_arrays_writeable,
+    tuples_to_lists as _tuple_to_list,
+)
 from process_bigraph import wire_step_layers
 from vivarium.core.engine import _StepGraph
 
@@ -29,25 +33,6 @@ from vivarium.core.engine import _StepGraph
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _tuple_to_list(path):
-    """Convert vivarium topology tuples to process-bigraph wire lists."""
-    if isinstance(path, tuple):
-        return list(path)
-    elif isinstance(path, dict):
-        return {key: _tuple_to_list(subpath) for key, subpath in path.items()}
-
-
-def _make_arrays_writeable(state):
-    """Recursively make all numpy arrays in state dict writeable."""
-    if isinstance(state, dict):
-        for key, value in state.items():
-            if isinstance(value, np.ndarray):
-                if not value.flags.writeable:
-                    state[key] = value.copy()
-                    state[key].flags.writeable = True
-            elif isinstance(value, dict):
-                _make_arrays_writeable(value)
 
 
 def _fill_schema_defaults(target, schema):
@@ -69,11 +54,6 @@ def _fill_schema_defaults(target, schema):
                 sub = target.setdefault(key, {})
                 if isinstance(sub, dict):
                     _fill_schema_defaults(sub, spec)
-
-
-def _class_address(cls):
-    """Fully-qualified module address for realize to import."""
-    return f'local:!{cls.__module__}.{cls.__name__}'
 
 
 # ---------------------------------------------------------------------------

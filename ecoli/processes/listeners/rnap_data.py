@@ -36,7 +36,7 @@ class RnapData(Step):
     topology = TOPOLOGY
 
     config_schema = {
-        'stable_RNA_indexes': 'array[integer]',
+        'stable_RNA_indexes': 'array[integer[64]]',
         'cistron_ids': 'array[string]',
         'cistron_tu_mapping_matrix': 'csr_matrix[4538|3277,integer[64]]',
         'time_step': 'float{1.0}',
@@ -48,7 +48,7 @@ class RnapData(Step):
         return {
             'listeners': {
                 'rnap_data': {
-                    'rna_init_event': f'array[{self.n_TUs},integer]',
+                    'rna_init_event': f'array[{self.n_TUs},integer[64]]',
                 },
             },
             'active_RNAPs': ACTIVE_RNAP_ARRAY,
@@ -63,12 +63,12 @@ class RnapData(Step):
         return {
             'listeners': {
                 'rnap_data': {
-                    'rna_init_event_per_cistron': f'array[{self.n_cistrons},integer]',
-                    'active_rnap_coordinates': 'array[integer]',
+                    'rna_init_event_per_cistron': f'array[{self.n_cistrons},integer[64]]',
+                    'active_rnap_coordinates': 'array[integer[64]]',
                     'active_rnap_domain_indexes': 'array[integer]',
                     'active_rnap_unique_indexes': 'array[integer[64]]',
                     'active_rnap_on_stable_RNA_indexes': 'array[integer[64]]',
-                    'active_rnap_n_bound_ribosomes': 'array[integer]',
+                    'active_rnap_n_bound_ribosomes': 'array[integer[64]]',
                 },
             },
             'next_update_time': 'overwrite[float]',

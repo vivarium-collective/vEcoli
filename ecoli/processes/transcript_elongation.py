@@ -92,11 +92,11 @@ class TranscriptElongation(PartitionedProcess):
     config_schema = {
         'rnaPolymeraseElongationRateDict': 'map[unum[float,nucleotide/s]]',
         'rnaIds': 'array[string]',
-        'rnaLengths': 'array[integer]',
-        'rnaSequences': 'array[integer]',
+        'rnaLengths': 'array[integer[64]]',
+        'rnaSequences': 'array[integer[8]]',
         'ntWeights': 'array[float]',
         'endWeight': 'array[float]',
-        'replichore_lengths': 'array[integer]',
+        'replichore_lengths': 'array[integer[64]]',
         'n_fragment_bases': 'integer',
         'recycle_stalled_elongation': 'boolean',
         'submass_indices': 'map[integer]',
@@ -113,7 +113,7 @@ class TranscriptElongation(PartitionedProcess):
         'cell_density': 'unum[g/L]',
         'n_avogadro': 'unum[1/mol]',
         'get_attenuation_stop_probabilities': 'method',
-        'attenuated_rna_indices': 'array[integer]',
+        'attenuated_rna_indices': 'array[integer[64]]',
         'location_lookup': 'map[node]',
         'seed': 'integer',
         'emit_unique': 'boolean',
@@ -138,7 +138,7 @@ class TranscriptElongation(PartitionedProcess):
             'listeners': {
                 'transcript_elongation_listener': {
                     'count_rna_synthesized': {
-                        '_type': 'overwrite[array[integer]]',
+                        '_type': 'overwrite[array[integer[64]]]',
                         '_default': [0] * len(self.rnaIds),
                     },
                     'count_NTPs_used': 'overwrite[integer]{0}',
@@ -147,25 +147,25 @@ class TranscriptElongation(PartitionedProcess):
                         '_default': [0.0] * len(self.attenuated_rnas),
                     },
                     'counts_attenuated': {
-                        '_type': 'overwrite[array[integer]]',
+                        '_type': 'overwrite[array[integer[64]]]',
                         '_default': [0] * len(self.attenuated_rnas),
                     },
                 },
                 'growth_limits': {
                     'ntp_used': {
-                        '_type': 'overwrite[array[integer]]',
+                        '_type': 'overwrite[array[integer[64]]]',
                         '_default': [0] * len(self.ntp_ids),
                     },
                     'ntp_pool_size': {
-                        '_type': 'overwrite[array[integer]]',
+                        '_type': 'overwrite[array[integer[64]]]',
                         '_default': [0] * len(self.ntp_ids),
                     },
                     'ntp_request_size': {
-                        '_type': 'overwrite[array[integer]]',
+                        '_type': 'overwrite[array[integer[64]]]',
                         '_default': [0] * len(self.ntp_ids),
                     },
                     'ntp_allocated': {
-                        '_type': 'overwrite[array[integer]]',
+                        '_type': 'overwrite[array[integer[64]]]',
                         '_default': [0] * len(self.ntp_ids),
                     },
                 },
