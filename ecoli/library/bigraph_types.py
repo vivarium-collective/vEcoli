@@ -216,6 +216,60 @@ def serialize(schema: UnumUnits, state):
         'magnitude': serialize(schema.magnitude, state.asNumber())}
 
 
+# Pint registry for dimensionality lookups. Cached at module load so
+# divide doesn't pay the (small but non-trivial) cost on every call.
+_UREG = pint.UnitRegistry()
+
+
+def _extensive_scale_factor(unit_dict):
+    """Net exponent of size-scaling base dimensions in a unit.
+
+    An extensive quantity (mass, amount, total volume) scales linearly
+    with system size — a cell splits its mass in half, its molecule
+    count in half, its volume in half. Intensive quantities
+    (concentration, rate, time) do not scale.
+
+    We detect by summing (mass_exp + substance_exp + length_exp/3)
+    across the unit's pint dimensionality. Volume shows up as
+    ``[length]^3`` in pint, so dividing length_exp by 3 gives
+    "volume exponent".
+
+    Returns a float: >0 extensive, 0 or <0 intensive. Returns 0 for
+    empty/None unit dicts (dimensionless → intensive)."""
+    if not unit_dict:
+        return 0.0
+    dim = {}
+    for symbol, exp in unit_dict.items():
+        try:
+            unit_dim = _UREG.parse_units(symbol).dimensionality
+        except Exception:
+            continue
+        for k, v in unit_dim.items():
+            dim[k] = dim.get(k, 0.0) + float(v) * float(exp)
+    mass = dim.get('[mass]', 0.0)
+    substance = dim.get('[substance]', 0.0)
+    length = dim.get('[length]', 0.0)
+    return mass + substance + length / 3.0
+
+
+@dispatch
+def divide(schema: UnumUnits, state, context=None, path=(), rng=None):
+    """Extensive quantities halve; intensive quantities share.
+
+    A ``Unum`` carries its unit in ``state._unit``. See
+    ``_extensive_scale_factor``: ``mol``, ``g``, ``L`` halve;
+    ``mol/L``, ``s``, ``1/s`` share."""
+    if state is None:
+        return None, None
+    if not isinstance(state, Unum):
+        return state, state
+    scale = _extensive_scale_factor(state._unit)
+    if scale > 0:
+        half = state / 2
+        return half, half
+    return state, state
+
+
 @dispatch
 def resolve(schema: UnumUnits, update: UnumUnits, path=()):
     return schema
@@ -347,6 +401,26 @@ def resolve(schema: Quantity, update: Quantity, path=()):
     if not schema.units or schema.units == update.units:
         return update
     return schema
+
+
+@dispatch
+def divide(schema: Quantity, state, context=None, path=(), rng=None):
+    """Same unit-aware split as ``UnumUnits``. pint Quantity exposes
+    ``.dimensionality`` directly so we compute the scale factor from
+    that without re-parsing."""
+    if state is None:
+        return None, None
+    if not isinstance(state, pint.Quantity):
+        return state, state
+    dim = dict(state.dimensionality)
+    mass = float(dim.get('[mass]', 0))
+    substance = float(dim.get('[substance]', 0))
+    length = float(dim.get('[length]', 0))
+    scale = mass + substance + length / 3.0
+    if scale > 0:
+        half = state / 2
+        return half, half
+    return state, state
 
 
 @dispatch

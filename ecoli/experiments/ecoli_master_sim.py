@@ -949,6 +949,7 @@ class EcoliSim:
             return
 
         print(f"Running composite for {self.max_duration}s...", flush=True)
+        pre_agent_count = len(ecoli.state.get("agents", {}))
         t0 = _time.time()
         divided = False
         try:
@@ -956,11 +957,12 @@ class EcoliSim:
         except DivisionDetected:
             divided = True
         # Composite engine has no StopAfterDivision — detect division
-        # by post-run agent count. The _divide sentinel walks through
-        # apply and leaves two daughters where the mother used to be.
+        # by agent-count *increase* (mother=1 → daughters=2). Checking
+        # `>= 2` alone triggers on already-divided checkpoints without
+        # an actual division event in this run.
         if not divided:
-            agents = ecoli.state.get("agents", {})
-            if len(agents) >= 2:
+            post_agent_count = len(ecoli.state.get("agents", {}))
+            if post_agent_count > pre_agent_count:
                 divided = True
         elapsed = _time.time() - t0
         print(f"Completed in {elapsed:.2f} seconds, divided={divided}", flush=True)
@@ -980,13 +982,32 @@ class EcoliSim:
         non_agent_state = {k: v for k, v in ecoli.state.items() if k != "agents"}
         for i, (agent_id, agent_state) in enumerate(sorted(agents.items())):
             daughter_dir = f"{self.daughter_outdir.rstrip('/')}/daughter_state_{i}"
-            # Prune the composite to this single daughter and save as bundle.
-            original_agents = ecoli.state["agents"]
+            # Prune the composite to this single daughter AND the matching
+            # schema subtree — otherwise realize on reload walks
+            # sibling-daughter schema entries against state that no
+            # longer has them, and type-resolve fails.
+            original_agents_state = ecoli.state["agents"]
+            original_agents_schema = ecoli.schema.get("agents") if isinstance(
+                ecoli.schema, dict) else None
             try:
                 ecoli.state["agents"] = {agent_id: agent_state}
+                if isinstance(ecoli.schema, dict) and isinstance(
+                        original_agents_schema, dict):
+                    ecoli.schema["agents"] = {
+                        agent_id: original_agents_schema[agent_id]
+                    }
+                # access() caches by id(dict), so mutating schema in
+                # place doesn't invalidate — clear before save so the
+                # freshly pruned schema is actually rendered.
+                if hasattr(ecoli.core, '_access_cache'):
+                    ecoli.core._access_cache.clear()
                 ecoli.save_bundle(daughter_dir)
             finally:
-                ecoli.state["agents"] = original_agents
+                ecoli.state["agents"] = original_agents_state
+                if isinstance(ecoli.schema, dict) and original_agents_schema is not None:
+                    ecoli.schema["agents"] = original_agents_schema
+                if hasattr(ecoli.core, '_access_cache'):
+                    ecoli.core._access_cache.clear()
             with open(f"daughter_state_{i}_uri.txt", "w") as f:
                 f.write(daughter_dir)
         with open("division_time.sh", "w") as f:
