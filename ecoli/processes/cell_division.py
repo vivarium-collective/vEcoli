@@ -37,7 +37,14 @@ class MarkDPeriod(Step):
     def outputs(self):
         return {
             'full_chromosome': 'unique_array',
-            'divide': 'overwrite[boolean]',
+            # divide_reset[boolean] mirrors v1's ``_divider:
+            # {set_value: False}`` so daughters start with divide=False
+            # rather than inheriting the mother's True from the moment
+            # mark_d_period triggered division. Without this the next
+            # generation's Division step short-circuits the boolean
+            # check (True>=True) and divides the moment chromosome
+            # replication completes — half the normal cell cycle.
+            'divide': 'overwrite[divide_reset[boolean]]',
         }
 
     def ports_schema(self):

@@ -114,7 +114,10 @@ class TranscriptElongation(PartitionedProcess):
         'n_avogadro': 'unum[1/mol]',
         'get_attenuation_stop_probabilities': 'method',
         'attenuated_rna_indices': 'array[integer[64]]',
-        'location_lookup': 'map[float]',
+        # sim_data provides integer keys (cistron indices), so the
+        # default-key (string) Map silently collapses all entries onto
+        # a single None key. Declare integer keys explicitly.
+        'location_lookup': 'map[integer,float]',
         'seed': 'integer',
         'emit_unique': 'boolean',
     }

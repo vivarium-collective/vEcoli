@@ -45,7 +45,11 @@ class MassListener(Step):
         'compartment_abbrev_to_index': 'map[integer]',
         'compartment_id_to_index': 'map[integer]',
         'submass_to_idx': 'map[integer]',
-        'compartment_indices': 'map[list[integer]]',
+        # sim_data provides {compartment_name: int}, not lists.
+        # Wrong type makes the framework coerce to None, which then
+        # makes ``compartment_submasses[None,:].sum()`` return total
+        # cell mass for every compartment.
+        'compartment_indices': 'map[integer]',
         'condition_to_doubling_time': 'map[unum[float,min]]',
         'expectedDryMassIncreaseDict': 'map[unum[float,fg]]',
 
