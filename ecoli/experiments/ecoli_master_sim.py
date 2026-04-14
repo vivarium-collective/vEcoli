@@ -851,6 +851,7 @@ class EcoliSim:
         from ecoli.composites.ecoli_composite import build_composite_native
         from ecoli.library.bigraph_types import ECOLI_TYPES
         from ecoli.processes.cell_division import DivisionDetected
+        from ecoli.library.parquet_emitter import ParquetEmitter
         from process_bigraph import Composite
         from bigraph_schema import allocate_core
         import time as _time
@@ -948,27 +949,100 @@ class EcoliSim:
             ecoli.save_bundle(checkpoint_dir)
             return
 
+        # Set up parquet emitter so per-tick listener data feeds the
+        # analysis step. Mirrors the vivarium engine's emit pattern:
+        # one ``configuration`` emit up front (with metadata that sets
+        # the hive partition path) then a ``history`` emit after each
+        # tick with flattened listener state. Only wired for composite
+        # engine here; the v1 vivarium path emits via engine.update.
+        emitter = None
+        if self.emitter == 'parquet':
+            emitter = ParquetEmitter(self.emitter_arg)
+            # Build the configuration emit. This establishes the hive
+            # partition (experiment_id/variant/lineage_seed/generation/agent_id)
+            # that downstream analysis queries against.
+            cfg_agent_id = str(self.agent_id)
+            cfg_metadata = {
+                'experiment_id': self.experiment_id,
+                'variant': self.variant,
+                'lineage_seed': self.lineage_seed,
+                'agent_id': cfg_agent_id,
+                'initial_global_time': float(
+                    ecoli.state.get('global_time', 0.0)),
+            }
+            emitter.emit({
+                'table': 'configuration',
+                'data': {'metadata': cfg_metadata},
+            })
+
         print(f"Running composite for {self.max_duration}s...", flush=True)
         pre_agent_count = len(ecoli.state.get("agents", {}))
         t0 = _time.time()
         divided = False
-        try:
-            ecoli.run(float(self.max_duration))
-        except DivisionDetected:
-            divided = True
-        # Composite engine has no StopAfterDivision — detect division
-        # by agent-count *increase* (mother=1 → daughters=2). Checking
-        # `>= 2` alone triggers on already-divided checkpoints without
-        # an actual division event in this run.
-        if not divided:
-            post_agent_count = len(ecoli.state.get("agents", {}))
-            if post_agent_count > pre_agent_count:
+        # Composite engine has no StopAfterDivision exception — poll
+        # agent count between short runs and halt at the first division.
+        # Matches v1's handoff model (stop, save daughters, let the
+        # next workflow generation bootstrap fresh from the bundles).
+        poll_s = 60.0
+        current_t = float(ecoli.state.get('global_time', 0.0))
+        end_t = current_t + float(self.max_duration)
+        last_emit_t = current_t
+        while float(ecoli.state.get('global_time', 0.0)) < end_t:
+            remaining = end_t - float(
+                ecoli.state.get('global_time', 0.0))
+            step = min(poll_s, remaining)
+            try:
+                ecoli.run(step)
+            except DivisionDetected:
                 divided = True
+                break
+            # Emit history: flatten each agent's listeners + bulk
+            # summary + timestep so the analysis pipeline sees the
+            # same columns v1 produces.
+            if emitter is not None:
+                self._emit_composite_history(emitter, ecoli)
+            if len(ecoli.state.get("agents", {})) > pre_agent_count:
+                divided = True
+                break
         elapsed = _time.time() - t0
         print(f"Completed in {elapsed:.2f} seconds, divided={divided}", flush=True)
 
+        if emitter is not None:
+            emitter.success = divided or not self.fail_at_max_duration
+            emitter.finalize()
+
         if divided and self.daughter_outdir:
             self._save_composite_daughters(ecoli)
+
+    def _emit_composite_history(self, emitter, ecoli):
+        """Emit a history row for the current tick.
+
+        ParquetEmitter.emit expects ``data['data']['agents']`` to be a
+        dict keyed by agent_id; it skips emission while more than one
+        agent is present (division cleanup is handled by the workflow's
+        handoff model), and flattens each surviving agent's subtree
+        individually. This mirrors how the vivarium Engine emits — the
+        agents-map shape is what the analysis pipeline queries.
+        """
+        global_t = float(ecoli.state.get('global_time', 0.0))
+        agents = ecoli.state.get('agents', {})
+        emit_agents = {}
+        for agent_id, agent_state in agents.items():
+            if not isinstance(agent_state, dict):
+                continue
+            listeners = agent_state.get('listeners', {})
+            if not isinstance(listeners, dict):
+                continue
+            emit_agents[str(agent_id)] = {'listeners': listeners}
+        if not emit_agents:
+            return
+        emitter.emit({
+            'table': 'history',
+            'data': {
+                'agents': emit_agents,
+                'time': global_t,
+            },
+        })
 
     def _save_composite_daughters(self, ecoli):
         """Write each daughter as its own bundle directory under
@@ -1281,7 +1355,12 @@ def main():
     Runs a simulation with CLI options.
     """
     ecoli_sim = EcoliSim.from_cli()
-    ecoli_sim.build_ecoli()
+    # build_ecoli() constructs the vivarium engine; it's only needed
+    # for the v1 path. The composite engine (v2) builds its state in
+    # _run_composite directly from sim_data or a bundle, skipping the
+    # v1 composer entirely.
+    if ecoli_sim.config.get("engine") != "composite":
+        ecoli_sim.build_ecoli()
     ecoli_sim.run()
 
 

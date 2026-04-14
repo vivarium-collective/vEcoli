@@ -497,8 +497,12 @@ def infer(core, value: UnitStructArray, path: tuple = ()):
 def serialize(schema: UnitsArray, state):
     if isinstance(state, dict):
         return state
+    # Use the dtype-preserving structured-array serializer so realize
+    # can rebuild with the correct structured dtype instead of falling
+    # back to ``schema.struct._data`` (which is ``float64`` by default
+    # and can't absorb strings/bools/sub-arrays in the real rows).
     return {
-        'struct': serialize(schema.struct, state.struct_array),
+        'struct': _serialize_structured_array(state.struct_array),
         'units': serialize(schema.units, state.units)}
 
 
@@ -507,10 +511,9 @@ def realize(core, schema: UnitsArray, encode, path=()):
     if isinstance(encode, UnitStructArray):
         return schema, encode, []
     if isinstance(encode, dict) and 'struct' in encode:
-        inner = tuple(
-            realize(core, getattr(schema, key), encode[key], path + (key,))[1]
-            for key in ['struct', 'units'])
-        return schema, UnitStructArray(*inner), []
+        struct = _realize_structured_array(encode['struct'])
+        _, units, _ = realize(core, schema.units, encode['units'], path + ('units',))
+        return schema, UnitStructArray(struct, units), []
     return schema, encode, []
 
 
