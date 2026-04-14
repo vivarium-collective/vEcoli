@@ -114,10 +114,10 @@ class PolypeptideInitiation(PartitionedProcess):
                         '_type': 'overwrite[array[float]]',
                         '_default': [0.0] * len(self.monomer_ids),
                     },
-                    'is_n_ribosomes_to_activate_reduced': 'overwrite[boolean]{False}',
-                    # Written by empty_update path
-                    'ribosomes_initialized': 'overwrite[integer]{0}',
-                    'prob_translation_per_transcript': 'overwrite[float]{0.0}',
+                    # Note: v1's ports_schema omits is_n_ribosomes_to_activate_reduced,
+                    # ribosomes_initialized, and prob_translation_per_transcript,
+                    # so the process's writes to those keys are silently dropped
+                    # in v1. Matching that here keeps the Parquet column set in sync.
                 },
             },
         }

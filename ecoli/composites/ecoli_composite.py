@@ -240,22 +240,17 @@ def build_ecoli_document(core, sim_config):
 
         cell_state[name] = decl
 
-    # 7. Ensure global_time, timestep, and listeners exist for seeding.
+    # global_time default is declared on global_clock.outputs() as
+    # 'float{0.0}' for the framework's auto-init at realize time, but
+    # the listener-seeding loop below builds views directly from
+    # cell_state and bypasses the framework, so we still need the
+    # cell_state seed here.
     cell_state.setdefault('global_time', 0.0)
+    # timestep is config-derived (no producer process); keep setdefault.
     cell_state.setdefault('timestep', int(time_step))
-    # Pre-populate listener.mass with zeros so the mass listener
-    # can read its own prior values (fold change computations).
-    cell_state.setdefault('listeners', {}).setdefault('mass', {
-        'cell_mass': 0.0, 'dry_mass': 0.0, 'water_mass': 0.0,
-        'volume': 0.0, 'rna_mass': 0.0, 'protein_mass': 0.0,
-        'rRna_mass': 0.0, 'tRna_mass': 0.0, 'mRna_mass': 0.0,
-        'dna_mass': 0.0, 'smallMolecule_mass': 0.0,
-        'growth': 0.0, 'instantaneous_growth_rate': 0.0,
-        'protein_mass_fraction': 0.0, 'rna_mass_fraction': 0.0,
-        'dry_mass_fold_change': 0.0, 'protein_mass_fold_change': 0.0,
-        'rna_mass_fold_change': 0.0, 'small_molecule_fold_change': 0.0,
-        'expected_mass_fold_change': 0.0, 'projection_mass': 0.0,
-    })
+    # listeners.mass.* defaults are declared in
+    # ecoli/processes/listeners/mass_listener.py outputs() so the
+    # framework auto-creates them on first read.
 
     # 8. Seed initial listener values by running all listeners once.
     # In v1, prime_listeners did this. In v2, we run the temporary

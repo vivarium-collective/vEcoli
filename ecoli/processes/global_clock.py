@@ -20,7 +20,7 @@ class GlobalClock(Process):
 
     def outputs(self):
         return {
-            'global_time': 'float',
+            'global_time': 'float{0.0}',
         }
 
 

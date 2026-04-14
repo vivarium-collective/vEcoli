@@ -57,14 +57,14 @@ class MarkDPeriod(Step):
         )
         if len(division_time) < 2:
             return {}
-        not_triggered = ~has_triggered_division
-        if not not_triggered.any():
-            return {}
-        divide_at_time = division_time[not_triggered].min()
+        # Set division time to be the minimum division time for a chromosome
+        # that has not yet triggered cell division
+        divide_at_time = division_time[~has_triggered_division].min()
         if states["global_time"] >= divide_at_time:
             divide_at_time_index = np.where(division_time == divide_at_time)[0][0]
             has_triggered_division = has_triggered_division.copy()
             has_triggered_division[divide_at_time_index] = True
+            # Set flag for ensuing division Step to trigger division
             return {
                 "full_chromosome": {
                     "set": {"has_triggered_division": has_triggered_division}
@@ -250,6 +250,38 @@ class CompositeDivision(Division):
         'seed': 'integer{0}',
         'daughter_ids_function': 'function',
     }
+
+    def outputs(self):
+        # Override the parent's outputs() to seed division_threshold
+        # with the configured value. Without this, v2's framework leaves
+        # state.division_threshold = None at startup, and the boolean
+        # comparison ``division_variable >= None`` (or ``False >= False``
+        # if the framework substitutes a typed default) short-circuits
+        # to True — division then fires the moment chromosome
+        # replication completes, halving the cell cycle.
+        threshold = self.parameters.get("division_threshold")
+        return {
+            'agents': {},
+            'division_threshold': {
+                '_type': 'overwrite[union[boolean,string,float]]',
+                '_default': threshold,
+            },
+        }
+
+    def inputs(self):
+        # Same default seeding for the input side so the read sees the
+        # configured threshold, not None, when no upstream write has
+        # happened yet.
+        threshold = self.parameters.get("division_threshold")
+        return {
+            'division_variable': 'union[boolean,float]',
+            'full_chromosome': 'unique_array',
+            'media_id': 'string',
+            'division_threshold': {
+                '_type': 'union[boolean,string,float]',
+                '_default': threshold,
+            },
+        }
 
     def __init__(self, parameters=None):
         # Bypass Division.__init__ (which requires composer /

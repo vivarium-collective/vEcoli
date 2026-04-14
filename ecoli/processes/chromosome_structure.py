@@ -181,6 +181,17 @@ class ChromosomeStructure(Step):
             'listeners': {
                 'rnap_data': {
                     'active_rnap_n_bound_ribosomes': 'array[integer[64]]',
+                    # RNAP/replisome collisions — next_update writes all of these;
+                    # match v1's ports_schema so they land in the Parquet emit.
+                    'n_total_collisions': 'overwrite[integer]{0}',
+                    'n_headon_collisions': 'overwrite[integer]{0}',
+                    'n_codirectional_collisions': 'overwrite[integer]{0}',
+                    'n_empty_fork_collisions': 'overwrite[integer]{0}',
+                    'n_removed_ribosomes': 'overwrite[integer]{0}',
+                    'headon_collision_coordinates': 'overwrite[array[integer[64]]]',
+                    'codirectional_collision_coordinates': 'overwrite[array[integer[64]]]',
+                    'empty_fork_collision_coordinates': 'overwrite[array[integer[64]]]',
+                    'incomplete_transcription_events': 'overwrite[array[integer[64]]]',
                 },
             },
             'active_replisomes': ACTIVE_REPLISOME_ARRAY,

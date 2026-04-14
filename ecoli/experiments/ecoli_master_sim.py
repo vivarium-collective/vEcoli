@@ -958,18 +958,18 @@ class EcoliSim:
         emitter = None
         if self.emitter == 'parquet':
             emitter = ParquetEmitter(self.emitter_arg)
-            # Build the configuration emit. This establishes the hive
-            # partition (experiment_id/variant/lineage_seed/generation/agent_id)
-            # that downstream analysis queries against.
-            cfg_agent_id = str(self.agent_id)
-            cfg_metadata = {
-                'experiment_id': self.experiment_id,
-                'variant': self.variant,
-                'lineage_seed': self.lineage_seed,
-                'agent_id': cfg_agent_id,
-                'initial_global_time': float(
-                    ecoli.state.get('global_time', 0.0)),
-            }
+            # Build the configuration emit. Mirror v1 ``get_metadata()``
+            # so the configuration table has the same column set —
+            # downstream analyses look up things like ``git_hash``,
+            # full config keys, and ``output_metadata__*`` columns.
+            cfg_metadata = self.get_metadata()
+            cfg_metadata['experiment_id'] = self.experiment_id
+            cfg_metadata['variant'] = self.config.get('variant', 0)
+            cfg_metadata['lineage_seed'] = self.lineage_seed
+            cfg_metadata['agent_id'] = str(self.agent_id)
+            cfg_metadata['initial_global_time'] = float(
+                ecoli.state.get('global_time', 0.0))
+            cfg_metadata['output_metadata'] = self._collect_output_metadata()
             emitter.emit({
                 'table': 'configuration',
                 'data': {'metadata': cfg_metadata},
@@ -983,7 +983,8 @@ class EcoliSim:
         # agent count between short runs and halt at the first division.
         # Matches v1's handoff model (stop, save daughters, let the
         # next workflow generation bootstrap fresh from the bundles).
-        poll_s = 60.0
+        # Step 1s so emit cadence matches v1's per-tick emit.
+        poll_s = 1.0
         current_t = float(ecoli.state.get('global_time', 0.0))
         end_t = current_t + float(self.max_duration)
         last_emit_t = current_t
@@ -1014,6 +1015,57 @@ class EcoliSim:
         if divided and self.daughter_outdir:
             self._save_composite_daughters(ecoli)
 
+    def _collect_output_metadata(self):
+        """Walk the live composite's process/step instances and build
+        the ``output_metadata`` dict v1 emits into ``configuration``.
+
+        Uses each instance's ``ports_schema()`` to pull out
+        ``_properties.metadata`` (e.g. cistron IDs that match listener
+        array columns), and remaps port names to wire paths via the
+        topology — so the parquet columns come out as
+        ``output_metadata__listeners__rna_counts__mRNA_cistron_counts``
+        etc., matching v1 and satisfying ``field_metadata`` lookups.
+        """
+        from vivarium.library.topology import inverse_topology
+        from vivarium.library.dict_utils import deep_merge_check
+
+        ecoli = self._composite
+        output_metadata: dict[str, Any] = {}
+        instance_paths = {**getattr(ecoli, 'step_paths', {}),
+                          **getattr(ecoli, 'process_paths', {})}
+        for path, entry in instance_paths.items():
+            # step_paths/process_paths values are the Link state dicts
+            # with ``instance`` holding the realized object; unwrap to
+            # the live instance for ports_schema() access.
+            if isinstance(entry, dict):
+                instance = entry.get('instance')
+            elif isinstance(entry, tuple) and entry:
+                instance = entry[0]
+            else:
+                instance = entry
+            if instance is None or not hasattr(instance, 'ports_schema'):
+                continue
+            try:
+                ports = instance.ports_schema()
+            except Exception:
+                continue
+            extracted = extract_metadata(ports)
+            if not extracted:
+                continue
+            proc_name = path[-1] if path else None
+            topology = self.topology.get(proc_name) if proc_name else None
+            if topology:
+                extracted = inverse_topology((), extracted, topology)
+            try:
+                output_metadata = deep_merge_check(
+                    output_metadata, extracted, check_equality=True)
+            except Exception:
+                # Different processes occasionally overlap in listener
+                # paths but with equal metadata — fall back to a
+                # forgiving merge that keeps the first value seen.
+                output_metadata = {**extracted, **output_metadata}
+        return output_metadata
+
     def _emit_composite_history(self, emitter, ecoli):
         """Emit a history row for the current tick.
 
@@ -1023,17 +1075,35 @@ class EcoliSim:
         handoff model), and flattens each surviving agent's subtree
         individually. This mirrors how the vivarium Engine emits — the
         agents-map shape is what the analysis pipeline queries.
+
+        Emits ``listeners``, ``bulk``, and ``process_state`` so the
+        per-column set matches v1's Parquet output (analyses and the
+        ``dummy`` column-name check rely on that schema parity).
         """
         global_t = float(ecoli.state.get('global_time', 0.0))
         agents = ecoli.state.get('agents', {})
         emit_agents = {}
+        # Only these agent subtrees are emitted. Anything else (process
+        # nodes, infrastructure stores) is not time-series data.
+        EMIT_KEYS = ('listeners', 'bulk', 'process_state')
         for agent_id, agent_state in agents.items():
             if not isinstance(agent_state, dict):
                 continue
-            listeners = agent_state.get('listeners', {})
-            if not isinstance(listeners, dict):
+            subtree = {}
+            for k in EMIT_KEYS:
+                v = agent_state.get(k)
+                if v is None:
+                    continue
+                # ``bulk`` is a structured numpy array at runtime;
+                # v1's Parquet column is a plain ``List[Int64]`` of
+                # counts, so project the ``count`` field out here.
+                if k == 'bulk' and isinstance(v, np.ndarray) and v.dtype.names \
+                        and 'count' in v.dtype.names:
+                    v = np.asarray(v['count'], dtype=np.int64)
+                subtree[k] = v
+            if not subtree:
                 continue
-            emit_agents[str(agent_id)] = {'listeners': listeners}
+            emit_agents[str(agent_id)] = subtree
         if not emit_agents:
             return
         emitter.emit({
@@ -1070,12 +1140,26 @@ class EcoliSim:
                     ecoli.schema["agents"] = {
                         agent_id: original_agents_schema[agent_id]
                     }
+                # CompositeDivision carries self.agent_id from the
+                # mother; stamp it to this daughter's key so the
+                # next generation's division sentinel targets the
+                # right mother key when it fires.
+                division_node = agent_state.get("division") if isinstance(
+                    agent_state, dict) else None
+                division_config = division_node.get("config") if isinstance(
+                    division_node, dict) else None
+                original_division_agent_id = None
+                if isinstance(division_config, dict):
+                    original_division_agent_id = division_config.get("agent_id")
+                    division_config["agent_id"] = agent_id
                 # access() caches by id(dict), so mutating schema in
                 # place doesn't invalidate — clear before save so the
                 # freshly pruned schema is actually rendered.
                 if hasattr(ecoli.core, '_access_cache'):
                     ecoli.core._access_cache.clear()
                 ecoli.save_bundle(daughter_dir)
+                if isinstance(division_config, dict) and original_division_agent_id is not None:
+                    division_config["agent_id"] = original_division_agent_id
             finally:
                 ecoli.state["agents"] = original_agents_state
                 if isinstance(ecoli.schema, dict) and original_agents_schema is not None:

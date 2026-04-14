@@ -50,7 +50,12 @@ class UniqueMoleculeCounts(Step):
     def outputs(self):
         return {
             'listeners': {
-                'unique_molecule_counts': 'map[integer]',
+                # ``overwrite[]`` is required: the default updater for
+                # ``map[integer]`` merges (i.e. adds) values per key, so
+                # without it the listener value accumulates +N every
+                # tick. v1's ``listener_schema`` set ``_updater: 'set'``
+                # which has the same effect.
+                'unique_molecule_counts': 'overwrite[map[integer]]',
             },
         }
 

@@ -58,10 +58,19 @@ class Requester(Step):
 
     def outputs(self):
         process = self.config.get("process")
+        timestep = process.parameters.get('timestep', 1) if process else 1
         result = {
             'request': {'_type': 'overwrite[map[list[integer]]]', '_default': {}},
             'process': 'shared_process',
-            'next_update_time': 'overwrite[float]',
+            # Default next_update_time to the wrapped process's
+            # timestep so the partition gate correctly fires on the
+            # first tick (next_update_time <= global_time=0 only when
+            # the default is non-positive — using timestep matches the
+            # cell_state.setdefault that lived in build_ecoli_document).
+            'next_update_time': {
+                '_type': 'overwrite[float]',
+                '_default': float(timestep),
+            },
         }
         # Pull the actual listener schema from the wrapped process so
         # per-field types are preserved (not flattened to map[...]).
@@ -195,10 +204,14 @@ class Evolver(Step):
 
     def outputs(self):
         process = self.parameters.get("process")
+        timestep = process.parameters.get('timestep', 1) if process else 1
         ports = process.outputs()
         # Evolver writes next_update_time and process in addition to
         # whatever the wrapped process declares.
-        ports['next_update_time'] = 'overwrite[float]'
+        ports['next_update_time'] = {
+            '_type': 'overwrite[float]',
+            '_default': float(timestep),
+        }
         ports['process'] = 'shared_process'
         # Evolver doesn't write to allocate, global_time, timestep
         for k in ('allocate', 'global_time', 'timestep'):
