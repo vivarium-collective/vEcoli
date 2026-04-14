@@ -114,7 +114,7 @@ class TranscriptElongation(PartitionedProcess):
         'n_avogadro': 'unum[1/mol]',
         'get_attenuation_stop_probabilities': 'method',
         'attenuated_rna_indices': 'array[integer[64]]',
-        'location_lookup': 'map[node]',
+        'location_lookup': 'map[float]',
         'seed': 'integer',
         'emit_unique': 'boolean',
     }

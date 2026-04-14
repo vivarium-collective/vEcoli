@@ -186,7 +186,7 @@ class Evolver(Step):
         ports = process.inputs()
         timestep = process.parameters.get('timestep', 1) if process else 1
         # Evolver also reads these control ports
-        ports['allocate'] = 'node'
+        ports['allocate'] = {'bulk': 'array[integer[64]]'}
         ports['global_time'] = 'float{0.0}'
         ports['timestep'] = f'integer{{{timestep}}}'
         ports['next_update_time'] = f'float{{{float(timestep)}}}'

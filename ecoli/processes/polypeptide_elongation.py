@@ -179,7 +179,7 @@ class PolypeptideElongation(PartitionedProcess):
     def inputs(self):
         return {
             'environment': {'media_id': 'string'},
-            'boundary': 'node',
+            'boundary': {'external': 'map[quantity[millimolar]]'},
             'listeners': {
                 'mass': {
                     'cell_mass': 'float[fg]',

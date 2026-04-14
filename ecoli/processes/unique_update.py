@@ -18,10 +18,10 @@ class UniqueUpdate(Step):
     }
 
     def inputs(self):
-        return {mol: UNIQUE_TYPES.get(mol, 'node') for mol in self.unique_topo}
+        return {mol: UNIQUE_TYPES.get(mol, 'unique_array') for mol in self.unique_topo}
 
     def outputs(self):
-        return {mol: UNIQUE_TYPES.get(mol, 'node') for mol in self.unique_topo}
+        return {mol: UNIQUE_TYPES.get(mol, 'unique_array') for mol in self.unique_topo}
 
     def __init__(self, parameters=None):
         super().__init__(parameters)

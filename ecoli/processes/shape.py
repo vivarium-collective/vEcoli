@@ -83,11 +83,12 @@ class Shape(Step):
     name = "ecoli-shape"
 
     config_schema = {
-        'width': 'node',
+        # All three are pint Quantities (vivarium.library.units).
+        'width': 'quantity',
         'periplasm_fraction': 'float{0.2}',
         'cytoplasm_fraction': 'float{0.8}',
-        'initial_cell_volume': 'node',
-        'initial_mass': 'node',
+        'initial_cell_volume': 'quantity',
+        'initial_mass': 'quantity',
     }
 
     defaults = {
@@ -98,20 +99,37 @@ class Shape(Step):
         "initial_mass": 1339 * units.fg,
     }
 
+    # Each `*_global` port is a dict of pint Quantities; declaring the
+    # inner field types lets the framework resolve units instead of
+    # falling back to opaque ``node``.
+    _GLOBAL_QUANTITY_FIELDS = {
+        'volume': 'overwrite[quantity]',
+        'mmol_to_counts': 'overwrite[quantity]',
+    }
+    _CELL_GLOBAL_FIELDS = {
+        'volume': 'overwrite[quantity]',
+        'width': 'overwrite[quantity]',
+        'length': 'overwrite[quantity]',
+        'outer_surface_area': 'overwrite[quantity]',
+        'inner_surface_area': 'overwrite[quantity]',
+        'mmol_to_counts': 'overwrite[quantity]',
+        'mass': 'overwrite[quantity]',
+    }
+
     def inputs(self):
         return {
-            'cell_global': 'node',
+            'cell_global': self._CELL_GLOBAL_FIELDS,
             'listener_cell_mass': 'float',
             'listener_cell_volume': 'float',
-            'periplasm_global': 'node',
-            'cytoplasm_global': 'node',
+            'periplasm_global': self._GLOBAL_QUANTITY_FIELDS,
+            'cytoplasm_global': self._GLOBAL_QUANTITY_FIELDS,
         }
 
     def outputs(self):
         return {
-            'cell_global': 'overwrite[node]',
-            'periplasm_global': 'overwrite[node]',
-            'cytoplasm_global': 'overwrite[node]',
+            'cell_global': self._CELL_GLOBAL_FIELDS,
+            'periplasm_global': self._GLOBAL_QUANTITY_FIELDS,
+            'cytoplasm_global': self._GLOBAL_QUANTITY_FIELDS,
         }
 
     def __init__(self, parameters=None):
@@ -246,13 +264,7 @@ class Shape(Step):
             },
         }
 
-    def update(self, states, interval=None):
-        return self._compute_update(states)
-
     def next_update(self, timestep, states):
-        return self._compute_update(states)
-
-    def _compute_update(self, states):
         for port in ("cell_global", "periplasm_global", "cytoplasm_global"):
             for variable, value in states[port].items():
                 assert isinstance(value, Quantity), (

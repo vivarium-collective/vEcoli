@@ -164,7 +164,7 @@ class TranscriptInitiation(PartitionedProcess):
             'shape': 'tuple[integer,integer]',
         },
         'get_delta_prob_matrix': 'method',
-        'perturbations': 'map[node]',
+        'perturbations': 'map[float]',
         'rna_data': 'units_array',
         'active_rnap_footprint_size': 'unum[nt]',
         'get_rnap_active_fraction_from_ppGpp': 'method',
