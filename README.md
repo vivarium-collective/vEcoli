@@ -161,3 +161,51 @@ and workflow configuration.
 
 If you encounter an issue not addressed by the docs, feel free to create a GitHub issue, and we will
 get back to you as soon as we can.
+
+## V2 engine migration (process-bigraph composite)
+
+vEcoli is being ported from the Vivarium engine (v1) to the
+[process-bigraph](https://github.com/vivarium-collective/process-bigraph)
+composite engine (v2). v2 drives the same scientific processes from a
+typed, declarative JSON document: each process exposes `config_schema()`,
+`inputs()`, and `outputs()`, and the composite is assembled via
+`realize()` rather than pre-built Python instances. Process bodies
+(`next_update`, `defaults`, `ports_schema`) are shared verbatim with v1 —
+only the typed wiring around them changes.
+
+Select an engine per simulation via the config `engine` field:
+
+- `"engine": "vivarium"` → v1 (legacy)
+- `"engine": "composite"` → v2 (new)
+
+### Running the v2 two-generation workflow
+
+From the top-level of the repo, launch a fresh run:
+
+    uvenv runscripts/workflow.py --config configs/two_generations_v2.json
+
+Output lands in `out/two_generations_v2/`. To continue an interrupted
+run, pass `--resume two_generations_v2`. The `configs/two_generations_v2.json`
+profile reuses the v1 parca output at
+`out/two_generations_v1/parca/kb/simData.cPickle`, so run the v1
+workflow first if that cPickle does not yet exist:
+
+    uvenv runscripts/workflow.py --config configs/two_generations_v1.json
+
+### Comparing v1 and v2
+
+Once both workflows have completed, generate a side-by-side HTML report:
+
+    uvenv runscripts/v1_v2_report.py
+
+The report lands at `doc/_static/v1_v2_report.html` (with its embedded
+plot HTMLs copied next to it under `doc/_static/v1_v2_report_assets/`)
+and covers per-generation division times, per-sim wall time and
+seconds-per-tick, and analysis plots (mass fraction, protein counts
+validation, etc.) for each (seed, generation). Use `--out <path>` to
+override the destination.
+
+A committed copy is available at [`doc/_static/v1_v2_report.html`](doc/_static/v1_v2_report.html).
+To view the rendered report directly from GitHub (rather than its
+source), open it via
+[htmlpreview.github.io](https://htmlpreview.github.io/?https://github.com/CovertLab/vEcoli/blob/master/doc/_static/v1_v2_report.html).

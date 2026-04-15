@@ -2,18 +2,30 @@
 
 Pulls task durations from each workflow's nextflow trace CSV and
 embeds the analysis plot HTMLs side-by-side for each (seed, generation)
-combination. Output: out/v1_v2_report.html
+combination.
+
+By default, writes a portable report at ``doc/_static/v1_v2_report.html``
+plus a sibling ``v1_v2_report_assets/`` directory of copied plot HTMLs
+referenced via relative iframes, so the bundle can be committed and
+viewed on GitHub (via htmlpreview.github.io) or rendered locally from
+the checkout.
 """
 import argparse
 import glob
+import json
 import os
 import re
+import shutil
 
 import polars as pl
+import vl_convert as vlc
+
+
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
 
 def load_trace(experiment_id):
-    pattern = f'/home/youdonotexist/code/vEcoli/trace--{experiment_id}--*.csv'
+    pattern = f'{REPO_ROOT}/trace--{experiment_id}--*.csv'
     files = sorted(glob.glob(pattern))
     if not files:
         return None
@@ -23,7 +35,7 @@ def load_trace(experiment_id):
 def division_times(experiment_id):
     """{seed: {gen: division_time_seconds}}"""
     out = {}
-    workdir_root = f'/home/youdonotexist/code/vEcoli/out/{experiment_id}/nextflow/nextflow_workdirs'
+    workdir_root = f'{REPO_ROOT}/out/{experiment_id}/nextflow/nextflow_workdirs'
     for sh_path in glob.glob(f'{workdir_root}/*/*/.command.sh'):
         if 'ecoli_master_sim.py' not in open(sh_path).read():
             continue
@@ -51,7 +63,7 @@ def division_times(experiment_id):
 
 def find_plot(experiment_id, kind, seed=None, gen=None):
     """Return path to a plot HTML/TSV for the given analysis type."""
-    base = f'/home/youdonotexist/code/vEcoli/out/{experiment_id}/analyses'
+    base = f'{REPO_ROOT}/out/{experiment_id}/analyses'
     if seed is not None and gen is not None:
         path = (f'{base}/variant=0/lineage_seed={seed}/generation={gen}/'
                 f'agent_id={"00" if gen == 2 else "0"}/plots/analysis={kind}')
@@ -66,29 +78,81 @@ def find_plot(experiment_id, kind, seed=None, gen=None):
     return tsvs[0] if tsvs else None
 
 
-def embed_plot(label, v1_path, v2_path):
-    def block(p):
-        if p is None:
+VEGA_SPEC_RE = re.compile(r'var spec = (\{.*?\});\s*\n\s*var ', re.DOTALL)
+
+
+def vegalite_to_png(html_path, out_png_path):
+    """Extract the first Vega-Lite spec from a plot HTML, render it
+    to PNG via vl-convert, and write it to out_png_path. Returns True
+    on success, False if no spec was found."""
+    src = open(html_path).read()
+    m = VEGA_SPEC_RE.search(src)
+    if not m:
+        return False
+    spec = json.loads(m.group(1))
+    png_bytes = vlc.vegalite_to_png(spec, scale=1.5)
+    with open(out_png_path, 'wb') as f:
+        f.write(png_bytes)
+    return True
+
+
+def stage_asset(src_path, assets_dir, assets_rel, stem):
+    """Stage the plot for the report and return its relative path.
+
+    For Vega-Lite HTMLs, render to PNG and return the PNG path.
+    For TSVs, copy as-is. Returns None if src_path is None."""
+    if src_path is None:
+        return None
+    if src_path.endswith('.html'):
+        png_name = f'{stem}.png'
+        png_path = os.path.join(assets_dir, png_name)
+        if vegalite_to_png(src_path, png_path):
+            return f'{assets_rel}/{png_name}'
+        # Fallback: plain HTML copy + iframe
+        html_name = f'{stem}.html'
+        shutil.copyfile(src_path, os.path.join(assets_dir, html_name))
+        return f'{assets_rel}/{html_name}'
+    ext = os.path.splitext(src_path)[1]
+    dest_name = f'{stem}{ext}'
+    shutil.copyfile(src_path, os.path.join(assets_dir, dest_name))
+    return f'{assets_rel}/{dest_name}'
+
+
+def embed_plot(label, v1_rel, v2_rel, v1_abs, v2_abs):
+    def block(rel, abs_path):
+        if rel is None:
             return '<em>(missing)</em>'
-        if p.endswith('.html'):
-            return (f'<iframe src="file://{p}" width="100%" '
+        if rel.endswith('.png'):
+            return (f'<img src="{rel}" style="max-width:100%;'
+                    f'border:1px solid #ccc">')
+        if rel.endswith('.html'):
+            return (f'<iframe src="{rel}" width="100%" '
                     f'height="500" style="border:1px solid #ccc"></iframe>')
-        with open(p) as f:
+        with open(abs_path) as f:
             preview = '\n'.join(f.readlines()[:20])
         return f'<pre style="max-height:300px;overflow:auto;background:#f8f8f8;padding:8px">{preview}</pre>'
     return f'''
     <h3>{label}</h3>
     <div style="display:flex;gap:12px">
-        <div style="flex:1"><h4>V1</h4>{block(v1_path)}</div>
-        <div style="flex:1"><h4>V2</h4>{block(v2_path)}</div>
+        <div style="flex:1"><h4>V1</h4>{block(v1_rel, v1_abs)}</div>
+        <div style="flex:1"><h4>V2</h4>{block(v2_rel, v2_abs)}</div>
     </div>
     '''
 
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('--out', default='out/v1_v2_report.html')
+    p.add_argument('--out', default='doc/_static/v1_v2_report.html')
     args = p.parse_args()
+
+    out_path = os.path.abspath(args.out)
+    out_dir = os.path.dirname(out_path)
+    out_stem = os.path.splitext(os.path.basename(out_path))[0]
+    assets_rel = f'{out_stem}_assets'
+    assets_dir = os.path.join(out_dir, assets_rel)
+    if os.path.isdir(assets_dir):
+        shutil.rmtree(assets_dir)
+    os.makedirs(assets_dir, exist_ok=True)
 
     v1_trace = load_trace('two_generations_v1')
     v2_trace = load_trace('two_generations_v2')
@@ -195,14 +259,22 @@ def main():
         for gen in [1, 2]:
             v1_p = find_plot('two_generations_v1', 'mass_fraction_summary', seed, gen)
             v2_p = find_plot('two_generations_v2', 'mass_fraction_summary', seed, gen)
+            stem1 = f'mass_fraction_summary__seed{seed}_gen{gen}_v1'
+            stem2 = f'mass_fraction_summary__seed{seed}_gen{gen}_v2'
+            v1_r = stage_asset(v1_p, assets_dir, assets_rel, stem1)
+            v2_r = stage_asset(v2_p, assets_dir, assets_rel, stem2)
             plots.append(embed_plot(
-                f'mass_fraction_summary — seed {seed}, gen {gen}', v1_p, v2_p))
+                f'mass_fraction_summary — seed {seed}, gen {gen}',
+                v1_r, v2_r, v1_p, v2_p))
     # Multiseed
     for kind in ['protein_counts_validation', 'subgenerational_expression_table',
                  'ecocyc_table']:
         v1_p = find_plot('two_generations_v1', kind)
         v2_p = find_plot('two_generations_v2', kind)
-        plots.append(embed_plot(f'{kind} (multiseed)', v1_p, v2_p))
+        v1_r = stage_asset(v1_p, assets_dir, assets_rel, f'{kind}_v1')
+        v2_r = stage_asset(v2_p, assets_dir, assets_rel, f'{kind}_v2')
+        plots.append(embed_plot(
+            f'{kind} (multiseed)', v1_r, v2_r, v1_p, v2_p))
 
     html = f'''<!DOCTYPE html>
 <html><head><title>vEcoli v1 vs v2 — two_generations</title>
@@ -226,11 +298,10 @@ td:first-child, th:first-child {{ text-align: left; }}
 {''.join(plots)}
 </body></html>
 '''
-    out_path = os.path.abspath(args.out)
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, 'w') as f:
         f.write(html)
     print(f'Report written: {out_path}')
+    print(f'Assets dir:    {assets_dir}')
 
 
 if __name__ == '__main__':
