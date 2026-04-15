@@ -1,0 +1,5 @@
+{
+    "inherit_from": ["two_generations.json"],
+    "experiment_id": "two_generations_v1",
+    "engine": "vivarium"
+}

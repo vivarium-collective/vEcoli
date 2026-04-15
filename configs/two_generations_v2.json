@@ -1,0 +1,6 @@
+{
+    "inherit_from": ["two_generations.json"],
+    "experiment_id": "two_generations_v2",
+    "engine": "composite",
+    "sim_data_path": "out/two_generations_v1/parca/kb/simData.cPickle"
+}
