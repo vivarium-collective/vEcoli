@@ -310,5 +310,6 @@ profiles {
     }
     standard {
         params.projectRoot = "${launchDir}"
+        executor.queueSize = 1
     }
 }

@@ -921,8 +921,12 @@ def generate_code(config):
         ).hexdigest()
         run_parca = [
             f"\tfile('{kb_dir}').copyTo(\"${{params.publishDir}}/${{params.experimentId}}/parca/kb\")",
-            # Create parca_out channel with config URI, config hash, kb URI, kb hash
-            f"\tChannel.of(tuple(params.config, '{config_hash}', '{kb_dir}', '{kb_hash}')).set {{ parca_out }}",
+            # parca_out MUST be a value channel so it gets reused across each
+            # iteration of simCh/multiSeedCh in downstream analyses. A queue
+            # channel (Channel.of) is consumed once and then analyses fire
+            # only once, skipping 3/4 of the per-sim analysisSingle tasks
+            # and 2/3 multiseed analyses.
+            f"\tChannel.value(tuple(params.config, '{config_hash}', '{kb_dir}', '{kb_hash}')).set {{ parca_out }}",
         ]
     else:
         run_parca = [

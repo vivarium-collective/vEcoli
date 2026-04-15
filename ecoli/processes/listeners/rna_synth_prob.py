@@ -52,7 +52,7 @@ class RnaSynthProb(Step):
             'rna_synth_prob': {
                 'actual_rna_synth_prob': f'array[{self.n_TU},float]',
                 'target_rna_synth_prob': f'array[{self.n_TU},float]',
-                'n_bound_TF_per_TU': f'array[({self.n_TU}|{self.n_TF}),integer]',
+                'n_bound_TF_per_TU': f'array[({self.n_TU}|{self.n_TF}),integer[16]]',
                 'total_rna_init': 'integer{0}',
             },
             'promoters': PROMOTER_ARRAY,
@@ -64,16 +64,16 @@ class RnaSynthProb(Step):
     def outputs(self):
         return {
             'rna_synth_prob': {
-                'promoter_copy_number': f'array[{self.n_TU},integer[64]]',
-                'gene_copy_number': f'array[{self.n_cistron},integer[64]]',
-                'bound_TF_indexes': 'array[integer[64]]',
-                'bound_TF_coordinates': 'array[integer[64]]',
-                'bound_TF_domains': 'array[integer]',
+                'promoter_copy_number': f'overwrite[array[{self.n_TU},integer[64]]]',
+                'gene_copy_number': f'overwrite[array[{self.n_cistron},integer[64]]]',
+                'bound_TF_indexes': 'overwrite[array[integer[64]]]',
+                'bound_TF_coordinates': 'overwrite[array[integer[64]]]',
+                'bound_TF_domains': 'overwrite[array[integer]]',
                 # Probabilities — dimensionless floats in [0, 1]
-                'expected_rna_init_per_cistron': f'array[{self.n_cistron},float]',
-                'actual_rna_synth_prob_per_cistron': f'array[{self.n_cistron},float]',
-                'target_rna_synth_prob_per_cistron': f'array[{self.n_cistron},float]',
-                'n_bound_TF_per_cistron': f'array[{self.n_cistron},integer[16]]',
+                'expected_rna_init_per_cistron': f'overwrite[array[{self.n_cistron},float]]',
+                'actual_rna_synth_prob_per_cistron': f'overwrite[array[{self.n_cistron},float]]',
+                'target_rna_synth_prob_per_cistron': f'overwrite[array[{self.n_cistron},float]]',
+                'n_bound_TF_per_cistron': f'overwrite[array[{self.n_cistron},integer[16]]]',
             },
         }
 

@@ -180,7 +180,7 @@ class ChromosomeStructure(Step):
             'bulk': 'bulk_array',
             'listeners': {
                 'rnap_data': {
-                    'active_rnap_n_bound_ribosomes': 'array[integer[64]]',
+                    'active_rnap_n_bound_ribosomes': 'overwrite[array[integer[64]]]',
                     # RNAP/replisome collisions — next_update writes all of these;
                     # match v1's ports_schema so they land in the Parquet emit.
                     'n_total_collisions': 'overwrite[integer]{0}',

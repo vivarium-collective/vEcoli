@@ -479,8 +479,20 @@ class PostDivisionMassListener(MassListener):
 
     name = "post-division-mass-listener"
 
+    def __init__(self, parameters=None):
+        super().__init__(parameters)
+        self._has_run = False
+
     def perform_update(self, states):
-        """v2 gate: always run (post-division runs once at start)."""
+        """v2 gate: run exactly once per sim — at the start (= post
+        load/post-divide), since this listener exists to make sure mass
+        is correct on the daughter's first tick. Returning True every
+        tick caused this listener to be invoked 2-3× per tick by the
+        step trigger system on every bulk write.
+        """
+        if self._has_run:
+            return False
+        self._has_run = True
         return True
 
     def update_condition(self, timestep, states):

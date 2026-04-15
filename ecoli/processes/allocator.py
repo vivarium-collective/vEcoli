@@ -75,13 +75,13 @@ class Allocator(Step):
 
     def outputs(self):
         return {
-            'allocate': 'overwrite[map[map[array[integer[64]]]]]',
+            'allocate': 'overwrite[map[map[overwrite[array[integer[64]]]]]]',
             'request': 'overwrite[map[map[list[integer]]]]',
             'listeners': {
                 'atp': {
                     # length n_processes; written as numpy arrays
-                    'atp_requested': f'array[{self.n_processes},integer[64]]',
-                    'atp_allocated_initial': f'array[{self.n_processes},integer[64]]',
+                    'atp_requested': f'overwrite[array[{self.n_processes},integer[64]]]',
+                    'atp_allocated_initial': f'overwrite[array[{self.n_processes},integer[64]]]',
                 },
             },
         }

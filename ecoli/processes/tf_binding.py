@@ -102,11 +102,11 @@ class TfBinding(Step):
             'promoters': PROMOTER_ARRAY,
             'listeners': {
                 'rna_synth_prob': {
-                    'p_promoter_bound': f'array[{self.n_TF},float]',
-                    'n_promoter_bound': f'array[{self.n_TF},integer]',
-                    'n_actual_bound': f'array[{self.n_TF},integer]',
-                    'n_available_promoters': f'array[{self.n_TF},integer]',
-                    'n_bound_TF_per_TU': f'array[({self.n_TU}|{self.n_TF}),integer]',
+                    'p_promoter_bound': f'overwrite[array[{self.n_TF},float]]',
+                    'n_promoter_bound': f'overwrite[array[{self.n_TF},integer[64]]]',
+                    'n_actual_bound': f'overwrite[array[{self.n_TF},integer[64]]]',
+                    'n_available_promoters': f'overwrite[array[{self.n_TF},integer[64]]]',
+                    'n_bound_TF_per_TU': f'overwrite[array[({self.n_TU}|{self.n_TF}),integer[16]]]',
                 },
             },
             'next_update_time': 'overwrite[float]',

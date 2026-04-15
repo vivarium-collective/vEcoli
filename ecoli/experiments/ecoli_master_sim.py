@@ -853,7 +853,9 @@ class EcoliSim:
         from ecoli.processes.cell_division import DivisionDetected
         from ecoli.library.parquet_emitter import ParquetEmitter
         from process_bigraph import Composite
-        from bigraph_schema import allocate_core
+        from process_bigraph.types.process import (
+            register_types as register_process_bigraph_types)
+        from bigraph_schema import Core, BASE_TYPES
         import time as _time
 
         # Resolve process classes / topologies / configs from registries.
@@ -872,7 +874,12 @@ class EcoliSim:
             self.process_configs, self.processes
         )
 
-        core = allocate_core()
+        # Build the core directly with exactly the types this sim
+        # needs, instead of going through ``allocate_core`` whose
+        # ``discover_packages`` scans every installed distribution
+        # for process libraries (~0.6s/sim wasted on cold start).
+        core = Core(BASE_TYPES)
+        register_process_bigraph_types(core)
         core.register_types(ECOLI_TYPES)
 
         initial_bundle = self.config.get("initial_state_file")

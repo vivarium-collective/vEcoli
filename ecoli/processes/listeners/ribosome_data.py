@@ -75,21 +75,21 @@ class RibosomeData(Step):
             'listeners': {
                 'ribosome_data': {
                     # Counts (dimensionless integers)
-                    'n_ribosomes_per_transcript': f'array[{self.n_monomers},integer[64]]',
-                    'n_ribosomes_on_partial_mRNA_per_transcript': f'array[{self.n_monomers},integer[64]]',
+                    'n_ribosomes_per_transcript': f'overwrite[array[{self.n_monomers},integer[64]]]',
+                    'n_ribosomes_on_partial_mRNA_per_transcript': f'overwrite[array[{self.n_monomers},integer[64]]]',
                     'total_rRNA_initiated': 'overwrite[integer]{0}',
                     'rRNA5S_initiated': 'overwrite[integer]{0}',
                     'rRNA16S_initiated': 'overwrite[integer]{0}',
                     'rRNA23S_initiated': 'overwrite[integer]{0}',
-                    'mRNA_TU_index': 'array[integer[64]]',
-                    'n_ribosomes_on_each_mRNA': 'array[integer[64]]',
+                    'mRNA_TU_index': 'overwrite[array[integer[64]]]',
+                    'n_ribosomes_on_each_mRNA': 'overwrite[array[integer[64]]]',
                     # Probabilities (dimensionless floats in [0,1])
                     'total_rRNA_init_prob': 'overwrite[float]{0.0}',
                     'rRNA5S_init_prob': 'overwrite[float]{0.0}',
                     'rRNA16S_init_prob': 'overwrite[float]{0.0}',
                     'rRNA23S_init_prob': 'overwrite[float]{0.0}',
                     # Mass per polysome — femtograms
-                    'protein_mass_on_polysomes': 'array[float[fg]]',
+                    'protein_mass_on_polysomes': 'overwrite[array[float[fg]]]',
                 },
             },
             'next_update_time': 'overwrite[float]',

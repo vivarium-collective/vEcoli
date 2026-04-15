@@ -71,12 +71,12 @@ class RnapData(Step):
         return {
             'listeners': {
                 'rnap_data': {
-                    'rna_init_event_per_cistron': f'array[{self.n_cistrons},integer[64]]',
-                    'active_rnap_coordinates': 'array[integer[64]]',
-                    'active_rnap_domain_indexes': 'array[integer]',
-                    'active_rnap_unique_indexes': 'array[integer[64]]',
-                    'active_rnap_on_stable_RNA_indexes': 'array[integer[64]]',
-                    'active_rnap_n_bound_ribosomes': 'array[integer[64]]',
+                    'rna_init_event_per_cistron': f'overwrite[array[{self.n_cistrons},integer[64]]]',
+                    'active_rnap_coordinates': 'overwrite[array[integer[64]]]',
+                    'active_rnap_domain_indexes': 'overwrite[array[integer]]',
+                    'active_rnap_unique_indexes': 'overwrite[array[integer[64]]]',
+                    'active_rnap_on_stable_RNA_indexes': 'overwrite[array[integer[64]]]',
+                    'active_rnap_n_bound_ribosomes': 'overwrite[array[integer[64]]]',
                 },
             },
             'next_update_time': 'overwrite[float]',
