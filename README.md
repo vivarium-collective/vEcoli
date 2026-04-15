@@ -194,18 +194,15 @@ workflow first if that cPickle does not yet exist:
 
 ### Comparing v1 and v2
 
-Once both workflows have completed, generate a side-by-side HTML report:
+Once both workflows have completed, generate a side-by-side report:
 
     uvenv runscripts/v1_v2_report.py
 
-The report lands at `doc/_static/v1_v2_report.html` (with its embedded
-plot HTMLs copied next to it under `doc/_static/v1_v2_report_assets/`)
-and covers per-generation division times, per-sim wall time and
-seconds-per-tick, and analysis plots (mass fraction, protein counts
-validation, etc.) for each (seed, generation). Use `--out <path>` to
-override the destination.
+The report lands at `doc/v1_v2_report.md` with plots rendered to PNG
+under `doc/_static/v1_v2_report_assets/`. It covers per-generation
+division times, per-sim wall time and seconds-per-tick, and analysis
+plots (mass fraction, protein counts validation, etc.) for each
+(seed, generation). Use `--out <path>` to override the destination.
 
-A committed copy is available at [`doc/_static/v1_v2_report.html`](doc/_static/v1_v2_report.html).
-To view the rendered report directly from GitHub (rather than its
-source), open it via
-[htmlpreview.github.io](https://htmlpreview.github.io/?https://github.com/CovertLab/vEcoli/blob/master/doc/_static/v1_v2_report.html).
+The committed report renders natively on GitHub:
+**[doc/v1_v2_report.md](doc/v1_v2_report.md)**.
