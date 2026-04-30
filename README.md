@@ -206,3 +206,6 @@ plots (mass fraction, protein counts validation, etc.) for each
 
 The committed report renders natively on GitHub:
 **[doc/v1_v2_report.md](doc/v1_v2_report.md)**.
+
+## Contributing
+External contributions are welcome! Refer to our [Contributor Guide](https://covertlab.github.io/vEcoli/contributing.html) for more details.

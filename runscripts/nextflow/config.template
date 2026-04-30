@@ -311,5 +311,8 @@ profiles {
     standard {
         params.projectRoot = "${launchDir}"
         executor.queueSize = 1
+        process {
+            errorStrategy = 'ignore'
+        }
     }
 }
