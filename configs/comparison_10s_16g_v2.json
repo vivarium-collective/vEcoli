@@ -1,0 +1,6 @@
+{
+    "inherit_from": ["comparison_10s_16g.json"],
+    "experiment_id": "comparison_10s_16g_v2",
+    "engine": "composite",
+    "sim_data_path": "out/comparison_10s_16g_v1/parca/kb/simData.cPickle"
+}
