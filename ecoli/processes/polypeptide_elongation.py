@@ -190,9 +190,16 @@ class PolypeptideElongation(PartitionedProcess):
             'bulk': 'bulk_array',
             'bulk_total': 'bulk_array',
             'polypeptide_elongation': {
-                'gtp_to_hydrolyze': 'float',
-                'aa_count_diff': 'array[float]',
-                'aa_exchange_rates': 'array[float]',
+                # divide_reset mirrors v1's ports_schema dividers for
+                # these process_state fields (zero / empty_dict / set).
+                # Without it v2 carries the mother's mid-tick values into
+                # the daughter, perturbing metabolism's GTP/AA inputs at
+                # the first tick of gen 2 and cascading into bulk diffs.
+                # The outer ``overwrite`` matches outputs() so input/output
+                # schemas resolve cleanly (same Wrap subclass).
+                'gtp_to_hydrolyze': 'overwrite[divide_reset[float]]',
+                'aa_count_diff': 'overwrite[divide_reset[array[float]]]',
+                'aa_exchange_rates': 'overwrite[divide_reset[array[float]]]',
             },
             'timestep': 'integer',
         }
@@ -269,9 +276,12 @@ class PolypeptideElongation(PartitionedProcess):
                 },
             },
             'polypeptide_elongation': {
-                'gtp_to_hydrolyze': 'overwrite[float]{0.0}',
-                'aa_count_diff': {'_type': 'overwrite[array[float]]', '_default': aa_f},
-                'aa_exchange_rates': {'_type': 'overwrite[array[float]]', '_default': aa_f},
+                # See inputs() for rationale — wrap in divide_reset so v2
+                # resets these on division, matching v1's ports_schema
+                # dividers (zero / empty_dict / set).
+                'gtp_to_hydrolyze': 'overwrite[divide_reset[float]]{0.0}',
+                'aa_count_diff': {'_type': 'overwrite[divide_reset[array[float]]]', '_default': aa_f},
+                'aa_exchange_rates': {'_type': 'overwrite[divide_reset[array[float]]]', '_default': aa_f},
             },
         }
 

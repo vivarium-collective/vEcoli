@@ -128,13 +128,20 @@ class Metabolism(Step):
             },
             'boundary': {'external': 'map[quantity[millimolar]]'},
             'polypeptide_elongation': {
-                'gtp_to_hydrolyze': 'float',
-                'aa_count_diff': 'array[float]',
-                'aa_exchange_rates': 'array[float]',
+                # Shared store with PolypeptideElongation — see that
+                # process's inputs() for rationale on divide_reset.
+                # ``overwrite`` outer matches the writer's outputs() so
+                # input/output schemas resolve cleanly.
+                'gtp_to_hydrolyze': 'overwrite[divide_reset[float]]',
+                'aa_count_diff': 'overwrite[divide_reset[array[float]]]',
+                'aa_exchange_rates': 'overwrite[divide_reset[array[float]]]',
             },
             'global_time': 'float',
             'timestep': 'integer',
-            'next_update_time': 'float',
+            # divide_reset matches v1's ``_divider: "set"`` so the
+            # daughter's metabolism schedule starts from time_step rather
+            # than carrying over the mother's mid-cell-cycle next tick.
+            'next_update_time': 'overwrite[divide_reset[float]]',
         }
 
     def outputs(self):
@@ -188,7 +195,7 @@ class Metabolism(Step):
                     'target_aa_conc': 'overwrite[array[float[mM]]]',
                 },
             },
-            'next_update_time': 'overwrite[float]',
+            'next_update_time': 'overwrite[divide_reset[float]]',
         }
 
     defaults = {
