@@ -7,7 +7,7 @@ binding back to DNA.
 import numpy as np
 import warnings
 
-from ecoli.library.ecoli_step import EcoliStep as Step
+from ecoli.library.bigraph_bridge import BigraphStep as Step
 
 from ecoli.processes.registries import topology_registry
 from ecoli.library.schema import bulk_name_to_idx, attrs, numpy_schema

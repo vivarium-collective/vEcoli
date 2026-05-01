@@ -22,7 +22,7 @@ from scipy.sparse import csr_matrix
 from unum import Unum
 from vivarium.library.units import units as vivunits
 
-from ecoli.library.ecoli_step import EcoliStep as Step
+from ecoli.library.bigraph_bridge import BigraphStep as Step
 from ecoli.processes.registries import topology_registry
 from ecoli.library.schema import numpy_schema, bulk_name_to_idx, counts, listener_schema
 from wholecell.utils import units

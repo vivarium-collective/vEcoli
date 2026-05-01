@@ -6,7 +6,7 @@ Unique Molecule Counts Listener
 Counts unique molecules
 """
 
-from ecoli.library.ecoli_step import EcoliStep as Step
+from ecoli.library.bigraph_bridge import BigraphStep as Step
 from ecoli.library.schema import numpy_schema, listener_schema
 from ecoli.processes.registries import topology_registry
 

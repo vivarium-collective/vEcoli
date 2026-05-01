@@ -8,7 +8,7 @@ import numpy as np
 import warnings
 from ecoli.library.schema import numpy_schema, listener_schema, attrs
 from ecoli.library.schema_types import ACTIVE_RNAP_ARRAY, RNA_ARRAY, ACTIVE_RIBOSOME_ARRAY
-from ecoli.library.ecoli_step import EcoliStep as Step
+from ecoli.library.bigraph_bridge import BigraphStep as Step
 
 from ecoli.processes.registries import topology_registry
 from ecoli.processes.transcript_elongation import get_mapping_arrays

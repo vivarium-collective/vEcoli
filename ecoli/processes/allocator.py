@@ -8,7 +8,7 @@ process priorities.
 """
 
 import numpy as np
-from ecoli.library.ecoli_step import EcoliStep as Step
+from ecoli.library.bigraph_bridge import BigraphStep as Step
 from typing import Any
 
 from ecoli.processes.registries import topology_registry

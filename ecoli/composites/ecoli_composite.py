@@ -208,11 +208,14 @@ def build_ecoli_document(core, sim_config):
 
         output_wires = {k: v for k, v in wires.items() if k in output_ports}
 
-        # Determine edge type: Process (continuous-time) vs Step (event-driven)
-        from ecoli.library.ecoli_step import EcoliProcess
-        from process_bigraph import Process as BigraphProcess
+        # Determine edge type: Process (continuous-time) vs Step (event-driven).
+        # BigraphProcess is the vEcoli bridge; ProcessBigraphProcess is the
+        # underlying process-bigraph base class — also accepted in case a
+        # process is registered without the bridge.
+        from ecoli.library.bigraph_bridge import BigraphProcess
+        from process_bigraph import Process as ProcessBigraphProcess
         instance = temp_instances.get(name)
-        if instance is not None and isinstance(instance, (EcoliProcess, BigraphProcess)) and not hasattr(instance, 'triggers'):
+        if instance is not None and isinstance(instance, (BigraphProcess, ProcessBigraphProcess)) and not hasattr(instance, 'triggers'):
             edge_type = 'process'
         else:
             edge_type = 'step'
@@ -669,3 +672,303 @@ def _get_initial_state(load_sim_data, config):
         deep_merge(cell_state, override)
 
     return cell_state
+
+
+# ---------------------------------------------------------------------------
+# Whole-cell process wrapper
+# ---------------------------------------------------------------------------
+#
+# EcoliProcess wraps the entire vEcoli composite as a single process so it
+# can be embedded in a larger simulation. The class subclasses Composite
+# and uses the standard process-bigraph bridge mechanism: external inputs
+# are projected into internal stores, the inner sim runs for the requested
+# interval, and bridge outputs are read back out at the end.
+#
+# Boundary (what an outer simulation sees):
+#   inputs:  external (mM concentrations), media_id (str), global_time (s)
+#   outputs: exchange (counts), cell_mass (fg), dry_mass (fg), volume (L),
+#            agent_id (str)
+#
+# Inside, the cell state is nested under ``agents.<agent_id>`` so the v2
+# division machinery (CompositeDivision adds new agents under the same key)
+# continues to work without changes. For multi-cell outer sims, instantiate
+# multiple EcoliProcess objects with distinct ``agent_id`` values.
+
+
+_DEFAULT_CONFIG_PATH = 'configs/default.json'
+
+
+def _load_default_sim_config():
+    """Load the vEcoli default sim config (configs/default.json).
+
+    Cached because every EcoliProcess instance reads the same defaults.
+    """
+    import json
+    import os
+    if not hasattr(_load_default_sim_config, '_cache'):
+        repo_root = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        path = os.path.join(repo_root, _DEFAULT_CONFIG_PATH)
+        with open(path, 'r') as f:
+            _load_default_sim_config._cache = json.load(f)
+    return copy.deepcopy(_load_default_sim_config._cache)
+
+
+def _resolve_sim_data(sim_data_path, parca_options):
+    """Ensure a sim_data pickle exists; run parca if necessary.
+
+    Returns the path to a usable simData.cPickle.
+
+    Resolution order:
+    1. If ``sim_data_path`` is set and the file exists, return it as-is.
+    2. Else if ``parca_options`` is provided, run parca with those options
+       and return the path to the resulting simData.cPickle (under
+       ``parca_options['outdir']/kb/``).
+    3. Else raise — caller must supply one or the other.
+    """
+    import os
+    from wholecell.utils import constants
+    from wholecell.utils.filepath import is_cloud_uri
+
+    if sim_data_path:
+        if is_cloud_uri(sim_data_path) or os.path.exists(sim_data_path):
+            return sim_data_path
+
+    if not parca_options:
+        raise ValueError(
+            "EcoliProcess: either 'sim_data_path' must point at an "
+            "existing simData.cPickle, or 'parca_options' must be set "
+            "so parca can be run.")
+
+    # Run parca via the runscript helper. It writes simData.cPickle under
+    # ``<outdir>/kb/`` and returns a content hash. We don't use the hash
+    # here — first cut trusts the user's outdir as the cache key.
+    from runscripts.parca import run_parca
+
+    outdir = parca_options.get('outdir', 'out')
+    if not is_cloud_uri(outdir):
+        outdir = os.path.abspath(outdir)
+        os.makedirs(outdir, exist_ok=True)
+    parca_options = dict(parca_options)
+    parca_options['outdir'] = outdir
+    parca_options.setdefault(
+        'cache_dir',
+        os.path.join(outdir, 'cache')
+        if not is_cloud_uri(outdir) else os.path.join(os.getcwd(), 'parca_cache'))
+    if not is_cloud_uri(parca_options['cache_dir']):
+        os.makedirs(parca_options['cache_dir'], exist_ok=True)
+
+    resolved_path = os.path.join(
+        outdir, 'kb', constants.SERIALIZED_SIM_DATA_FILENAME)
+    if os.path.exists(resolved_path):
+        # Outdir already has a parca output — reuse it.
+        return resolved_path
+
+    print(f"[EcoliProcess] Running parca → {resolved_path}", flush=True)
+    run_parca(parca_options)
+    return resolved_path
+
+
+def _build_inner_sim_config(user_config, sim_data_path):
+    """Merge user config onto configs/default.json and resolve registries.
+
+    Produces the dict consumed by ``build_ecoli_document``. Equivalent to
+    what ``EcoliSim._run_composite`` does just before calling
+    ``build_composite_native``: process names → classes, default topology,
+    process_configs sourced from sim_data, etc.
+    """
+    sim_config = _load_default_sim_config()
+
+    # Merge user-provided overrides on top. ``deep_merge`` mutates the
+    # first arg, so we work on the defaults copy.
+    for key, value in user_config.items():
+        if value is None:
+            continue
+        if key in sim_config and isinstance(sim_config[key], dict) and isinstance(value, dict):
+            deep_merge(sim_config[key], value)
+        else:
+            sim_config[key] = value
+
+    sim_config['sim_data_path'] = sim_data_path
+
+    # Resolve process names → classes, topology overrides, process configs.
+    # Reuse EcoliSim's helpers so registry lookup logic stays in one place.
+    from ecoli.experiments.ecoli_master_sim import EcoliSim
+    sim = EcoliSim(sim_config)
+    sim.processes = sim._retrieve_processes(
+        sim.processes, sim.add_processes, sim.exclude_processes,
+        sim.swap_processes)
+    sim.topology = sim._retrieve_topology(
+        sim.topology, sim.processes, sim.swap_processes, sim.log_updates)
+    sim.process_configs = sim._retrieve_process_configs(
+        sim.process_configs, sim.processes)
+    return sim.config
+
+
+def _ecoli_bridge(agent_id):
+    """Bridge wires connecting external ports to internal cell stores.
+
+    The cell state lives under ``agents.<agent_id>`` inside this Composite.
+    """
+    return {
+        'inputs': {
+            'external': ['agents', agent_id, 'boundary', 'external'],
+            'media_id': ['agents', agent_id, 'environment', 'media_id'],
+            'global_time': ['global_time'],
+        },
+        'outputs': {
+            'exchange': ['agents', agent_id, 'environment', 'exchange'],
+            'cell_mass': ['agents', agent_id, 'listeners', 'mass', 'cell_mass'],
+            'dry_mass': ['agents', agent_id, 'listeners', 'mass', 'dry_mass'],
+            'volume': ['agents', agent_id, 'listeners', 'mass', 'volume'],
+        },
+    }
+
+
+def _ecoli_interface():
+    """Declared input/output schema for the wrapped cell.
+
+    These are the ports an outer Composite wires up. Types match the
+    internal stores they bridge to (see ExchangeData and Metabolism
+    schemas in ecoli/processes/{environment/exchange_data,metabolism}.py).
+    """
+    return {
+        'inputs': {
+            'external': 'map[quantity[millimolar]]',
+            'media_id': 'string',
+            'global_time': 'float',
+        },
+        'outputs': {
+            'exchange': 'map[integer]',
+            'cell_mass': 'float[fg]',
+            'dry_mass': 'float[fg]',
+            'volume': 'float[L]',
+        },
+    }
+
+
+# Late import — Composite lives in process-bigraph and doesn't itself
+# trigger any vEcoli-specific machinery, so it's safe to import at module
+# top, but kept local to keep the module's import-time footprint similar
+# to before this class was added.
+from process_bigraph import Composite as _Composite
+
+
+class EcoliProcess(_Composite):
+    """Whole vEcoli model wrapped as a single process.
+
+    Use this to embed E. coli in a larger simulation: instantiate it with
+    a ``sim_data_path`` (or ``parca_options`` to run parca on demand) and
+    wire its declared input/output ports to your outer composite's stores.
+
+    Example::
+
+        from ecoli.composites.ecoli_composite import EcoliProcess
+        from process_bigraph import Composite
+        from bigraph_schema import Core, BASE_TYPES
+
+        core = Core(BASE_TYPES)
+        # ... register process_bigraph + ECOLI_TYPES ...
+
+        ecoli = EcoliProcess(
+            {'sim_data_path': 'out/kb/simData.cPickle',
+             'agent_id': '0', 'seed': 0},
+            core=core)
+        ecoli.run(60.0)  # advance 60 simulated seconds
+
+    For embedding in a parent Composite, reference by class address
+    (``local:!ecoli.composites.ecoli_composite.EcoliProcess``) and supply
+    the same config_schema fields under the child's ``config`` key.
+    """
+
+    config_schema = {
+        # --- sim_data sourcing (one of these is required at initialize) ---
+        'sim_data_path': 'maybe[string]',
+        'parca_options': 'maybe[tree[any]]',
+
+        # --- cell identity ---
+        'agent_id': 'string',
+        'seed': 'integer',
+        'time_step': 'float',
+        'initial_global_time': 'float',
+
+        # --- media / condition ---
+        'media_id': 'string',
+        'fixed_media': 'string',
+        'condition': 'string',
+        'mar_regulon': 'boolean',
+        'amp_lysis': 'boolean',
+
+        # --- bulk overrides on the loaded sim config ---
+        # Anything in here is deep-merged onto configs/default.json before
+        # build_ecoli_document is called. Use this to add antibiotics
+        # processes, custom topology, etc. (mirrors the JSON-config path).
+        'sim_config': 'tree[any]',
+
+        # --- initial state options ---
+        'initial_state': 'tree[any]',
+        'initial_state_file': 'maybe[string]',
+        'initial_state_overrides': 'list[string]',
+
+        # --- division (handled internally if true) ---
+        'divide': 'boolean',
+
+        # --- pass-throughs to Composite ---
+        'parallel_steps': 'boolean',
+        'parallel_workers': 'maybe[integer]',
+        'global_time_precision': 'maybe[float]',
+
+        # --- filled by ``initialize`` before delegating to Composite ---
+        'state': 'tree[node]',
+        'schema': 'schema',
+        'interface': {'inputs': 'schema', 'outputs': 'schema'},
+        'bridge': {'inputs': 'wires', 'outputs': 'wires'},
+        'run_steps_on_init': 'boolean',
+    }
+
+    def initialize(self, config=None):
+        """Resolve sim_data, build the inner cell, configure the bridge."""
+        cfg = self._config
+
+        # Collapse the user-facing keys into a sim_config dict that
+        # build_ecoli_document understands.
+        user_config = dict(cfg.get('sim_config') or {})
+        for key in (
+                'agent_id', 'seed', 'time_step', 'initial_global_time',
+                'fixed_media', 'condition', 'mar_regulon', 'amp_lysis',
+                'initial_state', 'initial_state_file',
+                'initial_state_overrides', 'divide'):
+            value = cfg.get(key)
+            if value is not None:
+                user_config[key] = value
+
+        sim_data_path = _resolve_sim_data(
+            cfg.get('sim_data_path'), cfg.get('parca_options'))
+
+        agent_id = str(cfg.get('agent_id') or '0')
+
+        # Build (or load) the inner state and stuff it into self._config so
+        # Composite.initialize picks it up.
+        initial_state_file = cfg.get('initial_state_file')
+        if initial_state_file and os.path.isdir(initial_state_file):
+            # Bundle reload path. Composite.load_bundle handles document
+            # parsing; we replicate a minimal subset here so realize() runs
+            # against the bundle's saved state.
+            from process_bigraph.bundle import load_bundle
+            document = load_bundle(initial_state_file, as_numpy=True)
+            cfg['state'] = document.get('state', {})
+            cfg.setdefault('schema', document.get('schema', {}))
+        else:
+            inner_sim_config = _build_inner_sim_config(
+                user_config, sim_data_path)
+            cfg['state'] = build_ecoli_document(self.core, inner_sim_config)
+
+        cfg['bridge'] = _ecoli_bridge(agent_id)
+        cfg['interface'] = _ecoli_interface()
+
+        super().initialize(config)
+
+
+# Late import: ``os`` is used by the bundle-reload branch above.
+import os
+

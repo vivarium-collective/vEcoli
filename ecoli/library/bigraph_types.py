@@ -45,9 +45,6 @@ from bigraph_schema.methods.handle_parameters import align_parameters
 from bigraph_schema import capture_object_state, restore_object_value
 from bigraph_schema.methods.bundle import register_derived_function_resolver
 
-from vivarium.core.process import Process as VivariumProcess, Step as VivariumStep
-from process_bigraph import Step as BigraphStep, Process as BigraphProcess
-
 from wholecell.utils.unit_struct_array import UnitStructArray
 
 

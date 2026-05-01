@@ -9,7 +9,7 @@ Represents the total cellular mass.
 import numpy as np
 from numpy.lib import recfunctions as rfn
 
-from ecoli.library.ecoli_step import EcoliStep as Step
+from ecoli.library.bigraph_bridge import BigraphStep as Step
 from ecoli.library.schema import numpy_schema, counts, attrs, bulk_name_to_idx
 from ecoli.processes.registries import topology_registry
 from wholecell.utils import units

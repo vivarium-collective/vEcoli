@@ -69,7 +69,7 @@ def install_patches():
     Allocator.update = traced
 
     # Also trace tf_binding / tf_unbinding / chromosome_structure
-    from ecoli.library.ecoli_step import EcoliStep
+    from ecoli.library.bigraph_bridge import BigraphStep
     extra_names = ('tf-binding', 'tf-unbinding', 'chromosome-structure')
     import ecoli.processes.tf_binding as tfb_mod
     import ecoli.processes.tf_unbinding as tfu_mod
@@ -77,7 +77,7 @@ def install_patches():
     for mod in (tfb_mod, tfu_mod, cs_mod):
         for attr_name in dir(mod):
             cls = getattr(mod, attr_name)
-            if isinstance(cls, type) and issubclass(cls, EcoliStep) and cls is not EcoliStep:
+            if isinstance(cls, type) and issubclass(cls, BigraphStep) and cls is not BigraphStep:
                 if hasattr(cls, 'update') and 'update' in cls.__dict__:
                     orig_m = cls.__dict__['update']
                     def make(orig_m=orig_m):

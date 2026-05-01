@@ -10,7 +10,7 @@ from unum import Unum
 import warnings
 from scipy.sparse import csr_matrix
 
-from ecoli.library.ecoli_step import EcoliStep as Step
+from ecoli.library.bigraph_bridge import BigraphStep as Step
 from vivarium.library.units import units as vivunits
 
 from ecoli.library.schema import numpy_schema, bulk_name_to_idx, listener_schema, counts

@@ -7,7 +7,7 @@ RNA Counts Listener
 import numpy as np
 from ecoli.library.schema import numpy_schema, attrs, listener_schema
 from ecoli.library.schema_types import RNA_ARRAY
-from ecoli.library.ecoli_step import EcoliStep as Step
+from ecoli.library.bigraph_bridge import BigraphStep as Step
 
 from ecoli.processes.registries import topology_registry
 

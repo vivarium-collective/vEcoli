@@ -7,7 +7,7 @@ DNA Supercoiling Listener
 import numpy as np
 from ecoli.library.schema import numpy_schema, listener_schema, attrs
 from ecoli.library.schema_types import CHROMOSOMAL_SEGMENT_ARRAY
-from ecoli.library.ecoli_step import EcoliStep as Step
+from ecoli.library.bigraph_bridge import BigraphStep as Step
 
 from ecoli.processes.registries import topology_registry
 

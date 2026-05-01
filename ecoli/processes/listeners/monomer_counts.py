@@ -11,7 +11,7 @@ from ecoli.library.schema_types import (
     ACTIVE_RNAP_ARRAY,
     ACTIVE_REPLISOME_ARRAY,
 )
-from ecoli.library.ecoli_step import EcoliStep as Step
+from ecoli.library.bigraph_bridge import BigraphStep as Step
 
 from ecoli.processes.registries import topology_registry
 

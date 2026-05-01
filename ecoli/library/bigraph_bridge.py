@@ -1,10 +1,13 @@
 """
-===================
-E. coli Step Bridge
-===================
+================
+Bigraph Bridge
+================
 
 Bridge base classes that inherit from both vivarium-core and
 process-bigraph, providing a unified interface for vEcoli processes.
+The "Bigraph" prefix marks these as the bridge: a vivarium-style API
+running on the process-bigraph runtime. Plain vivarium processes still
+work in the v1 engine; ``BigraphStep`` / ``BigraphProcess`` work in both.
 
 Each vEcoli process defines:
 
@@ -23,10 +26,13 @@ The bridge ensures both are available regardless of which path was used.
 
 from bigraph_schema.methods import default as schema_default
 from vivarium.core.process import Step as VivariumStep, Process as VivariumProcess
-from process_bigraph import Step as BigraphStep, Process as BigraphProcess
+from process_bigraph import (
+    Step as ProcessBigraphStep,
+    Process as ProcessBigraphProcess,
+)
 
 
-class EcoliStep(VivariumStep, BigraphStep):
+class BigraphStep(VivariumStep, ProcessBigraphStep):
     """Base class for vEcoli steps.
 
     Subclasses implement ``update(state, interval)`` as the primary
@@ -85,7 +91,7 @@ class EcoliStep(VivariumStep, BigraphStep):
 
         # process-bigraph init — sets self.config via Edge.__init__
         if core is not None:
-            BigraphStep.__init__(self, config=config or {}, core=core)
+            ProcessBigraphStep.__init__(self, config=config or {}, core=core)
         else:
             # Ensure self.config is available even without core.
             # Use self.parameters (post-merge with defaults) so
@@ -127,11 +133,11 @@ class EcoliStep(VivariumStep, BigraphStep):
         If a subclass overrides ``next_update`` (vivarium-style) but not
         ``update``, delegate to the subclass's ``next_update`` so the
         composite engine path also picks up the logic. We skip the
-        delegation when ``next_update`` is EcoliStep's own version (which
+        delegation when ``next_update`` is BigraphStep's own version (which
         just calls ``update``) to avoid infinite recursion.
         """
         cls = type(self)
-        _delegation_bases = (EcoliStep, EcoliProcess)
+        _delegation_bases = (BigraphStep, BigraphProcess)
         for klass in cls.__mro__:
             if 'next_update' in klass.__dict__:
                 if klass not in _delegation_bases:
@@ -140,10 +146,10 @@ class EcoliStep(VivariumStep, BigraphStep):
         return {}
 
 
-class EcoliProcess(VivariumProcess, BigraphProcess):
+class BigraphProcess(VivariumProcess, ProcessBigraphProcess):
     """Base class for vEcoli processes (time-driven, with interval).
 
-    Same bridge pattern as EcoliStep but for temporal processes.
+    Same bridge pattern as BigraphStep but for temporal processes.
     """
 
     config_schema = {
@@ -151,7 +157,7 @@ class EcoliProcess(VivariumProcess, BigraphProcess):
     }
     _output_ports = None
 
-    _defaults_from_schema = EcoliStep._defaults_from_schema
+    _defaults_from_schema = BigraphStep._defaults_from_schema
 
     def __init__(self, config=None, core=None):
         if self.config_schema and not self.__class__.__dict__.get('defaults'):
@@ -160,7 +166,7 @@ class EcoliProcess(VivariumProcess, BigraphProcess):
         VivariumProcess.__init__(self, parameters=config)
 
         if core is not None:
-            BigraphProcess.__init__(self, config=config or {}, core=core)
+            ProcessBigraphProcess.__init__(self, config=config or {}, core=core)
         else:
             self._config = self.parameters
 
@@ -168,9 +174,9 @@ class EcoliProcess(VivariumProcess, BigraphProcess):
         return self.update(states, timestep)
 
     def update(self, state, interval):
-        """Same delegation as EcoliStep.update."""
+        """Same delegation as BigraphStep.update."""
         cls = type(self)
-        _delegation_bases = (EcoliStep, EcoliProcess)
+        _delegation_bases = (BigraphStep, BigraphProcess)
         for klass in cls.__mro__:
             if 'next_update' in klass.__dict__:
                 if klass not in _delegation_bases:

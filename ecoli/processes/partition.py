@@ -19,7 +19,7 @@ import warnings
 
 import numpy as np
 
-from ecoli.library.ecoli_step import EcoliStep as Step, EcoliProcess as Process
+from ecoli.library.bigraph_bridge import BigraphStep as Step, BigraphProcess as Process
 from ecoli.library.schema_types import UNIQUE_TYPES
 from vivarium.library.dict_utils import deep_merge
 

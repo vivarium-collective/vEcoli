@@ -51,7 +51,7 @@ def _is_process_instance(v):
     cls = type(v)
     mod = getattr(cls, '__module__', '') or ''
     return (mod.startswith('ecoli.processes')
-            or mod.startswith('ecoli.library.ecoli_step')
+            or mod.startswith('ecoli.library.bigraph_bridge')
             or mod.startswith('ecoli.composites')
             or mod.endswith('.process')
             or mod.endswith('.step')

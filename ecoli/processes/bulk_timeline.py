@@ -1,4 +1,4 @@
-from ecoli.library.ecoli_step import EcoliProcess as Process
+from ecoli.library.bigraph_bridge import BigraphProcess as Process
 from ecoli.library.schema import bulk_name_to_idx, numpy_schema, counts
 
 

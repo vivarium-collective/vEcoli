@@ -1,4 +1,4 @@
-from ecoli.library.ecoli_step import EcoliStep as Step
+from ecoli.library.bigraph_bridge import BigraphStep as Step
 from ecoli.library.schema import numpy_schema
 from ecoli.library.schema_types import UNIQUE_TYPES
 
