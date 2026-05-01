@@ -364,6 +364,20 @@ def build_ecoli_document(core, sim_config):
         cell_state.setdefault('allocate', {}).setdefault(
             proc_name, {'bulk': _np.zeros(n_bulk, dtype=_np.int64)})
 
+    # Seed allocator_rng deterministically from the Allocator config.
+    # Without this, ``realize(NPRandom, None)`` falls back to
+    # ``RandomState()`` (system entropy), making gen 1 non-reproducible
+    # and producing a non-deterministic saved RNG state at division.
+    # ``_reseed_allocator_rng`` is the post-bundle-load counterpart that
+    # mirrors v1's per-generation re-seeding.
+    allocator_seed = next(
+        (cfg.get('seed') for nm, cfg in configs.items()
+         if nm.startswith('allocator_') and isinstance(cfg, dict)),
+        None)
+    if allocator_seed is not None:
+        cell_state['allocator_rng'] = _np.random.RandomState(
+            seed=int(allocator_seed))
+
     # 9b. For non-partitioned Steps whose topology references a
     # next_update_time store (e.g. Metabolism), initialize that store so
     # the perform_update() gate in process-bigraph's run_steps correctly
@@ -385,6 +399,53 @@ def build_ecoli_document(core, sim_config):
 
 # Keep backward compat alias
 build_composite_native = build_ecoli_document
+
+
+def _reseed_allocator_rng(state, agent_id='0'):
+    """Reset ``allocator_rng`` to a freshly-seeded RandomState.
+
+    v1 re-creates ``allocator_rng`` from ``config.seed`` at every
+    generation start (via the Composer roundtrip). v2's saved bundle
+    preserves the mother's advanced RNG state across division, so a
+    daughter loaded from disk would replay a different RNG stream than
+    v1 — diverging at the first stochastic allocation in gen 2.
+
+    This helper restores v1 parity by writing a fresh
+    ``RandomState(seed=allocator_seed)`` into the allocator_rng store
+    after a bundle load. It accepts either an ``{'agents': {...}}``
+    wrapper (the document shape) or a bare cell dict.
+
+    Mutates ``state`` in place. No-op if no allocator process is
+    declared (e.g. no PartitionedProcesses in the sim).
+    """
+    import numpy as _np
+    if isinstance(state, dict) and 'agents' in state:
+        cell = state['agents'].get(agent_id)
+        if cell is None:
+            cell = state['agents'][next(iter(state['agents']))]
+    else:
+        cell = state
+    if not isinstance(cell, dict):
+        return
+    # Allocator Step declarations live at the top level of the cell
+    # (allocator_1, allocator_2, ...), not under 'process' (which holds
+    # SharedProcess declarations for PartitionedProcesses). Look at both,
+    # preferring top-level since that's where Steps land.
+    seed = None
+    for name, decl in cell.items():
+        if name.startswith('allocator_') and isinstance(decl, dict):
+            seed = decl.get('config', {}).get('seed')
+            if seed is not None:
+                break
+    if seed is None:
+        for name, decl in cell.get('process', {}).items():
+            if name.startswith('allocator_') and isinstance(decl, dict):
+                seed = decl.get('config', {}).get('seed')
+                if seed is not None:
+                    break
+    if seed is None:
+        return
+    cell['allocator_rng'] = _np.random.RandomState(seed=int(seed))
 
 
 # ---------------------------------------------------------------------------
@@ -956,7 +1017,10 @@ class EcoliProcess(_Composite):
             # against the bundle's saved state.
             from process_bigraph.bundle import load_bundle
             document = load_bundle(initial_state_file, as_numpy=True)
-            cfg['state'] = document.get('state', {})
+            loaded_state = document.get('state', {})
+            # Match v1: re-seed allocator_rng at each generation start.
+            _reseed_allocator_rng(loaded_state, agent_id)
+            cfg['state'] = loaded_state
             cfg.setdefault('schema', document.get('schema', {}))
         else:
             inner_sim_config = _build_inner_sim_config(

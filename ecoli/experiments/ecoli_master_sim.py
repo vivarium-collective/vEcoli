@@ -889,6 +889,12 @@ class EcoliSim:
             print(f"Loading composite from bundle {initial_bundle}...", flush=True)
             t0 = _time.time()
             ecoli = Composite.load_bundle(initial_bundle, core=core)
+            # Match v1: re-seed allocator_rng from config.seed at each
+            # generation start. The bundle saved the mother's advanced
+            # RNG state; without this reset the daughter would replay a
+            # different stochastic stream than v1.
+            from ecoli.composites.ecoli_composite import _reseed_allocator_rng
+            _reseed_allocator_rng(ecoli.state, self.config.get('agent_id', '0'))
             print(f"  Loaded in {_time.time()-t0:.2f}s", flush=True)
         else:
             print("Building composite document directly from sim_data...", flush=True)
