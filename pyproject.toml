@@ -85,9 +85,9 @@ docs = [
     "pre-commit"
 ]
 
-[tool.uv.sources]
-bigraph-schema = { path = "../bigraph-schema", editable = true }
-process-bigraph = { path = "../process-bigraph", editable = true }
+#[tool.uv.sources]
+#bigraph-schema = { path = "../bigraph-schema", editable = true }
+#process-bigraph = { path = "../process-bigraph", editable = true }
 
 [tool.setuptools]
 packages = [
