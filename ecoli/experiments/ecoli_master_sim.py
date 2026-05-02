@@ -997,11 +997,6 @@ class EcoliSim:
         # Matches v1's handoff model (stop, save daughters, let the
         # next workflow generation bootstrap fresh from the bundles).
         # Step 1s so emit cadence matches v1's per-tick emit.
-        # ``_halt_after_structural`` opts into composite.run's early-
-        # return-on-structural-change so daughter step processes
-        # don't fire on the divide tick (which would overwrite the
-        # divide_reset zeros with post-evolve values before save).
-        ecoli._halt_after_structural = True
         poll_s = 1.0
         current_t = float(ecoli.state.get('global_time', 0.0))
         end_t = current_t + float(self.max_duration)

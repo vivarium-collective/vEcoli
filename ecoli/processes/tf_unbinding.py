@@ -49,14 +49,14 @@ class TfUnbinding(Step):
             'promoters': PROMOTER_ARRAY,
             'global_time': 'float{0.0}',
             'timestep': 'integer',
-            'next_update_time': 'overwrite[divide_reset[float]]',
+            'next_update_time': 'overwrite[float]',
         }
 
     def outputs(self):
         return {
             'bulk': 'bulk_array',
             'promoters': PROMOTER_ARRAY,
-            'next_update_time': 'overwrite[divide_reset[float]]',
+            'next_update_time': 'overwrite[float]',
         }
 
 

@@ -55,7 +55,7 @@ class Requester(Step):
         # divide_reset matches v1's ``_divider: "set"`` so daughter
         # cells start their schedule from time_step rather than carrying
         # the mother's mid-cycle next tick.
-        ports['next_update_time'] = f'overwrite[divide_reset[float]]{{{float(timestep)}}}'
+        ports['next_update_time'] = f'overwrite[float]{{{float(timestep)}}}'
         ports['process'] = 'shared_process'
         return ports
 
@@ -71,7 +71,7 @@ class Requester(Step):
             # the default is non-positive — using timestep matches the
             # cell_state.setdefault that lived in build_ecoli_document).
             'next_update_time': {
-                '_type': 'overwrite[divide_reset[float]]',
+                '_type': 'overwrite[float]',
                 '_default': float(timestep),
             },
         }
@@ -202,7 +202,7 @@ class Evolver(Step):
         ports['global_time'] = 'float{0.0}'
         ports['timestep'] = f'integer{{{timestep}}}'
         # divide_reset matches v1's ``_divider: "set"`` (see Requester).
-        ports['next_update_time'] = f'overwrite[divide_reset[float]]{{{float(timestep)}}}'
+        ports['next_update_time'] = f'overwrite[float]{{{float(timestep)}}}'
         ports['process'] = 'shared_process'
         return ports
 
@@ -213,7 +213,7 @@ class Evolver(Step):
         # Evolver writes next_update_time and process in addition to
         # whatever the wrapped process declares.
         ports['next_update_time'] = {
-            '_type': 'overwrite[divide_reset[float]]',
+            '_type': 'overwrite[float]',
             '_default': float(timestep),
         }
         ports['process'] = 'shared_process'

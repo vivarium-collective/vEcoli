@@ -132,7 +132,7 @@ class Metabolism(Step):
                 # process's inputs() for rationale on divide_reset.
                 # ``overwrite`` outer matches the writer's outputs() so
                 # input/output schemas resolve cleanly.
-                'gtp_to_hydrolyze': 'overwrite[divide_reset[float]]',
+                'gtp_to_hydrolyze': 'overwrite[float]',
                 'aa_count_diff': 'overwrite[divide_reset[array[float]]]',
                 'aa_exchange_rates': 'overwrite[divide_reset[array[float]]]',
             },
@@ -141,7 +141,7 @@ class Metabolism(Step):
             # divide_reset matches v1's ``_divider: "set"`` so the
             # daughter's metabolism schedule starts from time_step rather
             # than carrying over the mother's mid-cell-cycle next tick.
-            'next_update_time': 'overwrite[divide_reset[float]]',
+            'next_update_time': 'overwrite[float]',
         }
 
     def outputs(self):
@@ -195,7 +195,7 @@ class Metabolism(Step):
                     'target_aa_conc': 'overwrite[array[float[mM]]]',
                 },
             },
-            'next_update_time': 'overwrite[divide_reset[float]]',
+            'next_update_time': 'overwrite[float]',
         }
 
     defaults = {
