@@ -51,7 +51,7 @@ class Allocator(Step):
         'molecule_names': 'array[string]',
         'process_names': 'list[string]',
         'custom_priorities': 'map[integer]',
-        'seed': 'integer{0}',
+        'seed': 'lineage_seed[integer]',
         'time_step': 'float{1.0}',
         'emit_unique': 'boolean{false}',
     }

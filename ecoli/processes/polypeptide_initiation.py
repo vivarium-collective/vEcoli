@@ -66,7 +66,7 @@ class PolypeptideInitiation(PartitionedProcess):
         'monomer_index_to_tu_indexes': 'map[integer,array[integer]]',
         'ribosome30S': 'string',
         'ribosome50S': 'string',
-        'seed': 'integer',
+        'seed': 'lineage_seed[integer]',
         'monomer_ids': 'array[string]',
         'emit_unique': 'boolean',
     }

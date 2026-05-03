@@ -57,8 +57,8 @@ class DivisionDetector(Step):
             # so the daughter starts with division_trigger=False and
             # division_threshold reset to its configured default rather
             # than carrying over the mother's mid-cell-cycle values.
-            'division_trigger': 'overwrite[divide_reset[boolean]]',
-            'division_threshold': 'overwrite[divide_reset[union[boolean,string,float]]]',
+            'division_trigger': 'overwrite[boolean]',
+            'division_threshold': 'overwrite[union[boolean,string,float]]',
         }
 
     def ports_schema(self):

@@ -172,7 +172,7 @@ class PolypeptideElongation(PartitionedProcess):
         'k_SpoT_deg': 'float',
         'KI_SpoT': 'array[float]',
         'aa_supply_scaling': 'method',
-        'seed': 'integer',
+        'seed': 'lineage_seed[integer]',
         'emit_unique': 'boolean',
     }
 
@@ -199,7 +199,7 @@ class PolypeptideElongation(PartitionedProcess):
                 # schemas resolve cleanly (same Wrap subclass).
                 'gtp_to_hydrolyze': 'overwrite[divide_reset[float]]',
                 'aa_count_diff': 'overwrite[divide_reset[array[float]]]',
-                'aa_exchange_rates': 'overwrite[divide_reset[array[float]]]',
+                'aa_exchange_rates': 'overwrite[divide_share[array[float]]]',
             },
             'timestep': 'integer',
         }
@@ -230,7 +230,7 @@ class PolypeptideElongation(PartitionedProcess):
                     # Concentration — millimolar
                     'aa_supply_aa_conc': {'_type': 'overwrite[array[float[mM]]]', '_default': aa_f},
                     # Count deltas and pool sizes (n_aa-length)
-                    'aa_count_diff': {'_type': 'overwrite[array[float]]', '_default': aa_f},
+                    'aa_count_diff': {'_type': 'overwrite[divide_reset[array[float]]]', '_default': aa_f},
                     'aas_used': {'_type': 'overwrite[array[integer[64]]]', '_default': aa_i},
                     'aa_allocated': {'_type': 'overwrite[array[integer[64]]]', '_default': aa_i},
                     'aa_pool_size': {'_type': 'overwrite[array[integer[64]]]', '_default': aa_i},
@@ -281,7 +281,7 @@ class PolypeptideElongation(PartitionedProcess):
                 # dividers (zero / empty_dict / set).
                 'gtp_to_hydrolyze': 'overwrite[divide_reset[float]]{0.0}',
                 'aa_count_diff': {'_type': 'overwrite[divide_reset[array[float]]]', '_default': aa_f},
-                'aa_exchange_rates': {'_type': 'overwrite[divide_reset[array[float]]]', '_default': aa_f},
+                'aa_exchange_rates': {'_type': 'overwrite[divide_share[array[float]]]', '_default': aa_f},
             },
         }
 

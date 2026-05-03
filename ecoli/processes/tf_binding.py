@@ -66,7 +66,7 @@ class TfBinding(Step):
         'active_to_inactive_tf': 'map[string]',
         'bulk_molecule_ids': 'array[string]',
         'bulk_mass_data': {'_type': 'unum[array[float],g/mol]', '_default': None},
-        'seed': {'_type': 'integer', '_default': 0},
+        'seed': 'lineage_seed[integer]',
         'submass_to_idx': {'_type': 'map[integer]', '_default': {
             "rRNA": 0,
             "tRNA": 1,

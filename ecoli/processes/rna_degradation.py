@@ -102,7 +102,7 @@ class RnaDegradation(PartitionedProcess):
         'ribosome30S': 'string',
         'ribosome50S': 'string',
         'Kms': 'unum[array[float],mol/L]',
-        'seed': 'integer',
+        'seed': 'lineage_seed[integer]',
         'emit_unique': 'boolean',
     }
 

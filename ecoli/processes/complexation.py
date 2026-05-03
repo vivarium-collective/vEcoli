@@ -42,7 +42,7 @@ class Complexation(PartitionedProcess):
         'stoichiometry': 'array[integer[64]]',
         'rates': 'array[float]',
         'molecule_names': 'list[string]',
-        'seed': 'integer',
+        'seed': 'lineage_seed[integer]',
         'reaction_ids': 'list[string]',
         'complex_ids': 'list[string]',
     }

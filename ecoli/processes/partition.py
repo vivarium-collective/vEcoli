@@ -52,9 +52,12 @@ class Requester(Step):
         # Requester also reads these control ports
         ports['global_time'] = 'float{0.0}'
         ports['timestep'] = f'integer{{{timestep}}}'
-        # divide_reset matches v1's ``_divider: "set"`` so daughter
-        # cells start their schedule from time_step rather than carrying
-        # the mother's mid-cycle next tick.
+        # Plain ``overwrite[float]`` shares mother's value on divide
+        # (matches v1's ``_divider: "set"`` semantics). The daughter
+        # inherits mother's last-written ``next_update_time``
+        # (= current_time + interval) so the evolver gate
+        # ``next_update_time <= global_time`` is False on the daughter's
+        # divide tick — preventing it from firing with stale state.
         ports['next_update_time'] = f'overwrite[float]{{{float(timestep)}}}'
         ports['process'] = 'shared_process'
         return ports

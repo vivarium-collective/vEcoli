@@ -85,7 +85,7 @@ class MetabolismRedux(Step):
         'linked_metabolites': 'maybe[map[(lead:string|ratio:unum[dimensionless])]]',
         'aa_exchange_names': 'list[string]',
         'removed_aa_uptake': 'list[string]',
-        'seed': 'integer{0}',
+        'seed': 'lineage_seed[integer]',
         'base_reaction_ids': 'list[string]',
         'fba_reaction_ids_to_base_reaction_ids': 'list[integer]',
         'constraints_to_disable': 'list[string]',

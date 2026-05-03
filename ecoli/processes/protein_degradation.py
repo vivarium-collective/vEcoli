@@ -45,7 +45,7 @@ class ProteinDegradation(PartitionedProcess):
         'amino_acid_counts': 'array[integer[64]]',
         'protein_ids': 'array[string]',
         'protein_lengths': 'array[integer[64]]',
-        'seed': 'integer',
+        'seed': 'lineage_seed[integer]',
     }
 
     def inputs(self):

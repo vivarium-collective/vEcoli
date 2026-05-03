@@ -112,7 +112,7 @@ class Division(Step):
         'division_threshold': 'union[boolean,string,float]',
         # dry_mass_inc_dict maps media_id → Unum[fg] mass increase.
         'dry_mass_inc_dict': 'map[unum[fg]]',
-        'seed': 'integer{0}',
+        'seed': 'lineage_seed[integer]',
         # daughter_ids_function generates daughter agent_ids at
         # division time.
         'daughter_ids_function': 'function',
@@ -254,7 +254,7 @@ class CompositeDivision(Division):
         'agent_id': 'string',
         'division_threshold': 'union[boolean,string,float]',
         'dry_mass_inc_dict': 'map[unum[fg]]',
-        'seed': 'integer{0}',
+        'seed': 'lineage_seed[integer]',
         'daughter_ids_function': 'function',
     }
 

@@ -856,6 +856,37 @@ class EcoliSim:
         from process_bigraph.types.process import (
             register_types as register_process_bigraph_types)
         from bigraph_schema import Core, BASE_TYPES
+        from bigraph_schema.methods.derive import (
+            DerivationContext,
+            install_derivation_context,
+            uninstall_derivation_context,
+        )
+        import time as _time
+
+        # Install the per-generation derivation context. Process
+        # ``seed`` fields declared as ``lineage_seed[integer]`` are
+        # combined with this value at realize time, so each generation's
+        # processes get the v1-equivalent ``(default + cli_seed) %
+        # RAND_MAX`` derived seed without callers having to walk the
+        # state and reseed individual RandomStates after a bundle load.
+        derivation_context = DerivationContext(
+            lineage_seed=int(self.config.get("seed", 0)))
+        prev_derivation_context = install_derivation_context(
+            derivation_context)
+        try:
+            self._run_composite_inner()
+        finally:
+            uninstall_derivation_context(prev_derivation_context)
+
+    def _run_composite_inner(self):
+        from ecoli.composites.ecoli_composite import build_composite_native
+        from ecoli.library.bigraph_types import ECOLI_TYPES
+        from ecoli.processes.cell_division import DivisionDetected
+        from ecoli.library.parquet_emitter import ParquetEmitter
+        from process_bigraph import Composite
+        from process_bigraph.types.process import (
+            register_types as register_process_bigraph_types)
+        from bigraph_schema import Core, BASE_TYPES
         import time as _time
 
         # Resolve process classes / topologies / configs from registries.
@@ -904,7 +935,19 @@ class EcoliSim:
 
             print("Creating composite (with realize)...", flush=True)
             t0 = _time.time()
-            ecoli = Composite({'schema': {}, 'state': state}, core=core)
+            # ``run_steps_on_init`` fires derivers (mass listeners,
+            # post-division-mass-listener, etc.) at startup so they set
+            # their ``timeInitial`` / ``initial_mass`` references at
+            # t=0 before any process runs. Mirrors v1 vivarium's
+            # ``Engine.__init__`` -> ``run_steps()`` call. Without this,
+            # derivers' first call happens after the first process tick
+            # — their internal baselines lock in to slightly different
+            # values than v1, drifting fold_change values throughout.
+            # Evolvers won't fire (their gate ``next_update_time
+            # <= global_time`` is False at t=0 since default
+            # next_update_time = 1.0).
+            ecoli = Composite({'schema': {}, 'state': state,
+                               'run_steps_on_init': True}, core=core)
             print(f"  Composite created in {_time.time()-t0:.2f}s", flush=True)
 
         # Steps should only run when triggered by global_clock,
@@ -997,6 +1040,12 @@ class EcoliSim:
         # Matches v1's handoff model (stop, save daughters, let the
         # next workflow generation bootstrap fresh from the bundles).
         # Step 1s so emit cadence matches v1's per-tick emit.
+        # ``_halt_after_structural=True`` aborts the post-divide step
+        # cascade so daughters save with mother's pre-divide derived
+        # state. v1 vivarium does this implicitly via DivisionDetected.
+        # On gen 2 load, ``run_steps_on_init=True`` (set by
+        # Composite.load_bundle) fires derivers to refresh state.
+        ecoli._halt_after_structural = True
         poll_s = 1.0
         current_t = float(ecoli.state.get('global_time', 0.0))
         end_t = current_t + float(self.max_duration)

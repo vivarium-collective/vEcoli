@@ -105,7 +105,7 @@ class ChromosomeStructure(Step):
         'ribosome_50S_subunit': 'string{50S}',
         'amino_acids': 'list[string]',
         'water': 'string{water}',
-        'seed': 'integer{0}',
+        'seed': 'lineage_seed[integer]',
         'emit_unique': 'boolean{false}',
         'rna_ids': 'array[string]',
         'n_mature_rnas': 'integer{0}',

@@ -188,7 +188,7 @@ class TranscriptInitiation(PartitionedProcess):
         'trna_attenuation': 'boolean',
         'attenuated_rna_indices': 'array[integer[64]]',
         'attenuation_adjustments': 'array[float]',
-        'seed': 'integer',
+        'seed': 'lineage_seed[integer]',
         'emit_unique': 'boolean',
     }
 

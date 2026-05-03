@@ -118,7 +118,7 @@ class TranscriptElongation(PartitionedProcess):
         # default-key (string) Map silently collapses all entries onto
         # a single None key. Declare integer keys explicitly.
         'location_lookup': 'map[integer,float]',
-        'seed': 'integer',
+        'seed': 'lineage_seed[integer]',
         'emit_unique': 'boolean',
     }
 

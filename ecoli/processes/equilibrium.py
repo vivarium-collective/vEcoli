@@ -39,7 +39,7 @@ class Equilibrium(PartitionedProcess):
         'stoichMatrix': 'array[integer[64]]',
         'fluxesAndMoleculesToSS': 'method',
         'moleculeNames': 'list[string]',
-        'seed': 'integer',
+        'seed': 'lineage_seed[integer]',
         'complex_ids': 'list[string]',
         'reaction_ids': 'list[string]',
     }

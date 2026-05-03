@@ -96,7 +96,7 @@ class Metabolism(Step):
         'ppgpp_id': 'string{ppgpp}',
         'imports': 'set[string]',
         'metabolism': 'sim_data_object_ref',
-        'seed': 'integer',
+        'seed': 'lineage_seed[integer]',
         'time_step': 'integer',
         'avogadro': 'unum[float,1/mol]',
         'cell_density': 'unum[float,g/L]',
@@ -132,9 +132,9 @@ class Metabolism(Step):
                 # process's inputs() for rationale on divide_reset.
                 # ``overwrite`` outer matches the writer's outputs() so
                 # input/output schemas resolve cleanly.
-                'gtp_to_hydrolyze': 'overwrite[float]',
+                'gtp_to_hydrolyze': 'overwrite[divide_reset[float]]',
                 'aa_count_diff': 'overwrite[divide_reset[array[float]]]',
-                'aa_exchange_rates': 'overwrite[divide_reset[array[float]]]',
+                'aa_exchange_rates': 'overwrite[divide_share[array[float]]]',
             },
             'global_time': 'float',
             'timestep': 'integer',

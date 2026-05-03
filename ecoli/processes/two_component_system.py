@@ -40,7 +40,7 @@ class TwoComponentSystem(PartitionedProcess):
         'cell_density': 'float',
         'moleculesToNextTimeStep': 'method',
         'moleculeNames': 'array[string]',
-        'seed': 'integer',
+        'seed': 'lineage_seed[integer]',
     }
 
     def inputs(self):

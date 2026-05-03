@@ -72,7 +72,7 @@ def build_ecoli_document(core, sim_config):
     Returns a state dict shaped as ``{'agents': {<agent_id>: {...}}}``.
     Load with ``Composite({'state': document}, core=core)``.
     """
-    from ecoli.library.sim_data import LoadSimData
+    from ecoli.library.sim_data import LoadSimData, RAND_MAX
 
     load_sim_data = LoadSimData(**sim_config)
     agent_id = sim_config.get('agent_id', '0')
@@ -368,13 +368,22 @@ def build_ecoli_document(core, sim_config):
     # Without this, ``realize(NPRandom, None)`` falls back to
     # ``RandomState()`` (system entropy), making gen 1 non-reproducible
     # and producing a non-deterministic saved RNG state at division.
-    # ``_reseed_allocator_rng`` is the post-bundle-load counterpart that
-    # mirrors v1's per-generation re-seeding.
+    # The Allocator schema's ``seed`` is ``lineage_seed[integer]``; the
+    # config dict here holds the BASE value, so we replicate the same
+    # ``(base + lineage) % RAND_MAX`` derivation the framework will
+    # apply when constructing the Allocator process — keeping the
+    # cell-level store in sync with the process's internal RandomState.
+    from bigraph_schema.methods.derive import get_derivation_context
     allocator_seed = next(
         (cfg.get('seed') for nm, cfg in configs.items()
          if nm.startswith('allocator_') and isinstance(cfg, dict)),
         None)
     if allocator_seed is not None:
+        derivation_context = get_derivation_context()
+        if derivation_context is not None:
+            allocator_seed = (
+                int(allocator_seed) + int(derivation_context.lineage_seed)
+            ) % RAND_MAX
         cell_state['allocator_rng'] = _np.random.RandomState(
             seed=int(allocator_seed))
 
@@ -402,23 +411,26 @@ build_composite_native = build_ecoli_document
 
 
 def _reseed_allocator_rng(state, agent_id='0'):
-    """Reset ``allocator_rng`` to a freshly-seeded RandomState.
+    """Reset ``allocator_rng`` to a freshly-seeded RandomState after a
+    bundle load.
 
-    v1 re-creates ``allocator_rng`` from ``config.seed`` at every
-    generation start (via the Composer roundtrip). v2's saved bundle
-    preserves the mother's advanced RNG state across division, so a
-    daughter loaded from disk would replay a different RNG stream than
-    v1 — diverging at the first stochastic allocation in gen 2.
+    The bundle stores mother's advanced RandomState in the
+    ``allocator_rng`` cell-level store; a daughter that replayed it
+    would diverge from v1's per-generation re-seeding. This helper
+    re-creates the RandomState from the Allocator's config seed,
+    combined with the active ``DerivationContext.lineage_seed`` (so
+    each generation gets the v1-equivalent ``(base + cli_seed) %
+    RAND_MAX`` derived seed).
 
-    This helper restores v1 parity by writing a fresh
-    ``RandomState(seed=allocator_seed)`` into the allocator_rng store
-    after a bundle load. It accepts either an ``{'agents': {...}}``
-    wrapper (the document shape) or a bare cell dict.
-
-    Mutates ``state`` in place. No-op if no allocator process is
-    declared (e.g. no PartitionedProcesses in the sim).
+    Accepts either an ``{'agents': {...}}`` document or a bare cell
+    dict. Mutates ``state`` in place. No-op if no allocator process
+    is declared (e.g. no PartitionedProcesses in the sim) or no
+    DerivationContext is installed (caller hasn't opted in to
+    framework-driven derivation).
     """
     import numpy as _np
+    from bigraph_schema.methods.derive import get_derivation_context
+    from ecoli.library.sim_data import RAND_MAX
     if isinstance(state, dict) and 'agents' in state:
         cell = state['agents'].get(agent_id)
         if cell is None:
@@ -445,6 +457,14 @@ def _reseed_allocator_rng(state, agent_id='0'):
                     break
     if seed is None:
         return
+    # Saved seed is the BASE value (LineageSeed schema). Re-derive
+    # against the active context so the cell-level allocator_rng store
+    # matches the Allocator process's internal RandomState.
+    derivation_context = get_derivation_context()
+    if derivation_context is not None:
+        seed = (
+            int(seed) + int(derivation_context.lineage_seed)
+        ) % RAND_MAX
     cell['allocator_rng'] = _np.random.RandomState(seed=int(seed))
 
 
@@ -480,10 +500,12 @@ def _resolve_process_configs(load_sim_data, config):
             process_configs[name] = deepcopy(default)
             process_configs[name] = deep_merge(
                 process_configs[name], cfg)
-            if "seed" in process_configs[name]:
-                process_configs[name]["seed"] = (
-                    process_configs[name]["seed"] + config["seed"]
-                ) % RAND_MAX
+            # Per-generation seed derivation
+            # ((default + config["seed"]) % RAND_MAX) is now handled at
+            # realize time by the framework's LineageSeed type — the
+            # stored 'seed' field is the BASE value, and the active
+            # DerivationContext.lineage_seed is combined just before
+            # the process constructor sees it.
 
     configs = {}
     classes = {}
@@ -666,7 +688,11 @@ def _build_flow(config, load_sim_data, configs, classes, partitioned, time_step)
             "agent_id": config["agent_id"],
             "dry_mass_inc_dict":
                 load_sim_data.sim_data.expectedDryMassIncreaseDict,
-            "seed": config["seed"],
+            # Base seed is 0; the framework's LineageSeed type adds the
+            # active DerivationContext.lineage_seed at realize time so the
+            # constructor sees the per-generation value (matches v1's
+            # division.seed = config["seed"] without pre-deriving here).
+            "seed": 0,
             "daughter_ids_function": daughter_phylogeny_id,
         }
         configs["division"] = division_config

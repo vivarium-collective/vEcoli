@@ -78,7 +78,7 @@ class ChromosomeReplication(PartitionedProcess):
         'replisome_monomers_subunits': 'list[string]',
         'dntps': 'list[string]',
         'ppi': 'list[string]',
-        'seed': 'integer',
+        'seed': 'lineage_seed[integer]',
         'emit_unique': 'boolean',
     }
 
