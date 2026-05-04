@@ -399,6 +399,7 @@ def build_ecoli_document(core, sim_config):
             parent, key = nut_wire[0], nut_wire[1]
             cell_state.setdefault(parent, {}).setdefault(key, float(time_step))
 
+
     # 9. Wire step layers (flow tokens + triggers)
     if flow:
         wire_step_layers(cell_state, flow)
@@ -410,27 +411,79 @@ def build_ecoli_document(core, sim_config):
 build_composite_native = build_ecoli_document
 
 
-def _reseed_allocator_rng(state, agent_id='0'):
-    """Reset ``allocator_rng`` to a freshly-seeded RandomState after a
-    bundle load.
+def reseed_loaded_bundle(document, sim_data_path, cli_seed, agent_id='0'):
+    """Recompute per-process seeds from sim_data with the current
+    generation's ``cli_seed`` and overwrite them in a freshly-loaded
+    bundle ``document``. Also resets the cell-level ``allocator_rng``
+    and strips saved per-process ``rng_state`` so daughter processes
+    start from freshly-seeded RandomStates instead of replaying
+    mother's advanced state.
 
-    The bundle stores mother's advanced RandomState in the
-    ``allocator_rng`` cell-level store; a daughter that replayed it
-    would diverge from v1's per-generation re-seeding. This helper
-    re-creates the RandomState from the Allocator's config seed,
-    combined with the active ``DerivationContext.lineage_seed`` (so
-    each generation gets the v1-equivalent ``(base + cli_seed) %
-    RAND_MAX`` derived seed).
+    Mirrors v1's per-generation reset where each daughter is
+    constructed from ``LoadSimData(seed=cli_seed)``: per-process seed
+    = ``crc32(_seedFromName_input, cli_seed) & 0xFFFFFFFF``.
+
+    Mutates ``document`` in place. Call BEFORE constructing the
+    Composite so realize sees the up-to-date config.
+    """
+    from ecoli.library.sim_data import LoadSimData
+    sd = LoadSimData(sim_data_path=sim_data_path, seed=int(cli_seed))
+
+    cell = document['state']['agents'].get(agent_id)
+    if cell is None:
+        cell = document['state']['agents'][next(iter(document['state']['agents']))]
+    if not isinstance(cell, dict):
+        return
+
+    def _strip_partition_suffix(n):
+        # Partition wraps ``ecoli-X`` as ``ecoli-X_requester`` and
+        # ``ecoli-X_evolver``. Strip both. Map allocator_N to
+        # the singular ``allocator`` sim_data key.
+        if n.endswith('_requester'):
+            return n[:-len('_requester')]
+        if n.endswith('_evolver'):
+            return n[:-len('_evolver')]
+        if n.startswith('allocator_'):
+            return 'allocator'
+        return n
+
+    def _refresh(scope):
+        for name, decl in scope.items():
+            if not isinstance(decl, dict):
+                continue
+            cfg = decl.get('config')
+            if not isinstance(cfg, dict) or 'seed' not in cfg:
+                continue
+            try:
+                fresh_cfg = sd.get_config_by_name(_strip_partition_suffix(name))
+            except (KeyError, Exception):
+                continue
+            if isinstance(fresh_cfg, dict) and 'seed' in fresh_cfg:
+                cfg['seed'] = int(fresh_cfg['seed'])
+            # Drop saved RandomState — daughter starts fresh from the
+            # newly-derived seed (matches v1's daughter construction).
+            decl.pop('rng_state', None)
+
+    _refresh(cell)
+    proc_block = cell.get('process')
+    if isinstance(proc_block, dict):
+        _refresh(proc_block)
+
+
+def _reseed_allocator_rng(state, sim_data_path, cli_seed, agent_id='0'):
+    """Reset ``allocator_rng`` to a freshly-seeded RandomState matching
+    the cli_seed-derived seed for this generation.
+
+    The bundle stores mother's advanced RandomState; a daughter that
+    replayed it would diverge from v1's per-generation re-seeding.
+    Mirrors v1's ``RandomState(seed=_seedFromName('BulkMolecules',
+    cli_seed))``.
 
     Accepts either an ``{'agents': {...}}`` document or a bare cell
-    dict. Mutates ``state`` in place. No-op if no allocator process
-    is declared (e.g. no PartitionedProcesses in the sim) or no
-    DerivationContext is installed (caller hasn't opted in to
-    framework-driven derivation).
+    dict. Mutates ``state`` in place.
     """
     import numpy as _np
-    from bigraph_schema.methods.derive import get_derivation_context
-    from ecoli.library.sim_data import RAND_MAX
+    from ecoli.library.sim_data import LoadSimData
     if isinstance(state, dict) and 'agents' in state:
         cell = state['agents'].get(agent_id)
         if cell is None:
@@ -439,32 +492,8 @@ def _reseed_allocator_rng(state, agent_id='0'):
         cell = state
     if not isinstance(cell, dict):
         return
-    # Allocator Step declarations live at the top level of the cell
-    # (allocator_1, allocator_2, ...), not under 'process' (which holds
-    # SharedProcess declarations for PartitionedProcesses). Look at both,
-    # preferring top-level since that's where Steps land.
-    seed = None
-    for name, decl in cell.items():
-        if name.startswith('allocator_') and isinstance(decl, dict):
-            seed = decl.get('config', {}).get('seed')
-            if seed is not None:
-                break
-    if seed is None:
-        for name, decl in cell.get('process', {}).items():
-            if name.startswith('allocator_') and isinstance(decl, dict):
-                seed = decl.get('config', {}).get('seed')
-                if seed is not None:
-                    break
-    if seed is None:
-        return
-    # Saved seed is the BASE value (LineageSeed schema). Re-derive
-    # against the active context so the cell-level allocator_rng store
-    # matches the Allocator process's internal RandomState.
-    derivation_context = get_derivation_context()
-    if derivation_context is not None:
-        seed = (
-            int(seed) + int(derivation_context.lineage_seed)
-        ) % RAND_MAX
+    sd = LoadSimData(sim_data_path=sim_data_path, seed=int(cli_seed))
+    seed = sd.get_allocator_config()['seed']
     cell['allocator_rng'] = _np.random.RandomState(seed=int(seed))
 
 

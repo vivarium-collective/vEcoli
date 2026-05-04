@@ -636,26 +636,18 @@ def realize(core, schema: BulkArray, state, path=()):
     return schema, state, []
 
 
-_BULK_APPLY_COUNT = [0]
-_BULK_TOTAL_DELTA = [0]
-
 @dispatch
 def apply(schema: BulkArray, state, update, path):
-    """Apply sparse index updates to the 'count' field of a bulk array."""
+    """Apply sparse index updates to the ``count`` field of a bulk array.
+
+    The hot path: ``update`` is a list of ``(index_array, delta_array)``
+    tuples produced by partition's allocate/return cycle. Anything
+    else falls through to the standard Array dispatch.
+    """
     if isinstance(update, list):
-        # Sparse index updates: [(index_array, count_delta), ...]
-        import os
-        trace = os.environ.get('BULK_TRACE')
         for idx, delta in update:
-            _BULK_APPLY_COUNT[0] += 1
-            d = int(delta.sum()) if hasattr(delta, 'sum') else int(delta)
-            _BULK_TOTAL_DELTA[0] += d
-            if trace:
-                print(f'[bulk_apply] path={path} delta={d} n={len(idx) if hasattr(idx,"__len__") else 1}', flush=True)
             state['count'][idx] += delta
         return state, []
-
-    # Delegate to standard Array apply for non-sparse updates
     return apply(Array(_shape=schema._shape, _data=schema._data),
                  state, update, path)
 
@@ -798,6 +790,25 @@ def _as_op_list(value, leaf_check=None):
     return ()
 
 
+def _is_index_leaf(x):
+    return isinstance(x, (int, np.integer))
+
+
+# Cache of dtype → 1-element zero record. ``UniqueArray.apply``'s
+# delete branch was allocating a fresh ``np.zeros(1, dtype=result.dtype)``
+# on every delete op; caching it once per dtype lets the deactivate
+# write reuse the same buffer.
+_ZERO_RECORD_CACHE: typing.Dict[typing.Any, np.ndarray] = {}
+
+
+def _zero_record_for(dtype):
+    cached = _ZERO_RECORD_CACHE.get(dtype)
+    if cached is None:
+        cached = np.zeros(1, dtype=dtype)
+        _ZERO_RECORD_CACHE[dtype] = cached
+    return cached
+
+
 @dispatch
 def apply(schema: UniqueArray, state, update, path):
     """Apply batched unique molecule operations: set → add → delete.
@@ -814,42 +825,52 @@ def apply(schema: UniqueArray, state, update, path):
         result = state
     result.flags.writeable = True
 
-    active_mask = result['_entryState'].view(np.bool_)
+    # Pull the three op buckets up-front. Most calls only carry one
+    # of {set, add, delete}; gating the work blocks below on the
+    # explicit ``is None`` check skips the extra ``_as_op_list``
+    # call + iterator setup for the missing branches.
+    set_payload = update.get('set')
+    add_payload = update.get('add')
+    delete_payload = update.get('delete')
 
-    # Save initial active indices for delete operations
+    # ``initially_active_idx`` MUST be captured before any ops run —
+    # delete indices are relative to the pre-update active rows, not
+    # post-add. Same for set's ``active_mask``, since add wires
+    # newly-activated rows that set ops shouldn't touch.
+    active_mask = None
     initially_active_idx = None
-    if 'delete' in update:
+    if set_payload is not None or delete_payload is not None:
+        active_mask = result['_entryState'].view(np.bool_)
+    if delete_payload is not None:
         initially_active_idx = np.nonzero(active_mask)[0]
 
     # 1. Set operations: overwrite columns for active rows
-    for set_update in _as_op_list(update.get('set')):
-        for col, col_values in set_update.items():
-            result[col][active_mask] = col_values
+    if set_payload is not None:
+        for set_update in _as_op_list(set_payload):
+            for col, col_values in set_update.items():
+                result[col][active_mask] = col_values
 
     # 2. Add operations: activate inactive rows with new data
-    for add_update in _as_op_list(update.get('add')):
-        n_new = len(next(iter(add_update.values())))
-        result, free_indices = _get_free_indices(result, n_new)
-        if 'unique_index' not in add_update:
-            result['unique_index'][free_indices] = (
-                np.arange(n_new) + result.metadata
-            )
-            result.metadata += n_new
-        for col, col_values in add_update.items():
-            result[col][free_indices] = col_values
-        result['_entryState'][free_indices] = 1
+    if add_payload is not None:
+        for add_update in _as_op_list(add_payload):
+            n_new = len(next(iter(add_update.values())))
+            result, free_indices = _get_free_indices(result, n_new)
+            if 'unique_index' not in add_update:
+                result['unique_index'][free_indices] = (
+                    np.arange(n_new) + result.metadata
+                )
+                result.metadata += n_new
+            for col, col_values in add_update.items():
+                result[col][free_indices] = col_values
+            result['_entryState'][free_indices] = 1
 
     # 3. Delete operations: deactivate rows.
-    # A delete payload is either a single list/array of indices (one op)
-    # or a list of such (batched). Distinguish by checking the first
-    # element's type.
-    def _is_index_leaf(x):
-        return isinstance(x, (int, np.integer))
-    if initially_active_idx is not None:
+    if delete_payload is not None:
+        zero_rec = _zero_record_for(result.dtype)
         for delete_indices in _as_op_list(
-                update.get('delete'), leaf_check=_is_index_leaf):
+                delete_payload, leaf_check=_is_index_leaf):
             rows_to_delete = initially_active_idx[delete_indices]
-            result[rows_to_delete] = np.zeros(1, dtype=result.dtype)
+            result[rows_to_delete] = zero_rec
 
     result.flags.writeable = False
     return result, []
@@ -1296,7 +1317,7 @@ def realize(core, schema: SimDataObjectStore, state, path=()):
     for key, encoded in state.items():
         if isinstance(key, str) and key.startswith('_'):
             continue
-        _, instance = core.realize(Object(), encoded)
+        _, instance, _ = core.realize(Object(), encoded)
         result[key] = instance
         _sim_data_object_instances[key] = instance
     return schema, result, []

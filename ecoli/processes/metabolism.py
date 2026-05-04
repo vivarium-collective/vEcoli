@@ -148,7 +148,11 @@ class Metabolism(Step):
         return {
             'bulk': 'bulk_array',
             'environment': {
-                'exchange': 'map[integer]',
+                # divide_share matches v1's default integer divider ("set"
+                # for ports declared with no _divider) — both daughters
+                # inherit the mother's accumulated exchange counts rather
+                # than the framework's default binomial-halving for ints.
+                'exchange': 'map[divide_share[integer]]',
             },
             'listeners': {
                 'fba_results': {

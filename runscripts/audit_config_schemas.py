@@ -78,7 +78,7 @@ def main():
         # Run the raw_config through the framework's realize pipeline
         # — this is what SharedProcess.realize does before instantiating.
         try:
-            _, realized = core.realize(cfg_schema, raw_config)
+            _, realized, _ = core.realize(cfg_schema, raw_config)
         except Exception as e:
             findings.append((proc_name, 'realize_failed',
                              f'{type(e).__name__}: {str(e)[:120]}'))

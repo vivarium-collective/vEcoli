@@ -343,11 +343,12 @@ class SimConfig:
                 help="Directory in which to store daughter cell state JSONs.",
             )
             self.parser.add_argument(
-                "--variant", action="store", help="Name of variant."
+                "--variant", action="store", type=int, help="Name of variant."
             )
             self.parser.add_argument(
                 "--lineage_seed",
                 action="store",
+                type=int,
                 help="Seed used for first cell in lineage.",
             )
             self.parser.add_argument(
@@ -360,6 +361,20 @@ class SimConfig:
                 "--fail_at_max_duration",
                 action=argparse.BooleanOptionalAction,
                 help="Simulation will raise TimeLimitException upon reaching max_duration.",
+            )
+            self.parser.add_argument(
+                "--composite_checkpoint_at",
+                type=float,
+                action="store",
+                help="Run composite to this absolute sim-time, save bundle "
+                     "to --composite_checkpoint_dir, then exit. Used for "
+                     "pre-division iteration.",
+            )
+            self.parser.add_argument(
+                "--composite_checkpoint_dir",
+                action="store",
+                help="Directory for the composite checkpoint bundle (used "
+                     "with --composite_checkpoint_at).",
             )
 
     @staticmethod
@@ -856,34 +871,17 @@ class EcoliSim:
         from process_bigraph.types.process import (
             register_types as register_process_bigraph_types)
         from bigraph_schema import Core, BASE_TYPES
-        from bigraph_schema.methods.derive import (
-            DerivationContext,
-            install_derivation_context,
-            uninstall_derivation_context,
-        )
         import time as _time
 
-        # Install the per-generation derivation context. Process
-        # ``seed`` fields declared as ``lineage_seed[integer]`` are
-        # combined with this value at realize time, so each generation's
-        # processes get the v1-equivalent ``(default + cli_seed) %
-        # RAND_MAX`` derived seed without callers having to walk the
-        # state and reseed individual RandomStates after a bundle load.
-        derivation_context = DerivationContext(
-            lineage_seed=int(self.config.get("seed", 0)))
-        prev_derivation_context = install_derivation_context(
-            derivation_context)
-        try:
-            self._run_composite_inner()
-        finally:
-            uninstall_derivation_context(prev_derivation_context)
+        self._run_composite_inner()
 
     def _run_composite_inner(self):
-        from ecoli.composites.ecoli_composite import build_composite_native
+        from ecoli.composites.ecoli_composite import build_composite_native, reseed_loaded_bundle, _reseed_allocator_rng
         from ecoli.library.bigraph_types import ECOLI_TYPES
         from ecoli.processes.cell_division import DivisionDetected
         from ecoli.library.parquet_emitter import ParquetEmitter
         from process_bigraph import Composite
+        from process_bigraph.bundle import load_bundle
         from process_bigraph.types.process import (
             register_types as register_process_bigraph_types)
         from bigraph_schema import Core, BASE_TYPES
@@ -919,13 +917,30 @@ class EcoliSim:
                 if os.path.isabs(initial_bundle) else initial_bundle):
             print(f"Loading composite from bundle {initial_bundle}...", flush=True)
             t0 = _time.time()
-            ecoli = Composite.load_bundle(initial_bundle, core=core)
-            # Match v1: re-seed allocator_rng from config.seed at each
-            # generation start. The bundle saved the mother's advanced
-            # RNG state; without this reset the daughter would replay a
-            # different stochastic stream than v1.
-            from ecoli.composites.ecoli_composite import _reseed_allocator_rng
-            _reseed_allocator_rng(ecoli.state, self.config.get('agent_id', '0'))
+            # Load the bundle JSON (no process realize yet), bake fresh
+            # per-generation seeds in, then construct. Mirrors v1's
+            # ``LoadSimData(seed=cli_seed)`` per-generation reset:
+            # daughter processes start from freshly-seeded RandomStates
+            # rather than replaying mother's advanced state.
+            document = load_bundle(initial_bundle, as_numpy=True)
+            agent_id = self.config.get('agent_id', '0')
+            cli_seed = int(self.config.get('seed', 0))
+            sim_data_path = self.config['sim_data_path']
+            reseed_loaded_bundle(
+                document, sim_data_path, cli_seed, agent_id=agent_id)
+            # Mirror ``Composite.load_bundle``'s config flags:
+            # ``skip_process_state`` prevents the per-process
+            # ``link_state`` pass from re-adding initial state on top
+            # of the saved bundle (would double bulks); ``run_steps_on_init``
+            # fires derivers so mass listeners initialize from the
+            # daughter's halved bulk.
+            ecoli = Composite(
+                {'skip_process_state': True,
+                 'run_steps_on_init': True,
+                 **document},
+                core=core)
+            _reseed_allocator_rng(
+                ecoli.state, sim_data_path, cli_seed, agent_id=agent_id)
             print(f"  Loaded in {_time.time()-t0:.2f}s", flush=True)
         else:
             print("Building composite document directly from sim_data...", flush=True)
