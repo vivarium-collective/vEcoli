@@ -59,8 +59,8 @@ dependencies = [
     "arviz-plots>=0.7.0",
     "arviz>=0.23.0",
     "s3fs>=2025.5.1",
-    "bigraph-schema",
-    "process-bigraph",
+    "bigraph-schema>=1.2.8",
+    "process-bigraph>=1.4.0",
 ]
 
 [project.optional-dependencies]
@@ -84,10 +84,6 @@ docs = [
     "nbsphinx",
     "pre-commit"
 ]
-
-[tool.uv.sources]
-bigraph-schema = { path = "../bigraph-schema", editable = true }
-process-bigraph = { path = "../process-bigraph", editable = true }
 
 [tool.setuptools]
 packages = [
