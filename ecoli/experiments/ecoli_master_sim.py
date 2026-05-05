@@ -960,6 +960,19 @@ class EcoliSim:
         # starts from global_clock's update of global_time.
         ecoli.to_run = []
 
+        # Sync the composite's top-level global_time to the loaded
+        # daughter cell's global_time so gen N+1 emits at absolute
+        # time (matching v1). Without this, build_ecoli_document
+        # constructs a fresh global_clock that starts at 0, even when
+        # the daughter cell carries mother's division-time clock —
+        # daughter parquet would emit at t=1, 2, ... instead of
+        # t=division+1, division+2, ...
+        agent_id = self.config.get('agent_id', '0')
+        agent_t = ecoli.state.get('agents', {}).get(
+            agent_id, {}).get('global_time')
+        if agent_t is not None and float(agent_t) > 0:
+            ecoli.state['global_time'] = float(agent_t)
+
         self._composite = ecoli
         self.generated_initial_state = None
         self.ecoli = None
@@ -1037,6 +1050,15 @@ class EcoliSim:
             })
 
         from ecoli.composites.ecoli_composite import run_to_division
+
+        # Emit initial state BEFORE any tick fires, matching v1
+        # vivarium's emit cadence (vivarium engine.update emits the
+        # initial state at t=initial then post-tick at t=initial+1, ...).
+        # Without this, v2 emits one tick later than v1 across the
+        # board, producing a +1 alignment offset in every parquet
+        # comparison.
+        if emitter is not None:
+            self._emit_composite_history(emitter, ecoli)
 
         print(f"Running composite for {self.max_duration}s...", flush=True)
         t0 = _time.time()

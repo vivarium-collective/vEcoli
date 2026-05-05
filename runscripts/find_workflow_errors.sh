@@ -70,9 +70,17 @@ if [[ "$ROOT" =~ ^[0-9]+$ ]]; then
             | grep -oE 's3://[^[:space:]]*/nextflow/[^[:space:]]*' \
             | head -1)
     fi
+    if [[ -z "$s3_uri" ]]; then
+        # In-progress runs sometimes only surface the outer bucket prefix.
+        # Take any s3:// URI from the output; the walker below will descend
+        # into <prefix>/[<sim_id>/]nextflow/nextflow_workdirs.
+        s3_uri=$(echo "$atlantis_out" \
+            | grep -oE 's3://[^[:space:]]+' \
+            | head -1)
+    fi
     s3_uri=$(trim_punct "$s3_uri")
     if [[ -z "$s3_uri" ]]; then
-        echo "could not find an S3 workdir URI in atlantis output for sim $sim_id" >&2
+        echo "could not find any S3 URI in atlantis output for sim $sim_id" >&2
         echo "atlantis output (last 30 lines):" >&2
         echo "$atlantis_out" | tail -30 >&2
         exit 1
@@ -84,25 +92,61 @@ fi
 # --- Remote (S3) source: sync error/log files to a local mirror -------------
 
 if [[ "$ROOT" == s3://* ]]; then
-    # Normalize the URI to point at the nextflow_workdirs/ root.
-    case "$ROOT" in
-        */nextflow_workdirs|*/nextflow_workdirs/) WORKDIRS_S3="${ROOT%/}";;
-        */nextflow|*/nextflow/) WORKDIRS_S3="${ROOT%/}/nextflow_workdirs";;
-        *) WORKDIRS_S3="${ROOT%/}/nextflow/nextflow_workdirs";;
-    esac
-
-    # Local mirror path keyed off the workflow segment so repeated runs
-    # against the same simulation reuse the cache.
-    bn_trim="${ROOT%/}"
-    bn_trim="${bn_trim%%/nextflow*}"
-    base_name="${bn_trim##*/}"
-    [[ -z "$base_name" ]] && base_name="atlantis_run"
-    LOCAL_MIRROR="/tmp/wf_errors_${base_name}"
-
     if ! command -v aws >/dev/null 2>&1; then
         echo "aws CLI not found — required to sync S3 workdirs" >&2
         exit 1
     fi
+
+    # Normalize the URI to point at the nextflow_workdirs/ root.
+    # Atlantis writes workdirs under a doubled segment
+    # (sim<N>-<id>-<hash>/sim<N>-<id>-<hash>/nextflow/nextflow_workdirs/),
+    # but users often pass just the outer prefix — so probe candidates and
+    # walk one level down if the obvious path is empty.
+    s3_has_keys() {
+        # Returns 0 if the prefix has at least one key under it.
+        aws s3 ls "${1%/}/" 2>/dev/null | head -1 | grep -q .
+    }
+
+    case "$ROOT" in
+        */nextflow_workdirs|*/nextflow_workdirs/)
+            WORKDIRS_S3="${ROOT%/}";;
+        */nextflow|*/nextflow/)
+            WORKDIRS_S3="${ROOT%/}/nextflow_workdirs";;
+        *)
+            WORKDIRS_S3=""
+            # Try the obvious candidate first
+            cand="${ROOT%/}/nextflow/nextflow_workdirs"
+            if s3_has_keys "$cand"; then
+                WORKDIRS_S3="$cand"
+            else
+                # Walk one level down — Atlantis's doubled-segment layout
+                # puts everything under <prefix>/<sim_id_repeated>/nextflow/...
+                while IFS= read -r sub; do
+                    sub="${sub%/}"
+                    [[ -z "$sub" ]] && continue
+                    cand="${ROOT%/}/${sub}/nextflow/nextflow_workdirs"
+                    if s3_has_keys "$cand"; then
+                        WORKDIRS_S3="$cand"
+                        echo "Found workdirs at $cand" >&2
+                        break
+                    fi
+                done < <(aws s3 ls "${ROOT%/}/" 2>/dev/null | awk '/PRE/ {print $2}')
+            fi
+            if [[ -z "$WORKDIRS_S3" ]]; then
+                echo "no nextflow_workdirs/ found under $ROOT" >&2
+                echo "(checked $ROOT/nextflow/nextflow_workdirs and one level down)" >&2
+                exit 1
+            fi
+            ;;
+    esac
+
+    # Local mirror path keyed off the workflow segment so repeated runs
+    # against the same simulation reuse the cache.
+    bn_trim="${WORKDIRS_S3%/}"
+    bn_trim="${bn_trim%%/nextflow*}"
+    base_name="${bn_trim##*/}"
+    [[ -z "$base_name" ]] && base_name="atlantis_run"
+    LOCAL_MIRROR="/tmp/wf_errors_${base_name}"
 
     mkdir -p "$LOCAL_MIRROR/nextflow/nextflow_workdirs"
     echo "Syncing $WORKDIRS_S3 -> $LOCAL_MIRROR (logs/errs only)"

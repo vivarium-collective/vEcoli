@@ -509,52 +509,50 @@ def _reseed_allocator_rng(state, sim_data_path, cli_seed, agent_id='0'):
 # Atlantis. These helpers restore v1's pattern for daughter handoff while
 # keeping the bundle infrastructure available for other uses (checkpoints).
 
-# Cell-state keys that build_ecoli_document re-creates from sim_data on the
-# next gen. We strip these before saving so the daughter starts fresh from
-# a per-gen LoadSimData(seed=cli_seed), matching v1's per-gen reset.
-_V2_REBUILT_KEYS = (
-    'process',           # process declarations (rebuilt fresh per gen)
-    'allocator_rng',     # allocator RandomState (re-seeded from cli_seed)
-    'sim_data_objects',  # bound-method instance refs (unserializable)
-    'next_update_time',  # per-process scheduling state
-    'request',           # partition request slots
-    'allocate',          # partition allocation slots
-    'step_flow',         # wire_step_layers tokens
-)
+# v2 has the same cell state v1 has, plus extra infrastructure that's
+# either unserializable or recreated on the next-gen build:
+#   - top-level edge declarations (process/step decls with address/instance)
+#   - sim_data_objects (bound-method instance refs)
+# These get stripped here. Everything else v1 ships, v2 ships too, so
+# daughters inherit mother's listeners / boundary / process_state /
+# allocate / request etc. — same as v1, same bit-parity story.
 
+def _strip_v2_edges(d):
+    """Remove top-level edge declarations and sim_data_objects refs.
 
-def _v2_daughter_payload(agent_state):
-    """Build a JSON-serializable daughter payload from a v2 cell state.
-
-    Drops v2 infrastructure that gets rebuilt fresh on the next gen
-    (process declarations, allocator_rng, sim_data_objects refs, partition
-    request/allocate, next_update_time, flow tokens) and writes the dtype
-    metadata that v1's ``load_states`` consumes to reconstruct structured
-    numpy arrays. ``global_time`` is preserved so the daughter resumes at
-    division time.
-
-    Mutates ``agent_state`` in place. Step/process declarations live as
-    top-level keys (set by ``build_ecoli_document``); we identify them by
-    the presence of a ``_type`` field equal to ``shared_process``,
-    ``shared_step``, or similar edge types and strip those too.
+    v1 has no equivalent because vivarium stores processes in a separate
+    registry; v2 keeps them as state nodes (with ``address`` + ``instance``
+    after realize). Strip them so the daughter JSON contains only data,
+    matching v1's ``state.get_value(condition=not_a_process)`` output.
     """
-    for k in _V2_REBUILT_KEYS:
-        agent_state.pop(k, None)
-    # Strip top-level step/process edge declarations. Pre-realize these
-    # carry ``_type: process`` / ``_type: step``; after Composite()
-    # realize strips the ``_type`` and adds an ``instance`` reference.
-    # Detect by either signal: anything with an ``address`` field or a
-    # live ``instance`` is an edge that build_ecoli_document recreates.
     edge_keys = [
-        k for k, v in agent_state.items()
+        k for k, v in d.items()
         if isinstance(v, dict)
         and ('address' in v or 'instance' in v
              or v.get('_type') in (
                  'process', 'step', 'shared_process', 'shared_step'))
     ]
     for k in edge_keys:
-        del agent_state[k]
-    # v1-compatible dtype metadata for round-trip through load_states.
+        del d[k]
+    d.pop('sim_data_objects', None)
+    d.pop('step_flow', None)
+
+
+def _v2_daughter_payload(agent_state):
+    """Prepare a v2 cell state for JSON serialization.
+
+    Matches v1's ``prepare_save_state`` (drop ``process`` and
+    ``allocator_rng``, add bulk/unique dtype metadata) plus v2-specific
+    edge stripping. Everything else v1 ships, v2 ships — listeners,
+    boundary, process_state, allocate, request, next_update_time, etc.
+    """
+    from ecoli.experiments.ecoli_master_sim import prepare_save_state
+
+    _strip_v2_edges(agent_state)
+    agent_state.pop('process', None)
+    agent_state.pop('allocator_rng', None)
+    # v1 dtype metadata (same as prepare_save_state but resilient to
+    # already-stripped fields).
     if 'bulk' in agent_state and hasattr(agent_state['bulk'], 'dtype'):
         agent_state['bulk_dtypes'] = str(agent_state['bulk'].dtype)
     if 'unique' in agent_state and isinstance(agent_state['unique'], dict):
@@ -578,7 +576,6 @@ def save_v2_daughters(state, daughter_outdir):
         daughter_outdir: Output directory or cloud URI prefix
             (``s3://``, ``gs://``, or local path).
     """
-    from ecoli.experiments.ecoli_master_sim import prepare_save_state  # noqa
     from ecoli.library.logging_tools import write_json
     from wholecell.utils.filepath import cloud_path_join
 
@@ -587,21 +584,11 @@ def save_v2_daughters(state, daughter_outdir):
         print(f"  WARNING: expected 2 daughters post-divide, got {len(agents)}",
               flush=True)
 
-    # Non-agent state (environment, global_time, etc.) is shared by both
-    # daughters. Filter the same v2 infrastructure here, including
-    # top-level edge declarations like global_clock.
-    non_agent_state = {k: v for k, v in state.items() if k != 'agents'}
-    for k in _V2_REBUILT_KEYS:
-        non_agent_state.pop(k, None)
-    edge_keys = [
-        k for k, v in non_agent_state.items()
-        if isinstance(v, dict)
-        and ('address' in v or 'instance' in v
-             or v.get('_type') in (
-                 'process', 'step', 'shared_process', 'shared_step'))
-    ]
-    for k in edge_keys:
-        del non_agent_state[k]
+    # Top-level non-agent state — strip v2 edges, keep everything else
+    # (matches v1's `non_agent_state = {k:v for k,v in state.items()
+    # if k != 'agents'}` after vivarium's not_a_process filter).
+    non_agent_state = {k: deepcopy(v) for k, v in state.items() if k != 'agents'}
+    _strip_v2_edges(non_agent_state)
 
     for i, (agent_id, agent_state) in enumerate(sorted(agents.items())):
         # Deep-copy so the live composite state isn't mutated by the
@@ -933,7 +920,15 @@ def _build_flow(config, load_sim_data, configs, classes, partitioned, time_step)
 # ---------------------------------------------------------------------------
 
 def _get_initial_state(load_sim_data, config):
-    """Get initial cell state from sim_data."""
+    """Get initial cell state from sim_data or a daughter handoff JSON.
+
+    Same pattern as v1's update_experiment → get_state_from_file path:
+    if ``initial_state_file`` is set, load it (fsspec-aware via
+    ``load_states``) and use its agent's cell_state as-is.
+    ``build_ecoli_document`` then layers fresh process / allocator /
+    sim_data_objects / etc. on top, matching v1's per-gen reset for
+    those infrastructure pieces while preserving mother's data state.
+    """
     from ecoli.library.json_state import get_state_from_file
     from wholecell.utils.filepath import is_cloud_uri
 
@@ -953,8 +948,12 @@ def _get_initial_state(load_sim_data, config):
         cell_state = full_state["agents"][config.get("agent_id", "0")]
     else:
         cell_state = full_state
+    return _apply_overrides(cell_state, config)
 
-    # Apply overrides
+
+def _apply_overrides(cell_state, config):
+    """Apply ``initial_state_overrides`` files to a cell_state in place."""
+    from ecoli.library.json_state import get_state_from_file
     overrides = config.get("initial_state_overrides", [])
     if overrides:
         bulk_map = {

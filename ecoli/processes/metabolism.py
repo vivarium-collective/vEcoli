@@ -179,8 +179,14 @@ class Metabolism(Step):
                     'delta_metabolites': 'overwrite[array[integer[64]]]',
                     # Identifiers and constraint sets — flexible
                     'media_id': 'overwrite[string]{}',
-                    'unconstrained_molecules': 'overwrite[list[string]]',
-                    'constrained_molecules': 'overwrite[map[float]]',
+                    # These two fields are 87-element boolean masks
+                    # (one per environment molecule) recorded by the
+                    # FBA listener. v1's daughter JSON serializes them
+                    # the same way; on JSON reload the resolver checks
+                    # the loaded value against this schema, so the
+                    # declared type must match what gets written.
+                    'unconstrained_molecules': 'overwrite[list[boolean]]',
+                    'constrained_molecules': 'overwrite[list[boolean]]',
                     'uptake_constraints': 'overwrite[array[float]]',
                 },
                 'enzyme_kinetics': {
