@@ -31,7 +31,7 @@ from vivarium.library.dict_utils import deep_merge_check
 from vivarium.library.topology import inverse_topology
 from vivarium.library.topology import assoc_path, get_in
 from ecoli.library.logging_tools import write_json
-from wholecell.utils.filepath import cloud_path_join
+from wholecell.utils.filepath import cloud_path_join, is_cloud_uri
 import ecoli.composites.ecoli_master
 
 # Environment composer for spatial environment sim
@@ -194,6 +194,19 @@ def parse_key_value_args(args_list: list[str]) -> dict[str, str]:
         else:
             raise ValueError(f"Argument '{item}' is not in the form key=value")
     return parsed_dict
+
+
+def _is_bundle_path(path: str) -> bool:
+    # Cloud URIs need fsspec — os.path.isdir silently returns False on
+    # s3://, which routes Atlantis daughter handoffs through the v1
+    # JSON loader and crashes gen 1+ with an empty-file decode error.
+    if not path:
+        return False
+    if is_cloud_uri(path):
+        from fsspec import url_to_fs
+        fs, root = url_to_fs(path)
+        return fs.exists(f"{root.rstrip('/')}/document.json")
+    return os.path.isdir(path)
 
 
 def prepare_save_state(state: dict[str, Any]) -> None:
@@ -912,9 +925,7 @@ class EcoliSim:
         core.register_types(ECOLI_TYPES)
 
         initial_bundle = self.config.get("initial_state_file")
-        if initial_bundle and os.path.isdir(
-                self.config.get("initial_state_file")
-                if os.path.isabs(initial_bundle) else initial_bundle):
+        if _is_bundle_path(initial_bundle):
             print(f"Loading composite from bundle {initial_bundle}...", flush=True)
             t0 = _time.time()
             # Load the bundle JSON (no process realize yet), bake fresh
