@@ -87,14 +87,14 @@ def cmd_run(args):
         sim.run()
         print(f'[run] done in {time.monotonic()-t0:.1f}s wall', flush=True)
 
-        d0 = os.path.join(args.daughter_outdir, 'daughter_state_0')
-        d1 = os.path.join(args.daughter_outdir, 'daughter_state_1')
-        if os.path.isdir(d0) and os.path.isdir(d1):
+        d0 = os.path.join(args.daughter_outdir, 'daughter_state_0.json')
+        d1 = os.path.join(args.daughter_outdir, 'daughter_state_1.json')
+        if os.path.isfile(d0) and os.path.isfile(d1):
             print(f'[run] ✓ division fired, daughters:\n  {d0}\n  {d1}',
                   flush=True)
             return 0
         print(f'[run] ✗ division did NOT fire within {args.extra}s extra '
-              f'(no daughter bundles written)', flush=True)
+              f'(no daughter JSONs written)', flush=True)
         return 1
 
 

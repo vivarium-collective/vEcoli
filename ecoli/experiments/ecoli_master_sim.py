@@ -31,7 +31,7 @@ from vivarium.library.dict_utils import deep_merge_check
 from vivarium.library.topology import inverse_topology
 from vivarium.library.topology import assoc_path, get_in
 from ecoli.library.logging_tools import write_json
-from wholecell.utils.filepath import cloud_path_join, is_cloud_uri
+from wholecell.utils.filepath import cloud_path_join
 import ecoli.composites.ecoli_master
 
 # Environment composer for spatial environment sim
@@ -194,19 +194,6 @@ def parse_key_value_args(args_list: list[str]) -> dict[str, str]:
         else:
             raise ValueError(f"Argument '{item}' is not in the form key=value")
     return parsed_dict
-
-
-def _is_bundle_path(path: str) -> bool:
-    # Cloud URIs need fsspec — os.path.isdir silently returns False on
-    # s3://, which routes Atlantis daughter handoffs through the v1
-    # JSON loader and crashes gen 1+ with an empty-file decode error.
-    if not path:
-        return False
-    if is_cloud_uri(path):
-        from fsspec import url_to_fs
-        fs, root = url_to_fs(path)
-        return fs.exists(f"{root.rstrip('/')}/document.json")
-    return os.path.isdir(path)
 
 
 def prepare_save_state(state: dict[str, Any]) -> None:
@@ -868,33 +855,21 @@ class EcoliSim:
         :py:func:`ecoli.composites.ecoli_composite.build_composite_native`
         without instantiating the v1 vivarium composer.
 
-        Division and daughter handoff mirror the vivarium path:
-        - If ``config['initial_state_file']`` points at a v2 bundle
-          directory, the composite is loaded from that bundle instead
-          of built from sim_data.
-        - On ``DivisionDetected``, one bundle per daughter is written
-          under ``config['daughter_outdir']`` (``daughter_state_{i}/``)
-          so the next generation can reload via ``--initial_state_file``.
+        Division and daughter handoff mirror v1: if
+        ``config['initial_state_file']`` is set, ``_get_initial_state``
+        loads the daughter cell state from a v1-style single JSON via
+        fsspec (cloud-aware) and overlays it onto the freshly-built
+        document. On division, one ``daughter_state_{i}.json`` per
+        daughter is written under ``config['daughter_outdir']`` via
+        fsspec for the next workflow generation to pick up.
         """
-        from ecoli.composites.ecoli_composite import build_composite_native
-        from ecoli.library.bigraph_types import ECOLI_TYPES
-        from ecoli.processes.cell_division import DivisionDetected
-        from ecoli.library.parquet_emitter import ParquetEmitter
-        from process_bigraph import Composite
-        from process_bigraph.types.process import (
-            register_types as register_process_bigraph_types)
-        from bigraph_schema import Core, BASE_TYPES
-        import time as _time
-
         self._run_composite_inner()
 
     def _run_composite_inner(self):
-        from ecoli.composites.ecoli_composite import build_composite_native, reseed_loaded_bundle, _reseed_allocator_rng
+        from ecoli.composites.ecoli_composite import build_composite_native
         from ecoli.library.bigraph_types import ECOLI_TYPES
-        from ecoli.processes.cell_division import DivisionDetected
         from ecoli.library.parquet_emitter import ParquetEmitter
         from process_bigraph import Composite
-        from process_bigraph.bundle import load_bundle
         from process_bigraph.types.process import (
             register_types as register_process_bigraph_types)
         from bigraph_schema import Core, BASE_TYPES
@@ -924,27 +899,32 @@ class EcoliSim:
         register_process_bigraph_types(core)
         core.register_types(ECOLI_TYPES)
 
-        initial_bundle = self.config.get("initial_state_file")
-        if _is_bundle_path(initial_bundle):
-            print(f"Loading composite from bundle {initial_bundle}...", flush=True)
+        # ``initial_state_file`` may point at either a v1-style single
+        # JSON (daughter handoff between gens) or a local v2 bundle
+        # directory (pre-division iteration via composite_checkpoint_at).
+        # Bundles are detected by the presence of document.json; cloud
+        # URIs always go through the JSON path (save_bundle is local-
+        # only and bundle handoff to S3 is unsupported).
+        initial_state_file = self.config.get("initial_state_file")
+        is_local_bundle = (
+            initial_state_file
+            and os.path.isdir(initial_state_file)
+            and os.path.isfile(
+                os.path.join(initial_state_file, 'document.json')))
+
+        if is_local_bundle:
+            from process_bigraph.bundle import load_bundle
+            from ecoli.composites.ecoli_composite import (
+                reseed_loaded_bundle, _reseed_allocator_rng)
+            print(f"Loading composite from bundle {initial_state_file}...",
+                  flush=True)
             t0 = _time.time()
-            # Load the bundle JSON (no process realize yet), bake fresh
-            # per-generation seeds in, then construct. Mirrors v1's
-            # ``LoadSimData(seed=cli_seed)`` per-generation reset:
-            # daughter processes start from freshly-seeded RandomStates
-            # rather than replaying mother's advanced state.
-            document = load_bundle(initial_bundle, as_numpy=True)
+            document = load_bundle(initial_state_file, as_numpy=True)
             agent_id = self.config.get('agent_id', '0')
             cli_seed = int(self.config.get('seed', 0))
             sim_data_path = self.config['sim_data_path']
             reseed_loaded_bundle(
                 document, sim_data_path, cli_seed, agent_id=agent_id)
-            # Mirror ``Composite.load_bundle``'s config flags:
-            # ``skip_process_state`` prevents the per-process
-            # ``link_state`` pass from re-adding initial state on top
-            # of the saved bundle (would double bulks); ``run_steps_on_init``
-            # fires derivers so mass listeners initialize from the
-            # daughter's halved bulk.
             ecoli = Composite(
                 {'skip_process_state': True,
                  'run_steps_on_init': True,
@@ -954,7 +934,12 @@ class EcoliSim:
                 ecoli.state, sim_data_path, cli_seed, agent_id=agent_id)
             print(f"  Loaded in {_time.time()-t0:.2f}s", flush=True)
         else:
-            print("Building composite document directly from sim_data...", flush=True)
+            # Build from sim_data. If initial_state_file points at a
+            # v1-style JSON, _get_initial_state loads it via fsspec
+            # (cloud-aware) and overlays it onto the document; processes
+            # / allocator / etc. are rebuilt from per-gen
+            # LoadSimData(seed=cli_seed), matching v1's per-gen reset.
+            print("Building composite document from sim_data...", flush=True)
             t0 = _time.time()
             state = build_composite_native(core, self.config)
             print(f"  Built in {_time.time()-t0:.2f}s", flush=True)
@@ -962,16 +947,10 @@ class EcoliSim:
             print("Creating composite (with realize)...", flush=True)
             t0 = _time.time()
             # ``run_steps_on_init`` fires derivers (mass listeners,
-            # post-division-mass-listener, etc.) at startup so they set
-            # their ``timeInitial`` / ``initial_mass`` references at
-            # t=0 before any process runs. Mirrors v1 vivarium's
-            # ``Engine.__init__`` -> ``run_steps()`` call. Without this,
-            # derivers' first call happens after the first process tick
-            # — their internal baselines lock in to slightly different
-            # values than v1, drifting fold_change values throughout.
-            # Evolvers won't fire (their gate ``next_update_time
-            # <= global_time`` is False at t=0 since default
-            # next_update_time = 1.0).
+            # post-division-mass-listener, etc.) so they set their
+            # ``timeInitial`` / ``initial_mass`` references at t=0
+            # before any process runs. Mirrors v1 vivarium's
+            # ``Engine.__init__`` -> ``run_steps()`` call.
             ecoli = Composite({'schema': {}, 'state': state,
                                'run_steps_on_init': True}, core=core)
             print(f"  Composite created in {_time.time()-t0:.2f}s", flush=True)
@@ -1057,51 +1036,26 @@ class EcoliSim:
                 'data': {'metadata': cfg_metadata},
             })
 
+        from ecoli.composites.ecoli_composite import run_to_division
+
         print(f"Running composite for {self.max_duration}s...", flush=True)
-        pre_agent_count = len(ecoli.state.get("agents", {}))
         t0 = _time.time()
-        divided = False
-        # Composite engine has no StopAfterDivision exception — poll
-        # agent count between short runs and halt at the first division.
-        # Matches v1's handoff model (stop, save daughters, let the
-        # next workflow generation bootstrap fresh from the bundles).
-        # Step 1s so emit cadence matches v1's per-tick emit.
-        # ``_halt_after_structural=True`` aborts the post-divide step
-        # cascade so daughters save with mother's pre-divide derived
-        # state. v1 vivarium does this implicitly via DivisionDetected.
-        # On gen 2 load, ``run_steps_on_init=True`` (set by
-        # Composite.load_bundle) fires derivers to refresh state.
-        ecoli._halt_after_structural = True
-        poll_s = 1.0
-        current_t = float(ecoli.state.get('global_time', 0.0))
-        end_t = current_t + float(self.max_duration)
-        last_emit_t = current_t
-        while float(ecoli.state.get('global_time', 0.0)) < end_t:
-            remaining = end_t - float(
-                ecoli.state.get('global_time', 0.0))
-            step = min(poll_s, remaining)
-            try:
-                ecoli.run(step)
-            except DivisionDetected:
-                divided = True
-                break
-            # Emit history: flatten each agent's listeners + bulk
-            # summary + timestep so the analysis pipeline sees the
-            # same columns v1 produces.
-            if emitter is not None:
-                self._emit_composite_history(emitter, ecoli)
-            if len(ecoli.state.get("agents", {})) > pre_agent_count:
-                divided = True
-                break
+        # Emit per-tick history (parquet column parity with v1) by
+        # threading the emitter into run_to_division as a callback.
+        on_tick = (
+            (lambda eco: self._emit_composite_history(emitter, eco))
+            if emitter is not None else None)
+        divided, _ = run_to_division(
+            ecoli,
+            max_duration=self.max_duration,
+            daughter_outdir=self.daughter_outdir,
+            on_tick=on_tick)
         elapsed = _time.time() - t0
         print(f"Completed in {elapsed:.2f} seconds, divided={divided}", flush=True)
 
         if emitter is not None:
             emitter.success = divided or not self.fail_at_max_duration
             emitter.finalize()
-
-        if divided and self.daughter_outdir:
-            self._save_composite_daughters(ecoli)
 
     def _collect_output_metadata(self):
         """Walk the live composite's process/step instances and build
@@ -1201,65 +1155,6 @@ class EcoliSim:
                 'time': global_t,
             },
         })
-
-    def _save_composite_daughters(self, ecoli):
-        """Write each daughter as its own bundle directory under
-        ``daughter_outdir`` (mirrors the per-daughter JSON files v1
-        writes in ``update_experiment``). Also records the division
-        time and daughter paths for Nextflow."""
-        import copy as _copy
-        agents = ecoli.state.get("agents", {})
-        if len(agents) != 2:
-            print(f"  WARNING: expected 2 daughters post-divide, got {len(agents)}")
-        non_agent_state = {k: v for k, v in ecoli.state.items() if k != "agents"}
-        for i, (agent_id, agent_state) in enumerate(sorted(agents.items())):
-            daughter_dir = f"{self.daughter_outdir.rstrip('/')}/daughter_state_{i}"
-            # Prune the composite to this single daughter AND the matching
-            # schema subtree — otherwise realize on reload walks
-            # sibling-daughter schema entries against state that no
-            # longer has them, and type-resolve fails.
-            original_agents_state = ecoli.state["agents"]
-            original_agents_schema = ecoli.schema.get("agents") if isinstance(
-                ecoli.schema, dict) else None
-            try:
-                ecoli.state["agents"] = {agent_id: agent_state}
-                if isinstance(ecoli.schema, dict) and isinstance(
-                        original_agents_schema, dict):
-                    ecoli.schema["agents"] = {
-                        agent_id: original_agents_schema[agent_id]
-                    }
-                # CompositeDivision carries self.agent_id from the
-                # mother; stamp it to this daughter's key so the
-                # next generation's division sentinel targets the
-                # right mother key when it fires.
-                division_node = agent_state.get("division") if isinstance(
-                    agent_state, dict) else None
-                division_config = division_node.get("config") if isinstance(
-                    division_node, dict) else None
-                original_division_agent_id = None
-                if isinstance(division_config, dict):
-                    original_division_agent_id = division_config.get("agent_id")
-                    division_config["agent_id"] = agent_id
-                # access() caches by id(dict), so mutating schema in
-                # place doesn't invalidate — clear before save so the
-                # freshly pruned schema is actually rendered.
-                if hasattr(ecoli.core, '_access_cache'):
-                    ecoli.core._access_cache.clear()
-                ecoli.save_bundle(daughter_dir)
-                if isinstance(division_config, dict) and original_division_agent_id is not None:
-                    division_config["agent_id"] = original_division_agent_id
-            finally:
-                ecoli.state["agents"] = original_agents_state
-                if isinstance(ecoli.schema, dict) and original_agents_schema is not None:
-                    ecoli.schema["agents"] = original_agents_schema
-                if hasattr(ecoli.core, '_access_cache'):
-                    ecoli.core._access_cache.clear()
-            with open(f"daughter_state_{i}_uri.txt", "w") as f:
-                f.write(daughter_dir)
-        with open("division_time.sh", "w") as f:
-            f.write(f"export division_time={ecoli.state.get('global_time', 0.0)}")
-        print(f"  wrote {len(agents)} daughter bundle(s) to "
-              f"{self.daughter_outdir}", flush=True)
 
     def run(self):
         """Create and run an EcoliSim experiment. If the simulation reaches

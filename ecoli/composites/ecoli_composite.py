@@ -498,6 +498,189 @@ def _reseed_allocator_rng(state, sim_data_path, cli_seed, agent_id='0'):
 
 
 # ---------------------------------------------------------------------------
+# Run-to-division loop and daughter save (v1-style, fsspec, cloud-aware)
+# ---------------------------------------------------------------------------
+#
+# The v1 workflow handed daughter state across generations as a single JSON
+# file written via fsspec — works equally for local paths and s3:// / gs://.
+# v2 originally used save_bundle (parquet + document.json), which is local-
+# only: os.makedirs/os.path.join/open silently create local dirs literally
+# named ``s3:`` instead of writing to S3, so daughter handoff broke on
+# Atlantis. These helpers restore v1's pattern for daughter handoff while
+# keeping the bundle infrastructure available for other uses (checkpoints).
+
+# Cell-state keys that build_ecoli_document re-creates from sim_data on the
+# next gen. We strip these before saving so the daughter starts fresh from
+# a per-gen LoadSimData(seed=cli_seed), matching v1's per-gen reset.
+_V2_REBUILT_KEYS = (
+    'process',           # process declarations (rebuilt fresh per gen)
+    'allocator_rng',     # allocator RandomState (re-seeded from cli_seed)
+    'sim_data_objects',  # bound-method instance refs (unserializable)
+    'next_update_time',  # per-process scheduling state
+    'request',           # partition request slots
+    'allocate',          # partition allocation slots
+    'step_flow',         # wire_step_layers tokens
+)
+
+
+def _v2_daughter_payload(agent_state):
+    """Build a JSON-serializable daughter payload from a v2 cell state.
+
+    Drops v2 infrastructure that gets rebuilt fresh on the next gen
+    (process declarations, allocator_rng, sim_data_objects refs, partition
+    request/allocate, next_update_time, flow tokens) and writes the dtype
+    metadata that v1's ``load_states`` consumes to reconstruct structured
+    numpy arrays. ``global_time`` is preserved so the daughter resumes at
+    division time.
+
+    Mutates ``agent_state`` in place. Step/process declarations live as
+    top-level keys (set by ``build_ecoli_document``); we identify them by
+    the presence of a ``_type`` field equal to ``shared_process``,
+    ``shared_step``, or similar edge types and strip those too.
+    """
+    for k in _V2_REBUILT_KEYS:
+        agent_state.pop(k, None)
+    # Strip top-level step/process edge declarations. Pre-realize these
+    # carry ``_type: process`` / ``_type: step``; after Composite()
+    # realize strips the ``_type`` and adds an ``instance`` reference.
+    # Detect by either signal: anything with an ``address`` field or a
+    # live ``instance`` is an edge that build_ecoli_document recreates.
+    edge_keys = [
+        k for k, v in agent_state.items()
+        if isinstance(v, dict)
+        and ('address' in v or 'instance' in v
+             or v.get('_type') in (
+                 'process', 'step', 'shared_process', 'shared_step'))
+    ]
+    for k in edge_keys:
+        del agent_state[k]
+    # v1-compatible dtype metadata for round-trip through load_states.
+    if 'bulk' in agent_state and hasattr(agent_state['bulk'], 'dtype'):
+        agent_state['bulk_dtypes'] = str(agent_state['bulk'].dtype)
+    if 'unique' in agent_state and isinstance(agent_state['unique'], dict):
+        agent_state['unique_dtypes'] = {}
+        for name, mols in list(agent_state['unique'].items()):
+            agent_state['unique'][name] = np.asarray(mols)
+            agent_state['unique_dtypes'][name] = str(mols.dtype)
+
+
+def save_v2_daughters(state, daughter_outdir):
+    """Write per-daughter JSON files (v1 single-JSON pattern, fsspec).
+
+    Mirrors v1's ``EcoliSim.update_experiment`` daughter-save: one
+    ``daughter_state_{i}.json`` per daughter under ``daughter_outdir``,
+    plus ``daughter_state_{i}_uri.txt`` and ``division_time.sh`` in the
+    current working directory for Nextflow to read.
+
+    Args:
+        state: Composite's full state dict (must contain ``agents`` key
+            with exactly 2 daughter cells).
+        daughter_outdir: Output directory or cloud URI prefix
+            (``s3://``, ``gs://``, or local path).
+    """
+    from ecoli.experiments.ecoli_master_sim import prepare_save_state  # noqa
+    from ecoli.library.logging_tools import write_json
+    from wholecell.utils.filepath import cloud_path_join
+
+    agents = state.get('agents', {})
+    if len(agents) != 2:
+        print(f"  WARNING: expected 2 daughters post-divide, got {len(agents)}",
+              flush=True)
+
+    # Non-agent state (environment, global_time, etc.) is shared by both
+    # daughters. Filter the same v2 infrastructure here, including
+    # top-level edge declarations like global_clock.
+    non_agent_state = {k: v for k, v in state.items() if k != 'agents'}
+    for k in _V2_REBUILT_KEYS:
+        non_agent_state.pop(k, None)
+    edge_keys = [
+        k for k, v in non_agent_state.items()
+        if isinstance(v, dict)
+        and ('address' in v or 'instance' in v
+             or v.get('_type') in (
+                 'process', 'step', 'shared_process', 'shared_step'))
+    ]
+    for k in edge_keys:
+        del non_agent_state[k]
+
+    for i, (agent_id, agent_state) in enumerate(sorted(agents.items())):
+        # Deep-copy so the live composite state isn't mutated by the
+        # in-place pruning in _v2_daughter_payload (the run loop may
+        # continue after save in some test harnesses).
+        agent_copy = deepcopy(agent_state)
+        _v2_daughter_payload(agent_copy)
+
+        daughter_path = cloud_path_join(
+            daughter_outdir.rstrip('/'),
+            f"daughter_state_{i}.json")
+        write_json(
+            daughter_path,
+            {**non_agent_state, 'agents': {agent_id: agent_copy}})
+        with open(f"daughter_state_{i}_uri.txt", 'w') as f:
+            f.write(daughter_path)
+
+    division_time = float(state.get('global_time', 0.0))
+    with open('division_time.sh', 'w') as f:
+        f.write(f"export division_time={division_time}")
+    print(f"  wrote {len(agents)} daughter JSON(s) to {daughter_outdir}",
+          flush=True)
+
+
+def run_to_division(composite, max_duration, daughter_outdir=None,
+                    on_tick=None, poll_s=1.0):
+    """Tick the composite until first division or ``max_duration``.
+
+    This is the v2 equivalent of v1's ``update_experiment`` loop:
+    advance in short steps, poll for division (agent count grew), and on
+    division write per-daughter JSONs via fsspec.
+
+    Args:
+        composite: process_bigraph.Composite instance to drive.
+        max_duration: Max simulated seconds to run before stopping.
+        daughter_outdir: If set, save daughters here on division.
+        on_tick: Optional callback ``fn(composite)`` invoked after each
+            successful tick (used by ecoli_master_sim to emit history
+            rows to the parquet emitter).
+        poll_s: Tick granularity in seconds (1.0 matches v1's per-tick
+            emit cadence).
+
+    Returns:
+        ``(divided: bool, current_time: float)``.
+    """
+    from ecoli.processes.cell_division import DivisionDetected
+
+    # Caller may have already set this; flip it on so the framework
+    # halts the post-divide step cascade, leaving daughters' derived
+    # state in mother's pre-divide state (matches v1's
+    # DivisionDetected halt).
+    composite._halt_after_structural = True
+
+    pre_agent_count = len(composite.state.get('agents', {}))
+    current_t = float(composite.state.get('global_time', 0.0))
+    end_t = current_t + float(max_duration)
+    divided = False
+
+    while float(composite.state.get('global_time', 0.0)) < end_t:
+        remaining = end_t - float(composite.state.get('global_time', 0.0))
+        step = min(poll_s, remaining)
+        try:
+            composite.run(step)
+        except DivisionDetected:
+            divided = True
+            break
+        if on_tick is not None:
+            on_tick(composite)
+        if len(composite.state.get('agents', {})) > pre_agent_count:
+            divided = True
+            break
+
+    if divided and daughter_outdir:
+        save_v2_daughters(composite.state, daughter_outdir)
+
+    return divided, float(composite.state.get('global_time', 0.0))
+
+
+# ---------------------------------------------------------------------------
 # Config resolution
 # ---------------------------------------------------------------------------
 

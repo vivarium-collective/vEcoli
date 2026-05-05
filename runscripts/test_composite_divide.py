@@ -1,13 +1,14 @@
 """End-to-end test for v2 composite division + daughter handoff.
 
 Gen 0: `engine: composite`, `divide: true`, `daughter_outdir: out/composite_divide/gen0`
-       Runs until DivisionDetected; writes two daughter bundles.
+       Runs until DivisionDetected; writes two daughter JSONs (v1-style,
+       fsspec-aware).
 
-Gen 1: `initial_state_file: <daughter_0 bundle>`, same config.
-       Loads the daughter bundle, runs until DivisionDetected.
+Gen 1: `initial_state_file: <daughter_0.json>`, same config.
+       Loads the daughter JSON via _get_initial_state, runs until DivisionDetected.
 
-Success = both generations divide AND gen1 starts from a loaded bundle
-with correct state (no crash mid-run).
+Success = both generations divide AND gen1 starts from a loaded daughter
+JSON with correct state (no crash mid-run).
 
 Usage:
     python runscripts/test_composite_divide.py [--max-duration 5000]
@@ -61,15 +62,15 @@ def main():
         gen0_wall = time.monotonic() - t0
         print(f'[gen0] completed in {gen0_wall:.1f}s wall', flush=True)
 
-        # Verify daughter bundles written
-        d0 = os.path.join(gen0_dir, 'daughter_state_0')
-        d1 = os.path.join(gen0_dir, 'daughter_state_1')
-        if not (os.path.isdir(d0) and os.path.isdir(d1)):
-            print(f'[gen0] ✗ daughter bundles NOT written — divide probably did '
+        # Verify daughter JSONs written
+        d0 = os.path.join(gen0_dir, 'daughter_state_0.json')
+        d1 = os.path.join(gen0_dir, 'daughter_state_1.json')
+        if not (os.path.isfile(d0) and os.path.isfile(d1)):
+            print(f'[gen0] ✗ daughter JSONs NOT written — divide probably did '
                   f'not fire', flush=True)
-            print(f'  expected: {d0}/ and {d1}/', flush=True)
+            print(f'  expected: {d0} and {d1}', flush=True)
             return 1
-        print(f'[gen0] ✓ daughter bundles: {d0}, {d1}', flush=True)
+        print(f'[gen0] ✓ daughter JSONs: {d0}, {d1}', flush=True)
 
         # --- Gen 1 from daughter_0 ---
         gen1_dir = os.path.join(args.outdir, 'gen1')
@@ -90,15 +91,15 @@ def main():
         gen1_wall = time.monotonic() - t0
         print(f'[gen1] completed in {gen1_wall:.1f}s wall', flush=True)
 
-        g1d0 = os.path.join(gen1_dir, 'daughter_state_0')
-        g1d1 = os.path.join(gen1_dir, 'daughter_state_1')
-        if not (os.path.isdir(g1d0) and os.path.isdir(g1d1)):
+        g1d0 = os.path.join(gen1_dir, 'daughter_state_0.json')
+        g1d1 = os.path.join(gen1_dir, 'daughter_state_1.json')
+        if not (os.path.isfile(g1d0) and os.path.isfile(g1d1)):
             print(f'[gen1] ✗ daughters NOT written — second division did not '
                   f'fire', flush=True)
             return 1
-        print(f'[gen1] ✓ daughter bundles: {g1d0}, {g1d1}', flush=True)
+        print(f'[gen1] ✓ daughter JSONs: {g1d0}, {g1d1}', flush=True)
 
-        print(f'\n✓ PASS: 2 generations, 4 daughter bundles total', flush=True)
+        print(f'\n✓ PASS: 2 generations, 4 daughter JSONs total', flush=True)
         return 0
 
 
