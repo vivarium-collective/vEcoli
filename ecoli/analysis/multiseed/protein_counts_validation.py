@@ -3,6 +3,7 @@ import pickle
 from typing import Any, cast
 
 from duckdb import DuckDBPyConnection
+from fsspec import open as fsspec_open
 import numpy as np
 import polars as pl
 from scipy.stats import pearsonr
@@ -43,7 +44,7 @@ def plot(
     """
     with open_arbitrary_sim_data(sim_data_paths) as f:
         sim_data = pickle.load(f)
-    with open(validation_data_paths[0], "rb") as f:
+    with fsspec_open(validation_data_paths[0], "rb") as f:
         validation_data = pickle.load(f)
 
     subquery = cast(
