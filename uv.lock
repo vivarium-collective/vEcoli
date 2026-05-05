@@ -364,7 +364,7 @@ wheels = [
 [[package]]
 name = "bigraph-schema"
 version = "1.2.12"
-source = { editable = "../bigraph-schema" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "fire" },
     { name = "numpy" },
@@ -375,24 +375,9 @@ dependencies = [
     { name = "plum-dispatch" },
     { name = "requests" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "fire" },
-    { name = "numpy" },
-    { name = "orjson" },
-    { name = "pandas" },
-    { name = "parsimonious" },
-    { name = "pint" },
-    { name = "plum-dispatch" },
-    { name = "requests", specifier = ">=2.31.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "ipdb" },
-    { name = "pytest" },
-    { name = "pytest-cov" },
+sdist = { url = "https://files.pythonhosted.org/packages/81/9d/4000acf9f85ba7ecb27fbfefe5b57ca361236cbca3cf8c6d99c0ac869126/bigraph_schema-1.2.12.tar.gz", hash = "sha256:c6e0afc0a40a4052f168bd256ec9d6b46a2cdc576dd099d734f238eccd3e644c", size = 112355, upload-time = "2026-05-05T11:15:29.377Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/91/05/54e8e9f134db02b9a6996429a03efe13f30c8240197beb89d333bbf7bd68/bigraph_schema-1.2.12-py3-none-any.whl", hash = "sha256:9beec698a74d1e33d0541af61d2b8bdd926213110f3092a0e214e3e5f704f087", size = 127695, upload-time = "2026-05-05T11:15:27.88Z" },
 ]
 
 [[package]]
@@ -2637,7 +2622,7 @@ wheels = [
 [[package]]
 name = "process-bigraph"
 version = "1.4.3"
-source = { editable = "../process-bigraph" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bigraph-schema" },
     { name = "matplotlib" },
@@ -2646,39 +2631,9 @@ dependencies = [
     { name = "scipy" },
     { name = "sympy" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "bigraph-schema", specifier = ">=1.2.3" },
-    { name = "fastapi", marker = "extra == 'server-rest'", specifier = ">=0.116.1" },
-    { name = "fastapi-utils", marker = "extra == 'server-rest'", specifier = ">=0.8.0" },
-    { name = "fire", marker = "extra == 'server-rest'" },
-    { name = "matplotlib" },
-    { name = "pandas" },
-    { name = "pint", specifier = ">=0.24.4" },
-    { name = "ray", marker = "extra == 'ray'", specifier = ">=2.10" },
-    { name = "scipy", specifier = ">=1.8" },
-    { name = "sympy" },
-    { name = "typing-inspect", marker = "extra == 'server-rest'", specifier = ">=0.9.0" },
-    { name = "uvicorn", marker = "extra == 'server-rest'", specifier = ">=0.35.0" },
-]
-provides-extras = ["ray", "server-rest"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "fastapi", specifier = ">=0.116.1" },
-    { name = "fastapi-utils", specifier = ">=0.8.0" },
-    { name = "fire" },
-    { name = "httpx" },
-    { name = "ipdb", specifier = ">=0.13.13" },
-    { name = "ipykernel" },
-    { name = "jupyter" },
-    { name = "notebook" },
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "ray", specifier = ">=2.10" },
-    { name = "typing-inspect", specifier = ">=0.9.0" },
-    { name = "uvicorn", specifier = ">=0.35.0" },
+sdist = { url = "https://files.pythonhosted.org/packages/39/cb/87e6df2db11d25ab9cbfc18b19ad1b5cb7b9135d3518fa1aefacd9bf2e62/process_bigraph-1.4.3.tar.gz", hash = "sha256:168b9642163b6c991945f2575be35f836ad98515e098a79baeb815bb9db4ac6c", size = 93808, upload-time = "2026-05-05T11:19:46.449Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/22/7b/fda4bd7e5215905f7071cbbf18cd3979ebe3e6c94ea4941d930eda65659a/process_bigraph-1.4.3-py3-none-any.whl", hash = "sha256:7157f9d04bd9d7258852f0bd58eb2e09e75afe2fd643c23991136ca13d43bb75", size = 101153, upload-time = "2026-05-05T11:19:45.237Z" },
 ]
 
 [[package]]
@@ -4047,7 +4002,7 @@ requires-dist = [
     { name = "arviz", specifier = ">=0.23.0" },
     { name = "arviz-plots", specifier = ">=0.7.0" },
     { name = "autograd" },
-    { name = "bigraph-schema", editable = "../bigraph-schema" },
+    { name = "bigraph-schema", specifier = ">=1.2.8" },
     { name = "biopython" },
     { name = "boto3", marker = "extra == 'dev'", specifier = ">=1.41.5" },
     { name = "botocore", extras = ["crt"], marker = "extra == 'dev'", specifier = ">=1.41.5" },
@@ -4078,7 +4033,7 @@ requires-dist = [
     { name = "polars" },
     { name = "pre-commit", marker = "extra == 'dev'" },
     { name = "pre-commit", marker = "extra == 'docs'" },
-    { name = "process-bigraph", editable = "../process-bigraph" },
+    { name = "process-bigraph", specifier = ">=1.4.0" },
     { name = "pyarrow" },
     { name = "pymc", specifier = ">=5.27.0" },
     { name = "pymunk" },
