@@ -1,5 +1,5 @@
 {
     "inherit_from": ["comparison_10s_16g.json"],
-    "experiment_id": "comparison_10s_16g_v1",
+    "experiment_id": "EXPERIMENT_ID_PLACEHOLDER",
     "engine": "vivarium"
 }
