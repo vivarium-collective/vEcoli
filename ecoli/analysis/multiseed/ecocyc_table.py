@@ -508,7 +508,11 @@ def plot(
     cell_density = cell_density.asNumber(MASS_UNITS / VOLUME_UNITS)
     reaction_ids = sim_data.process.metabolism.base_reaction_ids
 
-    # Read fluxes
+    # Read fluxes. ``remove_first=True`` matches the other queries in this
+    # script — the first tick of each cell carries pre-listener-fire defaults
+    # (cell_mass = dry_mass = 0 in v2 fresh-build cells), which would make
+    # the per-tick conversion_coeffs ``dry_mass / cell_mass`` divide-by-zero
+    # and the downstream ``stddev`` raise an out-of-range error.
     flux_subquery = read_stacked_columns(
         history_sql,
         [
@@ -516,6 +520,7 @@ def plot(
             "listeners__mass__cell_mass",
             "listeners__mass__dry_mass",
         ],
+        remove_first=True,
         order_results=False,
     )
     flux_data = conn.sql(
