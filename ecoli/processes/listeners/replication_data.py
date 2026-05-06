@@ -53,12 +53,12 @@ class ReplicationData(Step):
         return {
             'listeners': {
                 'replication_data': {
-                    'fork_coordinates': 'overwrite[array[integer[64]]]',
-                    'fork_domains': 'overwrite[array[integer[32]]]',
-                    'fork_unique_index': 'overwrite[array[integer[64]]]',
-                    'number_of_oric': 'overwrite[integer]',
-                    'free_DnaA_boxes': 'overwrite[integer]',
-                    'total_DnaA_boxes': 'overwrite[integer]',
+                    'fork_coordinates': 'overwrite[divide_share[array[integer[64]]]]',
+                    'fork_domains': 'overwrite[divide_share[array[integer[32]]]]',
+                    'fork_unique_index': 'overwrite[divide_share[array[integer[64]]]]',
+                    'number_of_oric': 'overwrite[divide_share[integer]]',
+                    'free_DnaA_boxes': 'overwrite[divide_share[integer]]',
+                    'total_DnaA_boxes': 'overwrite[divide_share[integer]]',
                 },
             },
         }

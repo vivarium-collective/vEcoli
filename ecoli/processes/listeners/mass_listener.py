@@ -115,39 +115,39 @@ class MassListener(Step):
             'listeners': {
                 'mass': {
                     # Cell + submass compartments — femtograms
-                    'cell_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
-                    'water_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
-                    'dry_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
-                    'rna_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
-                    'rRna_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
-                    'tRna_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
-                    'mRna_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
-                    'dna_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
-                    'protein_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
-                    'smallMolecule_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
+                    'cell_mass': {'_type': 'overwrite[divide_share[float[fg]]]', '_default': 0.0},
+                    'water_mass': {'_type': 'overwrite[divide_share[float[fg]]]', '_default': 0.0},
+                    'dry_mass': {'_type': 'overwrite[divide_share[float[fg]]]', '_default': 0.0},
+                    'rna_mass': {'_type': 'overwrite[divide_share[float[fg]]]', '_default': 0.0},
+                    'rRna_mass': {'_type': 'overwrite[divide_share[float[fg]]]', '_default': 0.0},
+                    'tRna_mass': {'_type': 'overwrite[divide_share[float[fg]]]', '_default': 0.0},
+                    'mRna_mass': {'_type': 'overwrite[divide_share[float[fg]]]', '_default': 0.0},
+                    'dna_mass': {'_type': 'overwrite[divide_share[float[fg]]]', '_default': 0.0},
+                    'protein_mass': {'_type': 'overwrite[divide_share[float[fg]]]', '_default': 0.0},
+                    'smallMolecule_mass': {'_type': 'overwrite[divide_share[float[fg]]]', '_default': 0.0},
                     # Compartment masses — also femtograms
-                    'projection_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
-                    'cytosol_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
-                    'extracellular_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
-                    'flagellum_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
-                    'membrane_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
-                    'outer_membrane_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
-                    'periplasm_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
-                    'pilus_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
-                    'inner_membrane_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
+                    'projection_mass': {'_type': 'overwrite[divide_share[float[fg]]]', '_default': 0.0},
+                    'cytosol_mass': {'_type': 'overwrite[divide_share[float[fg]]]', '_default': 0.0},
+                    'extracellular_mass': {'_type': 'overwrite[divide_share[float[fg]]]', '_default': 0.0},
+                    'flagellum_mass': {'_type': 'overwrite[divide_share[float[fg]]]', '_default': 0.0},
+                    'membrane_mass': {'_type': 'overwrite[divide_share[float[fg]]]', '_default': 0.0},
+                    'outer_membrane_mass': {'_type': 'overwrite[divide_share[float[fg]]]', '_default': 0.0},
+                    'periplasm_mass': {'_type': 'overwrite[divide_share[float[fg]]]', '_default': 0.0},
+                    'pilus_mass': {'_type': 'overwrite[divide_share[float[fg]]]', '_default': 0.0},
+                    'inner_membrane_mass': {'_type': 'overwrite[divide_share[float[fg]]]', '_default': 0.0},
                     # Volume — femtoliters
-                    'volume': {'_type': 'overwrite[float[fL]]', '_default': 0.0},
+                    'volume': {'_type': 'overwrite[divide_share[float[fL]]]', '_default': 0.0},
                     # Growth — fg per second
-                    'growth': {'_type': 'overwrite[float[fg/s]]', '_default': 0.0},
-                    'instantaneous_growth_rate': {'_type': 'overwrite[float[1/s]]', '_default': 0.0},
+                    'growth': {'_type': 'overwrite[divide_share[float[fg/s]]]', '_default': 0.0},
+                    'instantaneous_growth_rate': {'_type': 'overwrite[divide_share[float[1/s]]]', '_default': 0.0},
                     # Dimensionless ratios and fractions
-                    'protein_mass_fraction': 'overwrite[float]{0.0}',
-                    'rna_mass_fraction': 'overwrite[float]{0.0}',
-                    'dry_mass_fold_change': 'overwrite[float]{0.0}',
-                    'protein_mass_fold_change': 'overwrite[float]{0.0}',
-                    'rna_mass_fold_change': 'overwrite[float]{0.0}',
-                    'small_molecule_fold_change': 'overwrite[float]{0.0}',
-                    'expected_mass_fold_change': 'overwrite[float]{0.0}',
+                    'protein_mass_fraction': 'overwrite[divide_share[float]]{0.0}',
+                    'rna_mass_fraction': 'overwrite[divide_share[float]]{0.0}',
+                    'dry_mass_fold_change': 'overwrite[divide_share[float]]{0.0}',
+                    'protein_mass_fold_change': 'overwrite[divide_share[float]]{0.0}',
+                    'rna_mass_fold_change': 'overwrite[divide_share[float]]{0.0}',
+                    'small_molecule_fold_change': 'overwrite[divide_share[float]]{0.0}',
+                    'expected_mass_fold_change': 'overwrite[divide_share[float]]{0.0}',
                 },
             },
         }
@@ -489,11 +489,21 @@ class PostDivisionMassListener(MassListener):
         is correct on the daughter's first tick. Returning True every
         tick caused this listener to be invoked 2-3× per tick by the
         step trigger system on every bulk write.
+
+        Side-effect-free: ``_has_run`` is set inside ``update()`` once
+        the listener has actually executed. The framework calls
+        ``perform_update`` twice per tick (once in run_steps and once
+        in BigraphStep.invoke); a side effect here would consume the
+        first-time flag before update() can fire.
         """
-        if self._has_run:
-            return False
-        self._has_run = True
-        return True
+        return not self._has_run
 
     def update_condition(self, timestep, states):
         return self.first_time_step
+
+    def next_update(self, timestep, states):
+        """Run the inherited mass computation, then mark _has_run so
+        perform_update gates subsequent fires off."""
+        update = super().next_update(timestep, states)
+        self._has_run = True
+        return update

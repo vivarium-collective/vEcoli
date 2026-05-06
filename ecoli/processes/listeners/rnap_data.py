@@ -64,7 +64,7 @@ class RnapData(Step):
             'active_ribosomes': ACTIVE_RIBOSOME_ARRAY,
             'global_time': 'float',
             'timestep': 'float',
-            'next_update_time': 'overwrite[float]',
+            'next_update_time': 'overwrite[divide_share[float]]',
         }
 
     def outputs(self):
@@ -72,14 +72,14 @@ class RnapData(Step):
             'listeners': {
                 'rnap_data': {
                     'rna_init_event_per_cistron': f'overwrite[array[{self.n_cistrons},integer[64]]]',
-                    'active_rnap_coordinates': 'overwrite[array[integer[64]]]',
-                    'active_rnap_domain_indexes': 'overwrite[array[integer]]',
-                    'active_rnap_unique_indexes': 'overwrite[array[integer[64]]]',
-                    'active_rnap_on_stable_RNA_indexes': 'overwrite[array[integer[64]]]',
-                    'active_rnap_n_bound_ribosomes': 'overwrite[array[integer[64]]]',
+                    'active_rnap_coordinates': 'overwrite[divide_share[array[integer[64]]]]',
+                    'active_rnap_domain_indexes': 'overwrite[divide_share[array[integer]]]',
+                    'active_rnap_unique_indexes': 'overwrite[divide_share[array[integer[64]]]]',
+                    'active_rnap_on_stable_RNA_indexes': 'overwrite[divide_share[array[integer[64]]]]',
+                    'active_rnap_n_bound_ribosomes': 'overwrite[divide_share[array[integer[64]]]]',
                 },
             },
-            'next_update_time': 'overwrite[float]',
+            'next_update_time': 'overwrite[divide_share[float]]',
         }
 
 

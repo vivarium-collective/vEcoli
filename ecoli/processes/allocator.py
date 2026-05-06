@@ -75,8 +75,8 @@ class Allocator(Step):
 
     def outputs(self):
         return {
-            'allocate': 'overwrite[map[map[overwrite[array[integer[64]]]]]]',
-            'request': 'overwrite[map[map[list[integer]]]]',
+            'allocate': 'overwrite[divide_share[map[map[overwrite[array[integer[64]]]]]]]',
+            'request': 'overwrite[divide_share[map[map[list[integer]]]]]',
             'listeners': {
                 'atp': {
                     # length n_processes; written as numpy arrays

@@ -57,7 +57,7 @@ class Equilibrium(PartitionedProcess):
             'listeners': {
                 'equilibrium_listener': {
                     # Reaction rates — counts per second
-                    'reaction_rates': 'overwrite[array[float[1/s]]]',
+                    'reaction_rates': 'overwrite[divide_share[array[float[1/s]]]]',
                 },
             },
         }

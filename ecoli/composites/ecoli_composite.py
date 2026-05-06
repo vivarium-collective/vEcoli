@@ -255,94 +255,10 @@ def build_ecoli_document(core, sim_config):
     # ecoli/processes/listeners/mass_listener.py outputs() so the
     # framework auto-creates them on first read.
 
-    # 8. Seed initial listener values by running all listeners once.
-    # In v1, prime_listeners did this. In v2, we run the temporary
-    # instances on the initial state and inject their outputs.
-    # This ensures metabolism sees correct cell_mass on its first tick
-    # and all listener outputs have valid initial values for analysis.
-    # Order matters: mass listeners first (other processes read cell_mass),
-    # then remaining listeners.
-    _seed_listeners = [
-        'post-division-mass-listener',
-        'ecoli-mass-listener',
-        'RNA_counts_listener',
-        'rna_synth_prob_listener',
-        'monomer_counts_listener',
-        'dna_supercoiling_listener',
-        'replication_data_listener',
-        'rnap_data_listener',
-        'ribosome_data_listener',
-        'unique_molecule_counts',
-    ]
-    for listener_name in _seed_listeners:
-        if listener_name not in classes:
-            continue
-        listener_cls = classes[listener_name]
-        listener_config = configs[listener_name]
-        listener_topo = topology.get(listener_name, {})
-        try:
-            listener_inst = listener_cls(listener_config)
-
-            # Pre-populate listener sub-dicts with defaults from
-            # ports_schema() so listeners that read their own prior
-            # state (e.g. ribosome_data reads rRNA_initiated_TU,
-            # rnap_data reads rna_init_event) don't crash.
-            # Only pre-populate ports that wire into the 'listeners'
-            # store — other ports like 'next_update_time' must stay
-            # as scalars.
-            try:
-                schema = listener_inst.ports_schema()
-                for port_name, port_schema in schema.items():
-                    if not isinstance(port_schema, dict):
-                        continue
-                    wire_path = listener_topo.get(port_name)
-                    if wire_path is None:
-                        continue
-                    if isinstance(wire_path, tuple):
-                        wire_path = list(wire_path)
-                    # Only pre-populate ports wiring into listeners
-                    if not wire_path or wire_path[0] != 'listeners':
-                        continue
-                    target = cell_state
-                    for seg in wire_path:
-                        target = target.setdefault(seg, {})
-                    _fill_schema_defaults(target, port_schema)
-            except Exception:
-                pass  # ports_schema() not available; proceed anyway
-
-            # Build the view from cell_state using the topology wires
-            view = {}
-            for port_name, wire_path in listener_topo.items():
-                if isinstance(wire_path, tuple):
-                    wire_path = list(wire_path)
-                cur = cell_state
-                for seg in wire_path:
-                    cur = cur.get(seg) if isinstance(cur, dict) else None
-                    if cur is None:
-                        break
-                if cur is not None:
-                    view[port_name] = cur
-            # Run the listener once
-            update = listener_inst.update(view)
-            # Apply the output back to cell_state via topology
-            if update:
-                for port_name, port_update in update.items():
-                    wire_path = listener_topo.get(port_name)
-                    if wire_path is None or not isinstance(port_update, dict):
-                        continue
-                    if isinstance(wire_path, tuple):
-                        wire_path = list(wire_path)
-                    target = cell_state
-                    for seg in wire_path[:-1]:
-                        target = target.setdefault(seg, {})
-                    if isinstance(target, dict) and wire_path:
-                        slot = target.setdefault(wire_path[-1], {})
-                        if isinstance(slot, dict) and isinstance(port_update, dict):
-                            slot.update(port_update)
-        except Exception as e:
-            import traceback
-            print(f"  [seed_listener] {listener_name} failed: {e}", flush=True)
-            traceback.print_exc()
+    # Listener seeding has been removed: the framework is responsible
+    # for running derivers/listeners on init via ``run_steps_on_init``
+    # or the first ``run()`` cycle. v1's ``prime_listeners`` equivalent
+    # belongs in the framework, not in build_ecoli_document.
 
     # 9. Initialize per-process runtime state (except process store,
     # which was already declared in step 5b as SharedProcess entries).

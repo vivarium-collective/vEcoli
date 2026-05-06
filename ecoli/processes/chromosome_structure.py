@@ -172,7 +172,7 @@ class ChromosomeStructure(Step):
             'chromosomal_segments': CHROMOSOMAL_SEGMENT_ARRAY,
             'global_time': 'float',
             'timestep': 'integer',
-            'next_update_time': 'overwrite[float]',
+            'next_update_time': 'overwrite[divide_share[float]]',
         }
 
     def outputs(self):
@@ -180,18 +180,18 @@ class ChromosomeStructure(Step):
             'bulk': 'bulk_array',
             'listeners': {
                 'rnap_data': {
-                    'active_rnap_n_bound_ribosomes': 'overwrite[array[integer[64]]]',
+                    'active_rnap_n_bound_ribosomes': 'overwrite[divide_share[array[integer[64]]]]',
                     # RNAP/replisome collisions — next_update writes all of these;
                     # match v1's ports_schema so they land in the Parquet emit.
-                    'n_total_collisions': 'overwrite[integer]{0}',
-                    'n_headon_collisions': 'overwrite[integer]{0}',
-                    'n_codirectional_collisions': 'overwrite[integer]{0}',
-                    'n_empty_fork_collisions': 'overwrite[integer]{0}',
-                    'n_removed_ribosomes': 'overwrite[integer]{0}',
-                    'headon_collision_coordinates': 'overwrite[array[integer[64]]]',
-                    'codirectional_collision_coordinates': 'overwrite[array[integer[64]]]',
-                    'empty_fork_collision_coordinates': 'overwrite[array[integer[64]]]',
-                    'incomplete_transcription_events': 'overwrite[array[integer[64]]]',
+                    'n_total_collisions': 'overwrite[divide_share[integer]]{0}',
+                    'n_headon_collisions': 'overwrite[divide_share[integer]]{0}',
+                    'n_codirectional_collisions': 'overwrite[divide_share[integer]]{0}',
+                    'n_empty_fork_collisions': 'overwrite[divide_share[integer]]{0}',
+                    'n_removed_ribosomes': 'overwrite[divide_share[integer]]{0}',
+                    'headon_collision_coordinates': 'overwrite[divide_share[array[integer[64]]]]',
+                    'codirectional_collision_coordinates': 'overwrite[divide_share[array[integer[64]]]]',
+                    'empty_fork_collision_coordinates': 'overwrite[divide_share[array[integer[64]]]]',
+                    'incomplete_transcription_events': 'overwrite[divide_share[array[integer[64]]]]',
                 },
             },
             'active_replisomes': ACTIVE_REPLISOME_ARRAY,
@@ -205,7 +205,7 @@ class ChromosomeStructure(Step):
             'promoters': PROMOTER_ARRAY,
             'genes': GENE_ARRAY,
             'DnaA_boxes': DNAA_BOX_ARRAY,
-            'next_update_time': 'overwrite[float]',
+            'next_update_time': 'overwrite[divide_share[float]]',
         }
 
 

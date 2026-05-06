@@ -104,9 +104,9 @@ class ChromosomeReplication(PartitionedProcess):
             'listeners': {
                 'replication_data': {
                     # Critical initiation mass — femtograms
-                    'critical_initiation_mass': {'_type': 'overwrite[float[fg]]', '_default': 0.0},
+                    'critical_initiation_mass': {'_type': 'overwrite[divide_share[float[fg]]]', '_default': 0.0},
                     # Cell mass / critical mass — dimensionless ratio
-                    'critical_mass_per_oriC': 'overwrite[float]{0.0}',
+                    'critical_mass_per_oriC': 'overwrite[divide_share[float]]{0.0}',
                 },
             },
         }

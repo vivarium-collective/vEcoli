@@ -141,42 +141,42 @@ class TranscriptElongation(PartitionedProcess):
             'listeners': {
                 'transcript_elongation_listener': {
                     'count_rna_synthesized': {
-                        '_type': 'overwrite[array[integer[64]]]',
+                        '_type': 'overwrite[divide_share[array[integer[64]]]]',
                         '_default': [0] * len(self.rnaIds),
                     },
-                    'count_NTPs_used': 'overwrite[integer]{0}',
+                    'count_NTPs_used': 'overwrite[divide_share[integer]]{0}',
                     'attenuation_probability': {
-                        '_type': 'overwrite[array[float]]',
+                        '_type': 'overwrite[divide_share[array[float]]]',
                         '_default': [0.0] * len(self.attenuated_rnas),
                     },
                     'counts_attenuated': {
-                        '_type': 'overwrite[array[integer[64]]]',
+                        '_type': 'overwrite[divide_share[array[integer[64]]]]',
                         '_default': [0] * len(self.attenuated_rnas),
                     },
                 },
                 'growth_limits': {
                     'ntp_used': {
-                        '_type': 'overwrite[array[integer[64]]]',
+                        '_type': 'overwrite[divide_share[array[integer[64]]]]',
                         '_default': [0] * len(self.ntp_ids),
                     },
                     'ntp_pool_size': {
-                        '_type': 'overwrite[array[integer[64]]]',
+                        '_type': 'overwrite[divide_share[array[integer[64]]]]',
                         '_default': [0] * len(self.ntp_ids),
                     },
                     'ntp_request_size': {
-                        '_type': 'overwrite[array[integer[64]]]',
+                        '_type': 'overwrite[divide_share[array[integer[64]]]]',
                         '_default': [0] * len(self.ntp_ids),
                     },
                     'ntp_allocated': {
-                        '_type': 'overwrite[array[integer[64]]]',
+                        '_type': 'overwrite[divide_share[array[integer[64]]]]',
                         '_default': [0] * len(self.ntp_ids),
                     },
                 },
                 'rnap_data': {
-                    'actual_elongations': 'overwrite[integer]{0}',
-                    'did_terminate': 'overwrite[integer]{0}',
-                    'termination_loss': 'overwrite[integer]{0}',
-                    'did_stall': 'overwrite[integer]{0}',
+                    'actual_elongations': 'overwrite[divide_share[integer]]{0}',
+                    'did_terminate': 'overwrite[divide_share[integer]]{0}',
+                    'termination_loss': 'overwrite[divide_share[integer]]{0}',
+                    'did_stall': 'overwrite[divide_share[integer]]{0}',
                 },
             },
         }

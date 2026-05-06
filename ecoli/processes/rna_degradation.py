@@ -121,13 +121,13 @@ class RnaDegradation(PartitionedProcess):
             'RNAs': RNA_ARRAY,
             'listeners': {
                 'rna_degradation_listener': {
-                    'count_rna_degraded': 'overwrite[array[integer[64]]]',
-                    'nucleotides_from_degradation': 'overwrite[integer]{0}',
-                    'count_RNA_degraded_per_cistron': 'overwrite[array[integer[64]]]',
-                    'fraction_active_endornases': 'overwrite[float]{0.0}',
-                    'diff_relative_first_order_decay': 'overwrite[float]{0.0}',
-                    'fract_endo_rrna_counts': 'overwrite[float]',
-                    'fragment_bases_digested': 'overwrite[integer]{0}',
+                    'count_rna_degraded': 'overwrite[divide_share[array[integer[64]]]]',
+                    'nucleotides_from_degradation': 'overwrite[divide_share[integer]]{0}',
+                    'count_RNA_degraded_per_cistron': 'overwrite[divide_share[array[integer[64]]]]',
+                    'fraction_active_endornases': 'overwrite[divide_share[float]]{0.0}',
+                    'diff_relative_first_order_decay': 'overwrite[divide_share[float]]{0.0}',
+                    'fract_endo_rrna_counts': 'overwrite[divide_share[float]]',
+                    'fragment_bases_digested': 'overwrite[divide_share[integer]]{0}',
                 },
             },
         }

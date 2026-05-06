@@ -55,7 +55,7 @@ class UniqueMoleculeCounts(Step):
                 # without it the listener value accumulates +N every
                 # tick. v1's ``listener_schema`` set ``_updater: 'set'``
                 # which has the same effect.
-                'unique_molecule_counts': 'overwrite[map[integer]]',
+                'unique_molecule_counts': 'overwrite[divide_share[map[integer]]]',
             },
         }
 

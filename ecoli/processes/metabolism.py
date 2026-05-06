@@ -141,7 +141,7 @@ class Metabolism(Step):
             # divide_reset matches v1's ``_divider: "set"`` so the
             # daughter's metabolism schedule starts from time_step rather
             # than carrying over the mother's mid-cell-cycle next tick.
-            'next_update_time': 'overwrite[float]',
+            'next_update_time': 'overwrite[divide_share[float]]',
         }
 
     def outputs(self):
@@ -157,55 +157,55 @@ class Metabolism(Step):
             'listeners': {
                 'fba_results': {
                     # Coefficient for flux→delta conversion (g*s/L)
-                    'coefficient': {'_type': 'overwrite[float[g*s/L]]', '_default': 0.0},
+                    'coefficient': {'_type': 'overwrite[divide_share[float[g*s/L]]]', '_default': 0.0},
                     # GTP from polypeptide elongation (count, dimensionless)
-                    'translation_gtp': 'overwrite[float]{0.0}',
+                    'translation_gtp': 'overwrite[divide_share[float]]{0.0}',
                     # Concentration updates per molecule (mM = mmol/L)
-                    'conc_updates': 'overwrite[array[float[mM]]]',
+                    'conc_updates': 'overwrite[divide_share[array[float[mM]]]]',
                     # Homeostatic target concentrations (mM)
-                    'target_concentrations': 'overwrite[array[float[mM]]]',
+                    'target_concentrations': 'overwrite[divide_share[array[float[mM]]]]',
                     # FBA solver outputs (mostly mmol/g/h flux units, but
                     # stored without units in the listener history)
-                    'reaction_fluxes': 'overwrite[array[float]]',
-                    'external_exchange_fluxes': 'overwrite[array[float]]',
-                    'base_reaction_fluxes': 'overwrite[array[float]]',
-                    'objective_value': 'overwrite[float]{0.0}',
-                    'shadow_prices': 'overwrite[array[float]]',
-                    'reduced_costs': 'overwrite[array[float]]',
-                    'homeostatic_objective_values': 'overwrite[array[float]]',
-                    'kinetic_objective_values': 'overwrite[array[float]]',
+                    'reaction_fluxes': 'overwrite[divide_share[array[float]]]',
+                    'external_exchange_fluxes': 'overwrite[divide_share[array[float]]]',
+                    'base_reaction_fluxes': 'overwrite[divide_share[array[float]]]',
+                    'objective_value': 'overwrite[divide_share[float]]{0.0}',
+                    'shadow_prices': 'overwrite[divide_share[array[float]]]',
+                    'reduced_costs': 'overwrite[divide_share[array[float]]]',
+                    'homeostatic_objective_values': 'overwrite[divide_share[array[float]]]',
+                    'kinetic_objective_values': 'overwrite[divide_share[array[float]]]',
                     # Counts (dimensionless)
-                    'catalyst_counts': 'overwrite[array[integer[64]]]',
-                    'delta_metabolites': 'overwrite[array[integer[64]]]',
+                    'catalyst_counts': 'overwrite[divide_share[array[integer[64]]]]',
+                    'delta_metabolites': 'overwrite[divide_share[array[integer[64]]]]',
                     # Identifiers and constraint sets — flexible
-                    'media_id': 'overwrite[string]{}',
+                    'media_id': 'overwrite[divide_share[string]]{}',
                     # These two fields are 87-element boolean masks
                     # (one per environment molecule) recorded by the
                     # FBA listener. v1's daughter JSON serializes them
                     # the same way; on JSON reload the resolver checks
                     # the loaded value against this schema, so the
                     # declared type must match what gets written.
-                    'unconstrained_molecules': 'overwrite[list[boolean]]',
-                    'constrained_molecules': 'overwrite[list[boolean]]',
-                    'uptake_constraints': 'overwrite[array[float]]',
+                    'unconstrained_molecules': 'overwrite[divide_share[list[boolean]]]',
+                    'constrained_molecules': 'overwrite[divide_share[list[boolean]]]',
+                    'uptake_constraints': 'overwrite[divide_share[array[float]]]',
                 },
                 'enzyme_kinetics': {
                     # Counts→molar conversion (mmol/L = mM)
-                    'counts_to_molar': {'_type': 'overwrite[float[mM]]', '_default': 0.0},
+                    'counts_to_molar': {'_type': 'overwrite[divide_share[float[mM]]]', '_default': 0.0},
                     # Counts (dimensionless)
-                    'metabolite_counts_init': 'overwrite[array[integer[64]]]',
-                    'metabolite_counts_final': 'overwrite[array[integer[64]]]',
-                    'enzyme_counts_init': 'overwrite[array[integer[64]]]',
+                    'metabolite_counts_init': 'overwrite[divide_share[array[integer[64]]]]',
+                    'metabolite_counts_final': 'overwrite[divide_share[array[integer[64]]]]',
+                    'enzyme_counts_init': 'overwrite[divide_share[array[integer[64]]]]',
                     # Fluxes (mmol/L/s) — leave plain for now since
                     # the listener stores per-timestep values, not rates
-                    'actual_fluxes': 'overwrite[array[float]]',
-                    'target_fluxes': 'overwrite[array[float]]',
-                    'target_fluxes_upper': 'overwrite[array[float]]',
-                    'target_fluxes_lower': 'overwrite[array[float]]',
-                    'target_aa_conc': 'overwrite[array[float[mM]]]',
+                    'actual_fluxes': 'overwrite[divide_share[array[float]]]',
+                    'target_fluxes': 'overwrite[divide_share[array[float]]]',
+                    'target_fluxes_upper': 'overwrite[divide_share[array[float]]]',
+                    'target_fluxes_lower': 'overwrite[divide_share[array[float]]]',
+                    'target_aa_conc': 'overwrite[divide_share[array[float[mM]]]]',
                 },
             },
-            'next_update_time': 'overwrite[float]',
+            'next_update_time': 'overwrite[divide_share[float]]',
         }
 
     defaults = {

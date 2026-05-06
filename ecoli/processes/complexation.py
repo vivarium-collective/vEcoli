@@ -58,7 +58,7 @@ class Complexation(PartitionedProcess):
             'bulk': 'bulk_array',
             'listeners': {
                 'complexation_listener': {
-                    'complexation_events': 'overwrite[array[integer[64]]]',
+                    'complexation_events': 'overwrite[divide_share[array[integer[64]]]]',
                 },
             },
         }

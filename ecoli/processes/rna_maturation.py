@@ -60,11 +60,11 @@ class RnaMaturation(PartitionedProcess):
             'bulk': 'bulk_array',
             'listeners': {
                 'rna_maturation_listener': {
-                    'total_maturation_events': 'overwrite[integer]{0}',
-                    'total_degraded_ntps': 'overwrite[integer]{0}',
-                    'unprocessed_rnas_consumed': 'overwrite[array[integer[64]]]',
-                    'mature_rnas_generated': 'overwrite[array[integer[64]]]',
-                    'maturation_enzyme_counts': 'overwrite[array[integer[64]]]',
+                    'total_maturation_events': 'overwrite[divide_share[integer]]{0}',
+                    'total_degraded_ntps': 'overwrite[divide_share[integer]]{0}',
+                    'unprocessed_rnas_consumed': 'overwrite[divide_share[array[integer[64]]]]',
+                    'mature_rnas_generated': 'overwrite[divide_share[array[integer[64]]]]',
+                    'maturation_enzyme_counts': 'overwrite[divide_share[array[integer[64]]]]',
                 },
             },
         }

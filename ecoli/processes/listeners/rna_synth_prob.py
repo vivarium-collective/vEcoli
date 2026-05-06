@@ -66,14 +66,14 @@ class RnaSynthProb(Step):
             'rna_synth_prob': {
                 'promoter_copy_number': f'overwrite[array[{self.n_TU},integer[64]]]',
                 'gene_copy_number': f'overwrite[array[{self.n_cistron},integer[64]]]',
-                'bound_TF_indexes': 'overwrite[array[integer[64]]]',
-                'bound_TF_coordinates': 'overwrite[array[integer[64]]]',
-                'bound_TF_domains': 'overwrite[array[integer]]',
+                'bound_TF_indexes': 'overwrite[divide_share[array[integer[64]]]]',
+                'bound_TF_coordinates': 'overwrite[divide_share[array[integer[64]]]]',
+                'bound_TF_domains': 'overwrite[divide_share[array[integer]]]',
                 # Probabilities — dimensionless floats in [0, 1]
                 'expected_rna_init_per_cistron': f'overwrite[array[{self.n_cistron},float]]',
                 'actual_rna_synth_prob_per_cistron': f'overwrite[array[{self.n_cistron},float]]',
                 'target_rna_synth_prob_per_cistron': f'overwrite[array[{self.n_cistron},float]]',
-                'n_bound_TF_per_cistron': f'overwrite[array[{self.n_cistron},integer[16]]]',
+                'n_bound_TF_per_cistron': f'overwrite[array[({self.n_TF}|{self.n_cistron}),integer[16]]]',
             },
         }
 

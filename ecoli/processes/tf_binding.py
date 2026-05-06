@@ -92,7 +92,7 @@ class TfBinding(Step):
                 'rna_synth_prob': 'map[float]',
             },
             'timestep': 'float',
-            'next_update_time': 'overwrite[float]',
+            'next_update_time': 'overwrite[divide_share[float]]',
             'global_time': 'float{0.0}',
         }
 
@@ -109,7 +109,7 @@ class TfBinding(Step):
                     'n_bound_TF_per_TU': f'overwrite[array[({self.n_TU}|{self.n_TF}),integer[16]]]',
                 },
             },
-            'next_update_time': 'overwrite[float]',
+            'next_update_time': 'overwrite[divide_share[float]]',
         }
 
 

@@ -92,26 +92,26 @@ class PolypeptideInitiation(PartitionedProcess):
             'active_ribosome': ACTIVE_RIBOSOME_ARRAY,
             'listeners': {
                 'ribosome_data': {
-                    'did_initialize': 'overwrite[integer]{0}',
+                    'did_initialize': 'overwrite[divide_share[integer]]{0}',
                     'ribosome_init_event_per_monomer': {
-                        '_type': 'overwrite[array[integer[64]]]',
+                        '_type': 'overwrite[divide_share[array[integer[64]]]]',
                         '_default': [0] * len(self.monomer_ids),
                     },
                     'target_prob_translation_per_transcript': {
-                        '_type': 'overwrite[array[float]]',
+                        '_type': 'overwrite[divide_share[array[float]]]',
                         '_default': [0.0] * len(self.monomer_ids),
                     },
                     'actual_prob_translation_per_transcript': {
-                        '_type': 'overwrite[array[float]]',
+                        '_type': 'overwrite[divide_share[array[float]]]',
                         '_default': [0.0] * len(self.monomer_ids),
                     },
                     'mRNA_is_overcrowded': {
-                        '_type': 'overwrite[array[boolean]]',
+                        '_type': 'overwrite[divide_share[array[boolean]]]',
                         '_default': [False] * len(self.monomer_ids),
                     },
-                    'max_p': 'overwrite[float]{0.0}',
+                    'max_p': 'overwrite[divide_share[float]]{0.0}',
                     'max_p_per_protein': {
-                        '_type': 'overwrite[array[float]]',
+                        '_type': 'overwrite[divide_share[array[float]]]',
                         '_default': [0.0] * len(self.monomer_ids),
                     },
                     # Note: v1's ports_schema omits is_n_ribosomes_to_activate_reduced,

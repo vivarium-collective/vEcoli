@@ -927,7 +927,7 @@ class EcoliSim:
                 document, sim_data_path, cli_seed, agent_id=agent_id)
             ecoli = Composite(
                 {'skip_process_state': True,
-                 'run_steps_on_init': True,
+                 'run_steps_on_init': False,
                  **document},
                 core=core)
             _reseed_allocator_rng(
@@ -946,13 +946,16 @@ class EcoliSim:
 
             print("Creating composite (with realize)...", flush=True)
             t0 = _time.time()
-            # ``run_steps_on_init`` fires derivers (mass listeners,
-            # post-division-mass-listener, etc.) so they set their
-            # ``timeInitial`` / ``initial_mass`` references at t=0
-            # before any process runs. Mirrors v1 vivarium's
-            # ``Engine.__init__`` -> ``run_steps()`` call.
+            # ``run_steps_on_init=False``: block #8 in build_ecoli_document
+            # already runs all listeners once on the initial state to seed
+            # ``listeners.*`` (timeInitial, initial_mass, etc.). Letting
+            # the framework also fire run_steps_on_init triggers a full
+            # cascade through global_clock → requesters → evolvers,
+            # advancing global_time by one tick BEFORE the first
+            # ``ecoli.run()`` call. Daughter handoff would then do an
+            # extra tick of work vs v1 (mother+1 tick at first emit).
             ecoli = Composite({'schema': {}, 'state': state,
-                               'run_steps_on_init': True}, core=core)
+                               'run_steps_on_init': False}, core=core)
             print(f"  Composite created in {_time.time()-t0:.2f}s", flush=True)
 
         # Steps should only run when triggered by global_clock,
@@ -971,7 +974,15 @@ class EcoliSim:
         agent_t = ecoli.state.get('agents', {}).get(
             agent_id, {}).get('global_time')
         if agent_t is not None and float(agent_t) > 0:
-            ecoli.state['global_time'] = float(agent_t)
+            new_t = float(agent_t)
+            ecoli.state['global_time'] = new_t
+            # Sync self.front[path]['time'] for all processes — Composite
+            # populated front with time=0 at construction (when global_time
+            # was still the schema default), so without this resync,
+            # run_process computes future = 0 + interval = 1 and ends up
+            # rewinding state.global_time to 1.0 on first tick.
+            for path in list(ecoli.front.keys()):
+                ecoli.front[path]['time'] = new_t
 
         self._composite = ecoli
         self.generated_initial_state = None

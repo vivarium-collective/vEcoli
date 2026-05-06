@@ -213,36 +213,36 @@ class TranscriptInitiation(PartitionedProcess):
                 'rna_synth_prob': {
                     # Synthesis probabilities — dimensionless
                     'target_rna_synth_prob': {
-                        '_type': 'overwrite[array[float]]',
+                        '_type': 'overwrite[divide_share[array[float]]]',
                         '_default': [0.0] * self.n_TUs,
                     },
                     'actual_rna_synth_prob': {
-                        '_type': 'overwrite[array[float]]',
+                        '_type': 'overwrite[divide_share[array[float]]]',
                         '_default': [0.0] * self.n_TUs,
                     },
-                    'max_p': 'overwrite[float]{0.0}',
+                    'max_p': 'overwrite[divide_share[float]]{0.0}',
                     'tu_is_overcrowded': {
-                        '_type': 'overwrite[array[boolean]]',
+                        '_type': 'overwrite[divide_share[array[boolean]]]',
                         '_default': [False] * self.n_TUs,
                     },
-                    'total_rna_init': 'overwrite[integer]{0}',
+                    'total_rna_init': 'overwrite[divide_share[integer]]{0}',
                 },
                 'ribosome_data': {
                     # rRNA initiation counts and probabilities
                     'rRNA_initiated_TU': {
-                        '_type': 'overwrite[array[integer]]',
+                        '_type': 'overwrite[divide_share[array[integer]]]',
                         '_default': [0] * len(self.idx_rRNA),
                     },
                     'rRNA_init_prob_TU': {
-                        '_type': 'overwrite[array[float]]',
+                        '_type': 'overwrite[divide_share[array[float]]]',
                         '_default': [0.0] * len(self.idx_rRNA),
                     },
-                    'total_rna_init': 'overwrite[integer]{0}',
+                    'total_rna_init': 'overwrite[divide_share[integer]]{0}',
                 },
                 'rnap_data': {
-                    'did_initialize': 'overwrite[integer]{0}',
+                    'did_initialize': 'overwrite[divide_share[integer]]{0}',
                     'rna_init_event': {
-                        '_type': 'overwrite[array[integer]]',
+                        '_type': 'overwrite[divide_share[array[integer]]]',
                         '_default': [0] * self.n_TUs,
                     },
                 },
