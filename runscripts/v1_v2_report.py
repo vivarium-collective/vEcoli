@@ -161,10 +161,83 @@ def plot_row(label, v1_rel, v2_rel, v1_abs, v2_abs):
             f'| {cell(v1_rel, v1_abs)} | {cell(v2_rel, v2_abs)} |\n')
 
 
+def parity_matrix_section(matrix_path):
+    """Render parity_matrix.tsv as a per-(seed, gen) markdown matrix."""
+    if not os.path.exists(matrix_path):
+        return ''
+    rows = []
+    with open(matrix_path) as f:
+        header = f.readline().strip().split('\t')
+        for line in f:
+            cols = line.rstrip('\n').split('\t')
+            if len(cols) < len(header):
+                continue
+            r = dict(zip(header, cols))
+            for k in ('seed', 'gen', 'n_steps', 'n_identical',
+                      'first_diff_t', 'max_abs', 'max_l1', 'n_species'):
+                r[k] = int(r[k])
+            rows.append(r)
+    if not rows:
+        return ''
+    by_cell = {(r['seed'], r['gen']): r for r in rows}
+    seeds_l = sorted({r['seed'] for r in rows})
+    gens_l = sorted({r['gen'] for r in rows})
+    table = '| seed \\\\ gen | ' + ' | '.join(str(g) for g in gens_l) + ' |\n'
+    table += '|---' * (len(gens_l) + 1) + '|\n'
+    for seed in seeds_l:
+        cells = [str(seed)]
+        for gen in gens_l:
+            r = by_cell.get((seed, gen))
+            if r is None:
+                cells.append('—')
+            elif r['n_identical'] == r['n_steps']:
+                cells.append('=')
+            else:
+                cells.append(f"Δ@{r['first_diff_t']}")
+        table += '| ' + ' | '.join(cells) + ' |\n'
+    # Worst-case stats
+    diverged = [r for r in rows if r['n_identical'] != r['n_steps']]
+    legend = (
+        '`=` = bit-identical bulk vector at every common timestep. '
+        '`Δ@<t>` = first divergence timestep. `—` = missing data.\n\n'
+    )
+    summary = ''
+    if diverged:
+        worst_l1 = max(diverged, key=lambda r: r['max_l1'])
+        worst_abs = max(diverged, key=lambda r: r['max_abs'])
+        first = min(diverged, key=lambda r: (r['first_diff_t'], r['seed'], r['gen']))
+        summary = (
+            f'\n**Diverged cells:** {len(diverged)} of {len(rows)}.  '
+            f'Earliest divergence at seed {first["seed"]} gen {first["gen"]} '
+            f'(t={first["first_diff_t"]}). '
+            f'Worst max|Δ| = {worst_abs["max_abs"]} '
+            f'(seed {worst_abs["seed"]} gen {worst_abs["gen"]}). '
+            f'Worst L1 = {worst_l1["max_l1"]} '
+            f'(seed {worst_l1["seed"]} gen {worst_l1["gen"]}).\n'
+        )
+    else:
+        summary = f'\n**All {len(rows)} cells bit-identical.**\n'
+    return ('## Bulk parity matrix\n\n' + legend + table + summary
+            + f'\n_Source: `{matrix_path}`._\n')
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--out', default='doc/v1_v2_report.md')
+    p.add_argument('--v1-id', default='two_generations_v1',
+                   help='v1 experiment id (matches out/<id>/ and trace--<id>--*.csv)')
+    p.add_argument('--v2-id', default='two_generations_v2',
+                   help='v2 experiment id')
+    p.add_argument('--seeds', default='0,1',
+                   help='comma-separated seeds for per-cell plots')
+    p.add_argument('--gens', default='1,2',
+                   help='comma-separated generation ints for per-cell plots')
+    p.add_argument('--parity-matrix', default='out/parity_matrix.tsv',
+                   help='path to parity_matrix.tsv (rendered if present)')
     args = p.parse_args()
+
+    seeds = [s.strip() for s in args.seeds.split(',') if s.strip()]
+    gens = [int(g.strip()) for g in args.gens.split(',') if g.strip()]
 
     out_path = os.path.abspath(args.out)
     out_dir = os.path.dirname(out_path)
@@ -177,11 +250,11 @@ def main():
         shutil.rmtree(assets_dir)
     os.makedirs(assets_dir, exist_ok=True)
 
-    v1_trace = load_trace('two_generations_v1')
-    v2_trace = load_trace('two_generations_v2')
+    v1_trace = load_trace(args.v1_id)
+    v2_trace = load_trace(args.v2_id)
 
-    v1_dt = division_times('two_generations_v1')
-    v2_dt = division_times('two_generations_v2')
+    v1_dt = division_times(args.v1_id)
+    v2_dt = division_times(args.v2_id)
 
     # Division times table
     div_rows = []
@@ -276,12 +349,12 @@ def main():
 
     # Analysis plots
     plot_blocks = []
-    for seed in ['0', '1']:
-        for gen in [1, 2]:
+    for seed in seeds:
+        for gen in gens:
             v1_p = find_plot(
-                'two_generations_v1', 'mass_fraction_summary', seed, gen)
+                args.v1_id, 'mass_fraction_summary', seed, gen)
             v2_p = find_plot(
-                'two_generations_v2', 'mass_fraction_summary', seed, gen)
+                args.v2_id, 'mass_fraction_summary', seed, gen)
             v1_r = stage_asset(v1_p, assets_dir, assets_rel,
                                f'mass_fraction_summary__seed{seed}_gen{gen}_v1')
             v2_r = stage_asset(v2_p, assets_dir, assets_rel,
@@ -292,17 +365,20 @@ def main():
     for kind in ['protein_counts_validation',
                  'subgenerational_expression_table',
                  'ecocyc_table']:
-        v1_p = find_plot('two_generations_v1', kind)
-        v2_p = find_plot('two_generations_v2', kind)
+        v1_p = find_plot(args.v1_id, kind)
+        v2_p = find_plot(args.v2_id, kind)
         v1_r = stage_asset(v1_p, assets_dir, assets_rel, f'{kind}_v1')
         v2_r = stage_asset(v2_p, assets_dir, assets_rel, f'{kind}_v2')
         plot_blocks.append(plot_row(
             f'{kind} (multiseed)', v1_r, v2_r, v1_p, v2_p))
 
+    parity_md = parity_matrix_section(args.parity_matrix)
+
     md = (
-        '# vEcoli v1 vs v2 — two_generations comparison\n\n'
+        f'# vEcoli v1 vs v2 — {args.v1_id} vs {args.v2_id}\n\n'
         '_Generated from latest workflow runs by `runscripts/v1_v2_report.py`._\n\n'
-        '## Cell cycle / division times\n\n'
+        + (parity_md + '\n' if parity_md else '')
+        + '## Cell cycle / division times\n\n'
         f'{div_table}\n\n'
         '## Runtime per task (sum across instances)\n\n'
         f'{runtime_table}\n\n'

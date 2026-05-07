@@ -8,7 +8,7 @@
         "threaded": false
     },
     "aws": {
-        "build_image": true,
+        "build_image": false,
         "container_image": "vecoli:v2-comparison-arm64",
         "region": "us-gov-west-1",
         "batch_queue": "vecoli-arm"
