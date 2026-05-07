@@ -118,7 +118,14 @@ cmd_resume()  { cmd_bootstrap resume; }
 
 cmd_ssh()    { exec ssh -i "$KEY_FILE" "ec2-user@$(require_running_dns)" "$@"; }
 cmd_attach() { exec ssh -i "$KEY_FILE" -t "ec2-user@$(require_running_dns)" "tmux attach -t $TMUX_SESSION"; }
-cmd_tail()   { exec ssh -i "$KEY_FILE" "ec2-user@$(require_running_dns)" "tail -f ~/v2_workflow.log"; }
+cmd_tail()   {
+  # Pick the log matching the active SESSION (set by bootstrap to write
+  # ~/${SESSION}_workflow.log). Fall back to the legacy ~/v2_workflow.log
+  # if no session-specific file exists yet.
+  local log="~/${TMUX_SESSION}_workflow.log"
+  exec ssh -i "$KEY_FILE" "ec2-user@$(require_running_dns)" \
+    "if [[ -f ${log/#\~/\$HOME} ]]; then tail -f ${log}; else tail -f ~/v2_workflow.log; fi"
+}
 
 cmd_reboot() {
   local id; id=$(get_instance_id)
