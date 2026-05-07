@@ -1,0 +1,10 @@
+{
+    "inherit_from": ["comparison_10s_16g.json"],
+    "experiment_id": "comparison_10s_16g_v2_local",
+    "engine": "composite",
+    "sim_data_path": null,
+    "parca_options": {
+        "cpus": 6,
+        "memory_gb": 8
+    }
+}
