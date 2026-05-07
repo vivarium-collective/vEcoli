@@ -1,0 +1,16 @@
+{
+    "inherit_from": ["comparison_10s_16g.json"],
+    "experiment_id": "comparison_10s_16g_v1_aws",
+    "engine": "vivarium",
+    "emitter_arg": {
+        "out_uri": "s3://smsvpctest-shared-sharedbucket60d199d6-abfvwv0day91/vecoli-output/comparison_10s_16g_v1_aws",
+        "threaded": false
+    },
+    "aws": {
+        "build_image": false,
+        "container_image": "vecoli:v2-comparison-arm64",
+        "region": "us-gov-west-1",
+        "batch_queue": "vecoli-arm"
+    },
+    "progress_bar": false
+}

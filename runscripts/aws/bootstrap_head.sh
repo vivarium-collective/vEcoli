@@ -13,7 +13,11 @@ set -euo pipefail
 VECOLI_REPO="${VECOLI_REPO:-https://github.com/vivarium-collective/vEcoli.git}"
 VECOLI_BRANCH="${VECOLI_BRANCH:-composite}"
 VECOLI_DIR="${HOME}/vEcoli"
-CONFIG_RELPATH="configs/comparison_10s_16g_v2_aws.json"
+# Override via env to launch a different workflow (e.g. v1 vs v2):
+#   CONFIG_RELPATH=configs/comparison_10s_16g_v1_aws.json
+#   SESSION=vecoli-v1
+CONFIG_RELPATH="${CONFIG_RELPATH:-configs/comparison_10s_16g_v2_aws.json}"
+SESSION="${SESSION:-vecoli-v2}"
 REGION="us-gov-west-1"
 
 # --- 1. system packages -----------------------------------------------------
@@ -61,9 +65,13 @@ current_origin=$(git remote get-url origin 2>/dev/null || true)
 if [[ "$current_origin" != "$VECOLI_REPO" ]]; then
   git remote set-url origin "$VECOLI_REPO"
 fi
+# The head is an execution environment, not a dev workspace. Any local
+# tracked-file modifications (e.g. from a previous report render writing
+# to doc/v1_v2_report.md) are forfeit — hard-reset to remote so pulls
+# never get blocked. Untracked files (our scp'd scripts) are kept.
 git fetch --all --tags
-git checkout "$VECOLI_BRANCH"
-git pull --ff-only origin "$VECOLI_BRANCH"
+git checkout "$VECOLI_BRANCH" 2>/dev/null || git checkout -B "$VECOLI_BRANCH" "origin/$VECOLI_BRANCH"
+git reset --hard "origin/$VECOLI_BRANCH"
 echo "vEcoli at $(git rev-parse --short HEAD) on $(git rev-parse --abbrev-ref HEAD)"
 
 # --- 7. uv sync (PyPI for bigraph-schema / process-bigraph) -----------------
@@ -103,19 +111,19 @@ else
   echo "Starting fresh experiment_id=${EXP_ID}"
 fi
 
-SESSION="vecoli-v2"
 if tmux has-session -t "$SESSION" 2>/dev/null; then
   echo "tmux session '$SESSION' already exists. Attach with: tmux attach -t $SESSION"
   exit 0
 fi
+LOG_FILE="\$HOME/${SESSION}_workflow.log"
 tmux new-session -d -s "$SESSION" \
   "cd $VECOLI_DIR && source .venv/bin/activate && \
-   python runscripts/workflow.py --config $CONFIG_RELPATH $RESUME_FLAG 2>&1 | tee \$HOME/v2_workflow.log"
+   python runscripts/workflow.py --config $CONFIG_RELPATH $RESUME_FLAG 2>&1 | tee ${LOG_FILE}"
 
 cat <<EOF
 
 Workflow launched in tmux session '$SESSION'.
-  Tail log:    tail -f ~/v2_workflow.log
+  Tail log:    tail -f ~/${SESSION}_workflow.log
   Attach:      tmux attach -t $SESSION
   Detach:      Ctrl+B then D
   Outputs to:  $(python -c "import json;print(json.load(open('$CONFIG_RELPATH'))['emitter_arg']['out_uri'])")

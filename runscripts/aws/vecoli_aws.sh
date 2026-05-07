@@ -105,8 +105,13 @@ cmd_bootstrap() {
   local dns; dns=$(require_running_dns)
   echo "scp bootstrap_head.sh -> $dns"
   scp -i "$KEY_FILE" "$SCRIPT_DIR/bootstrap_head.sh" "ec2-user@$dns:~/"
-  echo "running ${resume_env:-fresh} bootstrap..."
-  ssh -i "$KEY_FILE" "ec2-user@$dns" "${resume_env}bash ~/bootstrap_head.sh"
+  # Pass through CONFIG_RELPATH and SESSION (default to v2) so the same
+  # head can host parallel v1 and v2 workflows in separate tmux sessions.
+  local config_env="CONFIG_RELPATH='${CONFIG_REL}' "
+  local session_env=""
+  [[ -n "${SESSION:-}" ]] && session_env="SESSION='$SESSION' "
+  echo "running ${resume_env:-fresh} bootstrap (config=${CONFIG_REL}, session=${SESSION:-vecoli-v2})..."
+  ssh -i "$KEY_FILE" "ec2-user@$dns" "${resume_env}${config_env}${session_env}bash ~/bootstrap_head.sh"
 }
 cmd_launch()  { cmd_bootstrap; }
 cmd_resume()  { cmd_bootstrap resume; }
@@ -219,6 +224,45 @@ cmd_compare() {
     --seed "$seed" --gen "$gen"
 }
 
+# Convert doc/v1_v2_report.md to a self-contained shareable artifact.
+# Default: HTML with images base64-embedded (single file, browser-native).
+# Pass 'pdf' for PDF via weasyprint (needs `pip install weasyprint`).
+cmd_export() {
+  local fmt="${1:-html}"
+  local src="$REPO_ROOT/doc/v1_v2_report.md"
+  [[ -f "$src" ]] || { echo "no $src yet — run 'report' first" >&2; return 1; }
+  command -v pandoc >/dev/null \
+    || { echo "pandoc not installed: sudo apt install pandoc" >&2; return 1; }
+  case "$fmt" in
+    html)
+      local out="$REPO_ROOT/doc/v1_v2_report.html"
+      # --embed-resources is pandoc >=2.19; --self-contained is the legacy
+      # alias still accepted by 2.x but removed in 3.x. Try new, fall back.
+      local embed_flag="--embed-resources"
+      pandoc --help 2>&1 | grep -q -- '--embed-resources' \
+        || embed_flag="--self-contained"
+      pandoc -s "$embed_flag" \
+        --metadata title="vEcoli v1 vs v2" \
+        --resource-path="$REPO_ROOT/doc:$REPO_ROOT/doc/_static" \
+        -o "$out" "$src"
+      echo "Wrote $out ($(du -h "$out" | cut -f1), single-file, mailable)"
+      ;;
+    pdf)
+      command -v weasyprint >/dev/null \
+        || { echo "weasyprint not installed: uv pip install weasyprint" >&2; return 1; }
+      local out="$REPO_ROOT/doc/v1_v2_report.pdf"
+      pandoc --pdf-engine=weasyprint \
+        --resource-path="$REPO_ROOT/doc:$REPO_ROOT/doc/_static" \
+        -o "$out" "$src"
+      echo "Wrote $out ($(du -h "$out" | cut -f1))"
+      ;;
+    *)
+      echo "usage: $(basename "$0") export [html|pdf]" >&2
+      return 1
+      ;;
+  esac
+}
+
 # Render the v1↔v2 markdown report. Runs on the head (in-region S3 fetch is
 # fast). Pulls the rendered markdown + assets back to local doc/.
 cmd_report() {
@@ -289,6 +333,8 @@ Compare:
   report           fetch v1+v2 outputs on head, render v1_v2_report.md, pull to local
                    env: VECOLI_V1_ID, VECOLI_V2_ID, VECOLI_REPORT_SEEDS,
                         VECOLI_REPORT_GENS, VECOLI_INCLUDE_HISTORY
+  export [FMT]     convert doc/v1_v2_report.md to a single-file artifact
+                   FMT: html (default, self-contained) or pdf (needs weasyprint)
 
 Config (read from $CONFIG_REL):
   experiment_id    $EXP_ID
@@ -327,6 +373,7 @@ case "$cmd" in
   dns)        cmd_dns        "$@" ;;
   compare)    cmd_compare    "$@" ;;
   report)     cmd_report     "$@" ;;
+  export)     cmd_export     "$@" ;;
   help|-h|--help) cmd_help ;;
   *) echo "Unknown command: $cmd" >&2; echo; cmd_help; exit 1 ;;
 esac

@@ -31,18 +31,58 @@ def load_trace(experiment_id):
 
 
 def division_times(experiment_id):
-    """{seed: {gen: division_time_seconds}}"""
+    """{seed: {gen: division_time_seconds}}
+
+    Two data sources, in priority order:
+
+    1. parity_matrix.tsv (if present): the v1_t_max / v2_t_max columns are
+       the absolute global time at which each cell divided. This works for
+       AWS Batch runs, where the legacy ``division_time.sh`` files aren't
+       persisted to S3.
+
+    2. Per-task ``division_time.sh`` files in nextflow_workdirs/ (legacy
+       local-run path, kept for backwards compat with two_generations runs).
+    """
     out = {}
+    # Path 1: parity_matrix.tsv — works for AWS-side runs.
+    matrix_path = (f'{REPO_ROOT}/out/parity_matrix__'
+                   f'{experiment_id}__{experiment_id}.tsv')
+    # Try both v1 and v2 columns; the matrix file is named after both ids,
+    # so we have to look for either ordering.
+    candidates = glob.glob(f'{REPO_ROOT}/out/parity_matrix__*.tsv')
+    for cand in candidates:
+        with open(cand) as f:
+            header = f.readline().strip().split('\t')
+            if 'v1_t_max' not in header:
+                continue
+            base = os.path.basename(cand).replace('parity_matrix__', '').replace('.tsv', '')
+            parts = base.split('__')
+            if len(parts) != 2:
+                continue
+            ids_to_col = {parts[0]: 'v1_t_max', parts[1]: 'v2_t_max'}
+            col = ids_to_col.get(experiment_id)
+            if col is None:
+                continue
+            ix = {h: i for i, h in enumerate(header)}
+            for line in f:
+                cols = line.rstrip('\n').split('\t')
+                if len(cols) < len(header):
+                    continue
+                seed = cols[ix['seed']]
+                gen = int(cols[ix['gen']])
+                t = cols[ix[col]]
+                if t and t != '-':
+                    out.setdefault(seed, {})[gen] = float(t)
+            if out:
+                return out
+
+    # Path 2: legacy local-run path via per-task division_time.sh files.
     workdir_root = f'{REPO_ROOT}/out/{experiment_id}/nextflow/nextflow_workdirs'
     for sh_path in glob.glob(f'{workdir_root}/*/*/.command.sh'):
         if 'ecoli_master_sim.py' not in open(sh_path).read():
             continue
         sh = open(sh_path).read()
         seed_m = re.search(r'--lineage_seed\s+(\S+)', sh)
-        # ``--daughter_outdir`` points at the *current* sim's output
-        # dir; ``--initial_state_file`` points at the parent gen's
-        # state — using initial_state_file misclassifies every gen_2
-        # sim as gen_1.
         outdir_m = re.search(
             r'--daughter_outdir\s+"?\S*?seed=\d+/generation=(\d+)/agent_id=', sh)
         if not (seed_m and outdir_m):
@@ -63,8 +103,11 @@ def find_plot(experiment_id, kind, seed=None, gen=None):
     """Return path to a plot HTML/TSV for the given analysis type."""
     base = f'{REPO_ROOT}/out/{experiment_id}/analyses'
     if seed is not None and gen is not None:
+        # agent_id encodes the binary lineage path; for the always-take-
+        # daughter-0 lineage (single_daughters=true) it's gen zeros wide.
+        agent_id = '0' * int(gen)
         path = (f'{base}/variant=0/lineage_seed={seed}/generation={gen}/'
-                f'agent_id={"00" if gen == 2 else "0"}/plots/analysis={kind}')
+                f'agent_id={agent_id}/plots/analysis={kind}')
     else:
         path = f'{base}/variant=0/plots/analysis={kind}'
     if not os.path.isdir(path):
@@ -342,10 +385,27 @@ def main():
             '-', '-',
             f'**{total_delta:+.1f}%**',
         ])
-    runtime_table = md_table(
-        ['Sim', 'V1 wall (s)', 'V2 wall (s)',
-         'V1 s/tick', 'V2 s/tick', 'Δ wall %'],
-        runtime_rows)
+    if not v1_sim and v2_sim:
+        runtime_table = (
+            '_V1 trace CSV not available — atlantis-driven runs don\'t '
+            'preserve `trace--<exp>--*.csv` in S3, so V1 task durations '
+            'cannot be recovered post-hoc. Showing V2 only._\n\n'
+            + md_table(
+                ['Sim', 'V2 wall (s)', 'V2 s/tick'],
+                [[r[0], r[2], r[4]] for r in runtime_rows]))
+    elif not v2_sim and v1_sim:
+        runtime_table = (
+            '_V2 trace CSV not available._\n\n'
+            + md_table(
+                ['Sim', 'V1 wall (s)', 'V1 s/tick'],
+                [[r[0], r[1], r[3]] for r in runtime_rows]))
+    elif not v1_sim and not v2_sim:
+        runtime_table = '_No trace CSVs available for either run._\n'
+    else:
+        runtime_table = md_table(
+            ['Sim', 'V1 wall (s)', 'V2 wall (s)',
+             'V1 s/tick', 'V2 s/tick', 'Δ wall %'],
+            runtime_rows)
 
     # Analysis plots
     plot_blocks = []

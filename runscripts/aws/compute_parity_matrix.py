@@ -67,6 +67,8 @@ def compute_cell(v1_df, v2_df):
     times = common['time'].to_numpy()
     n_identical = int((n_diff == 0).sum())
     first_diff = int(times[np.argmax(n_diff > 0)]) if n_diff.any() else -1
+    # Division-time signal: the last (largest) time in each run is the
+    # absolute global time at which the cell divided.
     return {
         'n_steps': int(len(common)),
         'n_identical': n_identical,
@@ -74,6 +76,8 @@ def compute_cell(v1_df, v2_df):
         'max_abs': int(max_abs.max()),
         'max_l1': int(l1.max()),
         'n_species': int(b1.shape[1]),
+        'v1_t_max': int(v1_df['time'].max()),
+        'v2_t_max': int(v2_df['time'].max()),
     }
 
 
@@ -99,16 +103,29 @@ def main():
 
     os.makedirs(os.path.dirname(args.output) or '.', exist_ok=True)
     cols = ['seed', 'gen', 'n_steps', 'n_identical',
-            'first_diff_t', 'max_abs', 'max_l1', 'n_species']
+            'first_diff_t', 'max_abs', 'max_l1', 'n_species',
+            'v1_t_max', 'v2_t_max']
 
-    # Resume: skip cells already in the output
+    # Resume: skip cells already in the output. If the existing file's
+    # header doesn't match the current schema (e.g. older runs missing
+    # v1_t_max/v2_t_max), invalidate it and start fresh — avoids quietly
+    # serving stale data with missing columns.
     done = set()
     if os.path.exists(args.output):
         with open(args.output) as f:
-            for line in f.readlines()[1:]:
-                fields = line.split('\t')
-                if len(fields) >= 2:
-                    done.add((int(fields[0]), int(fields[1])))
+            existing_header = f.readline().strip().split('\t')
+        if existing_header == cols:
+            with open(args.output) as f:
+                for line in f.readlines()[1:]:
+                    fields = line.split('\t')
+                    if len(fields) >= 2:
+                        done.add((int(fields[0]), int(fields[1])))
+        else:
+            print(f'header mismatch (have {existing_header}, want {cols}); '
+                  f'rebuilding {args.output}')
+            os.rename(args.output, args.output + '.bak')
+            with open(args.output, 'w') as f:
+                f.write('\t'.join(cols) + '\n')
     else:
         with open(args.output, 'w') as f:
             f.write('\t'.join(cols) + '\n')
@@ -142,7 +159,8 @@ def main():
                            str(stats['n_identical']),
                            str(stats['first_diff_t']),
                            str(stats['max_abs']), str(stats['max_l1']),
-                           str(stats['n_species'])]
+                           str(stats['n_species']),
+                           str(stats['v1_t_max']), str(stats['v2_t_max'])]
                     f.write('\t'.join(row) + '\n')
                 tag = ('IDENTICAL'
                        if stats['n_identical'] == stats['n_steps']
