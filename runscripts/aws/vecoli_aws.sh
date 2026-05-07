@@ -273,7 +273,10 @@ cmd_export() {
 # Render the v1↔v2 markdown report. Runs on the head (in-region S3 fetch is
 # fast). Pulls the rendered markdown + assets back to local doc/.
 cmd_report() {
-  local v1_id="${VECOLI_V1_ID:-sim35-comparison_test_6-4b7b}"
+  # Default v1 id is now the AWS-Batch v1 rerun (comparison_10s_16g_v1_aws),
+  # which has a real Nextflow trace CSV (the original atlantis run sim35-...
+  # didn't preserve one in S3). Override via VECOLI_V1_ID if needed.
+  local v1_id="${VECOLI_V1_ID:-comparison_10s_16g_v1_aws}"
   local v2_id="${VECOLI_V2_ID:-$EXP_ID}"
   local seeds="${VECOLI_REPORT_SEEDS:-0,1,2,3,4,5,6,7,8,9}"
   local gens="${VECOLI_REPORT_GENS:-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16}"

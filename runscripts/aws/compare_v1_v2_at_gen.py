@@ -41,8 +41,8 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument('--seed', type=int, default=0)
     p.add_argument('--gen', type=int, default=3)
-    p.add_argument('--v1-id', default='sim35-comparison_test_6-4b7b')
-    p.add_argument('--v2-id', default='comparison_10s_16g_v2_aws')
+    p.add_argument('--v1-id', default='comparison_10s_16g_v1_aws')
+    p.add_argument('--v2-id', default='comparison_10s_16g_v2_aws_listener_fix')
     p.add_argument('--bucket',
                    default='smsvpctest-shared-sharedbucket60d199d6-abfvwv0day91')
     p.add_argument('--prefix', default='vecoli-output')

@@ -83,8 +83,8 @@ def compute_cell(v1_df, v2_df):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('--v1-id', required=True)
-    p.add_argument('--v2-id', required=True)
+    p.add_argument('--v1-id', default='comparison_10s_16g_v1_aws')
+    p.add_argument('--v2-id', default='comparison_10s_16g_v2_aws_listener_fix')
     p.add_argument('--bucket',
                    default='smsvpctest-shared-sharedbucket60d199d6-abfvwv0day91')
     p.add_argument('--prefix', default='vecoli-output')

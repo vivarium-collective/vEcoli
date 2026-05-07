@@ -21,8 +21,8 @@
 
 set -euo pipefail
 
-V1_ID="${V1_ID:-sim35-comparison_test_6-4b7b}"
-V2_ID="${V2_ID:-comparison_10s_16g_v2_aws}"
+V1_ID="${V1_ID:-comparison_10s_16g_v1_aws}"
+V2_ID="${V2_ID:-comparison_10s_16g_v2_aws_listener_fix}"
 BUCKET="${BUCKET:-smsvpctest-shared-sharedbucket60d199d6-abfvwv0day91}"
 PREFIX="${PREFIX:-vecoli-output}"
 SEEDS="${SEEDS:-0,1}"
