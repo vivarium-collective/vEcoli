@@ -946,16 +946,15 @@ class EcoliSim:
 
             print("Creating composite (with realize)...", flush=True)
             t0 = _time.time()
-            # ``run_steps_on_init=False``: block #8 in build_ecoli_document
-            # already runs all listeners once on the initial state to seed
-            # ``listeners.*`` (timeInitial, initial_mass, etc.). Letting
-            # the framework also fire run_steps_on_init triggers a full
-            # cascade through global_clock → requesters → evolvers,
-            # advancing global_time by one tick BEFORE the first
-            # ``ecoli.run()`` call. Daughter handoff would then do an
-            # extra tick of work vs v1 (mother+1 tick at first emit).
+            # v1-emulation: run Steps on init so listener outputs are
+            # populated before the t=0 emit (mass, fold_change, etc.).
+            # Side effect: global_clock (classified as a Step) advances
+            # global_time by one tick, so v2 produces one extra emit at
+            # the end of the run. This doesn't affect parity comparisons
+            # (which align on common timesteps) but is a known v1-compat
+            # cut — see memory:v1_compat_debt.
             ecoli = Composite({'schema': {}, 'state': state,
-                               'run_steps_on_init': False}, core=core)
+                               'run_steps_on_init': True}, core=core)
             print(f"  Composite created in {_time.time()-t0:.2f}s", flush=True)
 
         # Steps should only run when triggered by global_clock,

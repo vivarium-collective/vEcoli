@@ -1,0 +1,15 @@
+{
+    "inherit_from": ["comparison_10s_16g_v1.json"],
+    "experiment_id": "iter_v1",
+    "suffix_time": false,
+    "sim_data_path": "out/comparison_10s_16g_v2_local/parca/kb/simData.cPickle",
+    "max_duration": 10,
+    "fail_at_max_duration": false,
+    "n_init_sims": 1,
+    "emitter_arg": {
+        "threaded": false,
+        "batch_size": 10
+    },
+    "progress_bar": false,
+    "analysis_options": {}
+}

@@ -38,27 +38,56 @@ def sync(s3_uri, dest):
         check=True)
 
 
+def col_status_t0_only(a, b):
+    """Return True if a and b differ ONLY at index 0 (the t=0 emit) and
+    match identically from index 1 onwards. Helps distinguish listener-
+    priming emit artifacts from real per-tick divergences.
+    """
+    if len(a) != len(b) or len(a) < 2:
+        return False
+    if a.dtype == object or b.dtype == object:
+        try:
+            for i in range(1, len(a)):
+                if a[i] != b[i]:
+                    return False
+            return a[0] != b[0]
+        except Exception:
+            return False
+    if a.dtype.kind == 'f':
+        rest_eq = np.array_equal(a[1:], b[1:], equal_nan=True)
+    else:
+        rest_eq = np.array_equal(a[1:], b[1:])
+    return rest_eq and bool((a[0] != b[0]) if a.dtype != object else a[0] != b[0])
+
+
 def col_status(a, b):
     """Compare two same-length numpy arrays; return one of:
-    'identical', 'diverged', 'nan_only_in_v2', 'shape_mismatch', 'unsupported'.
+    'identical', 't0_only', 'diverged', 'nan_only_in_v2',
+    'shape_mismatch', 'unsupported'.
     """
     if a.shape != b.shape:
         return 'shape_mismatch'
     # object dtype = list/struct: row-by-row scalar/list compare
     if a.dtype == object or b.dtype == object:
         try:
-            for x, y in zip(a, b):
+            diffs = []
+            for i, (x, y) in enumerate(zip(a, b)):
+                eq = True
                 if isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
-                    if x.shape != y.shape or not np.array_equal(x, y):
-                        return 'diverged'
+                    eq = x.shape == y.shape and np.array_equal(x, y)
                 elif isinstance(x, list) and isinstance(y, list):
-                    if len(x) != len(y) or any(xi != yi for xi, yi in zip(x, y)):
-                        return 'diverged'
+                    eq = len(x) == len(y) and not any(xi != yi for xi, yi in zip(x, y))
                 else:
-                    if x != y and not (isinstance(x, float) and isinstance(y, float)
-                                       and math.isnan(x) and math.isnan(y)):
-                        return 'diverged'
-            return 'identical'
+                    eq = (x == y) or (
+                        isinstance(x, float) and isinstance(y, float)
+                        and math.isnan(x) and math.isnan(y))
+                if not eq:
+                    diffs.append(i)
+            if not diffs:
+                return 'identical'
+            if diffs == [0] and len(a) > 1:
+                return 't0_only'
+            return 'diverged'
         except Exception:
             return 'unsupported'
     # numeric float
@@ -67,11 +96,18 @@ def col_status(a, b):
         b_nan = np.isnan(b)
         if (b_nan & ~a_nan).any():
             return 'nan_only_in_v2'
-        if not np.array_equal(a, b, equal_nan=True):
-            return 'diverged'
-        return 'identical'
+        if np.array_equal(a, b, equal_nan=True):
+            return 'identical'
+        # Check t=0-only
+        if len(a) > 1 and np.array_equal(a[1:], b[1:], equal_nan=True):
+            return 't0_only'
+        return 'diverged'
     # int / bool / other primitive
-    return 'identical' if np.array_equal(a, b) else 'diverged'
+    if np.array_equal(a, b):
+        return 'identical'
+    if len(a) > 1 and np.array_equal(a[1:], b[1:]):
+        return 't0_only'
+    return 'diverged'
 
 
 def family(col):

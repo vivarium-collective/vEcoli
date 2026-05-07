@@ -1,0 +1,5 @@
+{
+    "inherit_from": ["iter_v1.json"],
+    "experiment_id": "iter_v2",
+    "engine": "composite"
+}
