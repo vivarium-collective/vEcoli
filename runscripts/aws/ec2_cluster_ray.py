@@ -126,32 +126,48 @@ def main() -> int:
     try:
         with cluster:
             log_path = "/tmp/lineage_ray.log"
+            local_sim_data = "/tmp/simData.cPickle"
             command = (
                 f"set +e; "
                 f"cd /vEcoli; "
                 f": > {log_path}; "
                 # AWS region must be set explicitly inside the Docker
                 # container — aiobotocore/s3fs don't auto-detect from
-                # IMDSv2 the way the AWS CLI does, so without these
-                # they default to commercial us-east-1 endpoints and
-                # hit "400 Bad Request" trying to HeadObject a
-                # GovCloud bucket. The wrapping ``aws s3 cp`` of the
-                # log later in this command works either way (CLI does
-                # auto-detect), but Python boto3 needs the env vars.
+                # IMDSv2 the way the AWS CLI does. We still set it for
+                # later S3 calls (parquet writes via fsspec).
                 f"export AWS_REGION={cluster.region} "
                 f"AWS_DEFAULT_REGION={cluster.region}; "
+                # Diagnostic: prove the env exports applied so we know
+                # whether failures are env-related or library-related.
+                f"echo \"[diag] AWS_REGION=$AWS_REGION "
+                f"AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION\" >> {log_path}; "
+                # Pre-download sim_data via AWS CLI (which auto-detects
+                # region from IMDSv2 reliably). Mirrors the MP runner's
+                # pattern. Avoids depending on fsspec/aiobotocore for
+                # the sim_data load. Parquet writes still go through
+                # fsspec — those will surface separately if region
+                # detection is broken in s3fs too.
+                f"echo \"[diag] downloading sim_data: {sim_data_uri}\" "
+                f"  >> {log_path}; "
+                f"aws --region {cluster.region} s3 cp "
+                f"  {sim_data_uri} {local_sim_data} --no-progress "
+                f"  >> {log_path} 2>&1; "
+                f"if [ ! -f {local_sim_data} ]; then "
+                f"  echo \"[diag] sim_data download failed\" >> {log_path}; "
+                f"  exit 2; "
+                f"fi; "
                 # POLARS_MAX_THREADS=1 to avoid oversubscription on the
                 # multi-actor head — same setup MP runner uses.
                 f"POLARS_MAX_THREADS=1 "
                 f"python -u runscripts/run_composite_lineage_ray.py "
                 f"  --config {config_relpath} "
-                f"  --sim_data_path {sim_data_uri} "
+                f"  --sim_data_path {local_sim_data} "
                 f"  --out_uri {out_uri} "
                 f"  --n_seeds {n_seeds} "
                 f"  --generations {generations} "
                 f"  --max_duration {max_duration} "
                 f"  --ray_address auto "
-                f"  > {log_path} 2>&1; "
+                f"  >> {log_path} 2>&1; "
                 f"rc=$?; "
                 f'echo "=== experiment exit: $rc ===" >> {log_path}; '
                 f"aws --region {cluster.region} s3 cp {log_path} "
