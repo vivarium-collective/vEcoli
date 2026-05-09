@@ -185,6 +185,14 @@ ns_head_terminate() {
   echo "Terminated."
 }
 ns_head_rebuild() { ns_head_terminate; ns_head_setup; }
+ns_head_setup_ray_iam() {
+  # One-time grant of Ray cluster-management perms to the head's
+  # instance profile, plus creation of the worker instance profile
+  # ``ray-process-bigraph-node``. Idempotent. Must be run from a
+  # machine with IAM admin rights (your laptop, not the head).
+  echo "Granting Ray cluster-management IAM policy to head's instance profile..."
+  bash "$SCRIPT_DIR/setup_ray_iam.sh"
+}
 ns_head_reboot() {
   local id; id=$(get_instance_id)
   [[ -n "$id" && "$id" != "None" ]] || { echo "no head"; return 1; }
@@ -500,6 +508,8 @@ Bootstrap:      $(basename "$BOOTSTRAP_SCRIPT")
 Namespaces (recommended):
   head <subcmd>     EC2 head-node lifecycle
     setup           provision new head ($HEAD_INSTANCE_TYPE)
+    setup-ray-iam   one-time IAM grant for Ray cluster mode (run from
+                    laptop with admin perms; idempotent)
     rebuild         terminate + setup
     reboot | stop | start | terminate
     refresh-sg      re-add current public IP to SSH SG
@@ -561,17 +571,18 @@ case "$cmd" in
   head)
     sub="${1:-help}"; shift || true
     case "$sub" in
-      setup)      ns_head_setup "$@" ;;
-      terminate)  ns_head_terminate "$@" ;;
-      rebuild)    ns_head_rebuild "$@" ;;
-      reboot)     ns_head_reboot "$@" ;;
-      stop)       ns_head_stop "$@" ;;
-      start)      ns_head_start "$@" ;;
-      refresh-sg) ns_head_refresh_sg "$@" ;;
-      dns)        ns_head_dns "$@" ;;
-      ssh)        ns_head_ssh "$@" ;;
-      attach)     ns_head_attach "$@" ;;
-      help|*)     cmd_help ;;
+      setup)         ns_head_setup "$@" ;;
+      setup-ray-iam) ns_head_setup_ray_iam "$@" ;;
+      terminate)     ns_head_terminate "$@" ;;
+      rebuild)       ns_head_rebuild "$@" ;;
+      reboot)        ns_head_reboot "$@" ;;
+      stop)          ns_head_stop "$@" ;;
+      start)         ns_head_start "$@" ;;
+      refresh-sg)    ns_head_refresh_sg "$@" ;;
+      dns)           ns_head_dns "$@" ;;
+      ssh)           ns_head_ssh "$@" ;;
+      attach)        ns_head_attach "$@" ;;
+      help|*)        cmd_help ;;
     esac
     ;;
   image)

@@ -37,6 +37,13 @@ Optional:
     BAKED_AMI_ID         override default ECS-AL2 image
     KEEP_CLUSTER         1 to skip terminate at end (debugging)
     CLUSTER_ID           default "vecoli-ray-<unix-timestamp>"
+    WORKER_SUBNET_ID     default subnet-08621613bcb558caa (SMS API VPC
+                         private, NAT-routed). MUST be a subnet with
+                         NAT egress so the SSM agent on each worker can
+                         reach ssm.us-gov-west-1.amazonaws.com — public
+                         subnets without auto-assign-public-IPv4 don't
+                         work. The driver node (this script) stays in
+                         whatever subnet it was launched in (public).
 """
 from __future__ import annotations
 
@@ -77,6 +84,21 @@ def main() -> int:
     keep_cluster = bool(int(os.environ.get("KEEP_CLUSTER") or "0"))
     cluster_id = os.environ.get(
         "CLUSTER_ID") or f"vecoli-ray-{int(time.time())}"
+    # GovCloud workers MUST land in a private subnet that has NAT egress
+    # so the SSM agent can reach ssm.us-gov-west-1.amazonaws.com. The
+    # head node is in a public subnet (so it can drive boto3/S3 with a
+    # public IP) but workers are policy-forbidden from getting public
+    # IPs. Default = the SMS API VPC's private subnet (same one
+    # spatio-flux uses; both clusters share the VPC's NAT gateway).
+    # Override via WORKER_SUBNET_ID env. EC2SSMRayCluster's
+    # ``subnet_id`` controls workers AND head; if it's the private
+    # subnet, head gets no public IP either — but it doesn't need one
+    # since it talks to S3 via the same NAT (or via S3 VPC endpoint
+    # if one exists).
+    worker_subnet_id = (
+        os.environ.get("WORKER_SUBNET_ID")
+        or "subnet-08621613bcb558caa"  # SMS API VPC private, NAT-routed
+    )
 
     print(f"→ image={image_uri}", flush=True)
     print(f"→ cluster_id={cluster_id}  workers={n_workers} "
@@ -84,6 +106,8 @@ def main() -> int:
     print(f"→ out_uri={out_uri}", flush=True)
     print(f"→ sim_data_uri={sim_data_uri}", flush=True)
 
+    print(f"→ subnet={worker_subnet_id} (must have NAT egress to SSM)",
+          flush=True)
     cluster = EC2SSMRayCluster(
         image_uri=image_uri,
         n_workers=n_workers,
@@ -93,6 +117,7 @@ def main() -> int:
         worker_instance_type=worker_type,
         iam_profile=iam_profile,
         baked_ami_id=baked_ami_id,
+        subnet_id=worker_subnet_id,
         # Container name is grep-able by ops scripts (cancel-current-run,
         # diagnose-current-run, etc). Keep distinct from spatio-flux's.
         container_name="vecoli_ray",
