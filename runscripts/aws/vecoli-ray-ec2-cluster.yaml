@@ -1,0 +1,136 @@
+# =====================================================================
+# Ray cluster on EC2 GovCloud for distributed vEcoli composite_lineage.
+#
+# Quickstart (from a workstation with `ray>=2.10` + boto3 + AWS GovCloud
+# creds; SSO works):
+#   ray up runscripts/aws/vecoli-ray-ec2-cluster.yaml
+#   ray attach runscripts/aws/vecoli-ray-ec2-cluster.yaml
+#
+#   # On the head:
+#   cd ~/vEcoli && source .venv/bin/activate
+#   python runscripts/run_composite_lineage_ray.py \
+#       --config configs/comparison_10s_16g_v2_ray_aws.json \
+#       --sim_data_path s3://.../parca/kb/simData.cPickle \
+#       --out_uri      s3://.../comparison_10s_16g_v2_ray_aws/ \
+#       --n_seeds 10 --generations 16 --max_duration 3000 \
+#       --ray_address auto
+#
+#   ray down runscripts/aws/vecoli-ray-ec2-cluster.yaml
+#
+# Cluster shape (per user decision in the design Q&A):
+#   - Pre-allocated, no autoscaling: 1 head + 5 workers
+#   - 10 lineage actors / 5 workers = 2 actors per worker = 8 vCPU per
+#     actor on m5.4xlarge → comparable to MP single-node where each
+#     worker gets ~6 vCPU on c7g.metal.
+#   - Cost: m5.2xlarge head ($0.384/hr) + 5×m5.4xlarge workers
+#     ($0.768/hr each) = $4.22/hr on-demand. ~$4 for a 1 hr run.
+# =====================================================================
+
+cluster_name: vecoli-ray
+
+# Pre-allocate to peak: no autoscaling. SCALING_TRADEOFFS.md says
+# autoscaling savings are modest for monotonic workloads and add
+# complexity; pre-alloc is simpler.
+min_workers: 5
+max_workers: 5
+upscaling_speed: 1.0
+
+# Long idle so a manual `ray attach` for ad-hoc runs doesn't lose the
+# workers. Tear down explicitly with `ray down`.
+idle_timeout_minutes: 30
+
+# ---------------------------------------------------------------------
+# Where the cluster lives — same region as the existing v1/v2-aws Batch
+# workflow so S3 reads/writes stay in-region.
+# ---------------------------------------------------------------------
+provider:
+  type: aws
+  region: us-gov-west-1
+  # availability_zone, security_group, subnet, etc. left to defaults.
+  # If the existing v[12]-aws head SG is reused, set:
+  # security_group:
+  #   GroupName: vecoli-head-ssh-sg
+
+auth:
+  ssh_user: ec2-user
+  # ray creates + manages this key on first `ray up`.
+
+# ---------------------------------------------------------------------
+# Node images and sizes
+# ---------------------------------------------------------------------
+# Amazon Linux 2023 ARM64 ami matching the existing vEcoli AWS Batch
+# image base — replace ami-id per region. The AMI must have python3.12
+# available (default in AL2023). Verify with `aws ec2 describe-images`
+# before first `ray up`.
+available_node_types:
+  ray.head.default:
+    node_config:
+      InstanceType: m5.2xlarge          # 8 vCPU, 32 GB RAM
+      ImageId: ami-0acce26d4eb6bb3a4    # AL2023 us-gov-west-1 (verify)
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 100
+            VolumeType: gp3
+    resources: {}
+    min_workers: 0
+    max_workers: 0
+
+  ray.worker.default:
+    node_config:
+      InstanceType: m5.4xlarge          # 16 vCPU, 64 GB RAM per worker
+      ImageId: ami-0acce26d4eb6bb3a4
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 100
+            VolumeType: gp3
+    resources: {}
+    # 5 workers × 2 lineage actors = 10 lineage_seeds.
+    min_workers: 5
+    max_workers: 5
+
+head_node_type: ray.head.default
+
+# ---------------------------------------------------------------------
+# How to install vEcoli on every node
+# ---------------------------------------------------------------------
+# Run on every node at provisioning time. We don't ship a Docker image
+# (unlike the Batch workflow) — the head's role is small and we want
+# fast iteration. Workers also run setup_commands by default.
+setup_commands:
+  - sudo dnf -y update
+  - sudo dnf -y install git tmux gcc gcc-c++ make
+  # uv as user (no sudo) — matches the existing bootstrap_head.sh path.
+  - if ! command -v uv >/dev/null; then curl -LsSf https://astral.sh/uv/install.sh | sh; fi
+  - export PATH="$HOME/.local/bin:$PATH" && hash -r
+  # Clone vEcoli (composite branch). Pinned via VECOLI_BRANCH env if set
+  # by `ray up --bootstrap-env`.
+  - if [[ ! -d $HOME/vEcoli/.git ]]; then git clone --filter=blob:none https://github.com/vivarium-collective/vEcoli.git $HOME/vEcoli; fi
+  - cd $HOME/vEcoli && git fetch --all --tags && git checkout composite && git reset --hard origin/composite
+  # Editable install + s3fs for ParquetEmitter S3 writes.
+  - cd $HOME/vEcoli && (test -d .venv || $HOME/.local/bin/uv venv) && source .venv/bin/activate && $HOME/.local/bin/uv pip install -e . s3fs boto3 'ray[default]>=2.10'
+
+# ---------------------------------------------------------------------
+# Ray daemon start commands
+# ---------------------------------------------------------------------
+head_start_ray_commands:
+  - ray stop
+  - >
+    cd $HOME/vEcoli && source .venv/bin/activate &&
+    ray start --head --port=6379
+    --object-manager-port=8076
+    --autoscaling-config=~/ray_bootstrap_config.yaml
+
+worker_start_ray_commands:
+  - ray stop
+  - >
+    cd $HOME/vEcoli && source .venv/bin/activate &&
+    ray start --address=$RAY_HEAD_IP:6379
+    --object-manager-port=8076
+
+# ---------------------------------------------------------------------
+# Ports / SG: `ray up` opens 6379 (head), 8076 (object manager), and
+# 8265 (dashboard) automatically. Driver SSHes to head via ray's
+# managed key.
+# ---------------------------------------------------------------------

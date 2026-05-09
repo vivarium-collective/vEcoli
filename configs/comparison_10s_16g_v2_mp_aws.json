@@ -1,0 +1,18 @@
+{
+    "inherit_from": ["comparison_10s_16g.json"],
+    "experiment_id": "comparison_10s_16g_v2_mp_aws",
+    "engine": "composite_lineage",
+    "sim_data_path": null,
+    "emitter_arg": {
+        "out_uri": "s3://smsvpctest-shared-sharedbucket60d199d6-abfvwv0day91/vecoli-output/comparison_10s_16g_v2_mp_aws",
+        "threaded": false
+    },
+    "aws": {
+        "deploy_mode": "mp_single_node",
+        "instance_type": "c7g.metal",
+        "region": "us-gov-west-1",
+        "head_name": "vecoli-v2-mp-head",
+        "tmux_session": "vecoli-v2-mp"
+    },
+    "progress_bar": false
+}

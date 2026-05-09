@@ -1089,6 +1089,339 @@ class EcoliSim:
             emitter.success = divided or not self.fail_at_max_duration
             emitter.finalize()
 
+    def _run_composite_lineage(self):
+        """Run a single lineage forward by rebuilding a fresh per-gen
+        Composite at every division boundary.
+
+        Each generation builds its own :py:class:`Composite` via
+        :py:func:`~ecoli.composites.ecoli_composite.build_ecoli_document`
+        with ``seed = lineage_seed + gen``, just like the per-gen
+        Nextflow path does. Daughter cell state (split bulk + unique
+        from mother's pre-divide composite) is overlaid onto the
+        fresh build via ``initial_state``. This guarantees per-gen
+        byte parity vs the per-gen path because the same code runs
+        in both, just inside one Python interpreter instead of N.
+
+        Inputs vs the per-gen Nextflow path that this saves on each
+        gen boundary:
+          - sim_data pickle reload (~5–30 s) — the loaded pickle is
+            shared across all per-gen LoadSimData wrappers via the
+            new ``sim_data=`` kwarg.
+          - Python interpreter start + import (~10–30 s on fresh pod)
+          - numba JIT cache reload (~0–10 s)
+
+        What persists across gens:
+          - ``self._shared_sim_data`` — pickle stays loaded.
+          - ``core`` (Core registry) — type system stays warm.
+          - ``emitter`` (ParquetEmitter) — single emitter; we emit a
+            new ``configuration`` row at each gen boundary so the
+            partition path advances to ``generation=N/agent_id=AID``.
+
+        What's rebuilt fresh per gen (matching per-gen path):
+          - ``LoadSimData`` wrapper (cheap; just a new RandomState
+            seeded with ``lineage_seed + gen``).
+          - The cell's full state via ``build_ecoli_document``:
+            process configs (with new RNG seeds), allocator_rng,
+            next_update_time defaults, sim_data_objects store, step
+            flow, all of it. Daughter's split bulk/unique come in via
+            ``initial_state``; everything else is fresh.
+          - The :py:class:`Composite` instance.
+        """
+        from ecoli.composites.ecoli_composite import (
+            build_composite_native, run_to_division)
+        from ecoli.library.bigraph_types import ECOLI_TYPES
+        from ecoli.library.parquet_emitter import ParquetEmitter
+        from ecoli.library.sim_data import LoadSimData
+        from process_bigraph import Composite
+        from process_bigraph.types.process import (
+            register_types as register_process_bigraph_types)
+        from bigraph_schema import Core, BASE_TYPES
+        from copy import deepcopy
+        import time as _time
+
+        n_generations = int(self.config.get("generations") or 1)
+        if not self.config.get("single_daughters", True):
+            raise NotImplementedError(
+                "composite_lineage engine currently only supports "
+                "single_daughters=True. Tree-mode multi-cell composite "
+                "is a future phase.")
+        if self.config.get("composite_checkpoint_at") is not None:
+            raise NotImplementedError(
+                "composite_checkpoint_at is incompatible with "
+                "composite_lineage engine.")
+
+        # ---- One-time setup ---------------------------------------
+        self.processes = self._retrieve_processes(
+            self.processes, self.add_processes,
+            self.exclude_processes, self.swap_processes)
+        self.topology = self._retrieve_topology(
+            self.topology, self.processes, self.swap_processes,
+            self.log_updates)
+        self.process_configs = self._retrieve_process_configs(
+            self.process_configs, self.processes)
+
+        core = Core(BASE_TYPES)
+        register_process_bigraph_types(core)
+        core.register_types(ECOLI_TYPES)
+
+        base_lineage_seed = int(self.config.get('lineage_seed', 0))
+        base_agent_id = str(self.config.get('agent_id', '0'))
+
+        # Load sim_data once. All per-gen LoadSimData wrappers below
+        # reuse this loaded pickle via the ``sim_data=`` kwarg, so
+        # only this one call hits disk / fsspec.
+        #
+        # MP / Ray paths can pre-load the pickle in the parent /
+        # actor and pass it in via ``self._preloaded_sim_data`` so
+        # this call costs ~0.0s rather than 5-30s per worker.
+        print("Loading sim_data...", flush=True)
+        t0 = _time.time()
+        base_kwargs = dict(self.config)
+        base_kwargs['seed'] = base_lineage_seed
+        if getattr(self, '_preloaded_sim_data', None) is not None:
+            base_kwargs['sim_data'] = self._preloaded_sim_data
+        base_load_sim_data = LoadSimData(**base_kwargs)
+        self._shared_sim_data = base_load_sim_data.sim_data
+        print(f"  Loaded in {_time.time()-t0:.2f}s", flush=True)
+
+        # Single shared emitter across all gens. Each gen's
+        # ``configuration`` emit advances ``partitioning_path`` so
+        # subsequent history rows land in the new
+        # ``generation=N/agent_id=AID/`` partition.
+        emitter = None
+        if self.emitter == 'parquet':
+            emitter = ParquetEmitter(self.emitter_arg)
+
+        # ---- Drive each generation --------------------------------
+        # ``daughter_state`` is the (deep-copied, payload-stripped)
+        # cell state from the previous gen's daughter-0 cell, used as
+        # ``initial_state`` for the next gen's build. ``None`` for
+        # gen 0 (uses sim_data initial state via the standard path).
+        daughter_state = None
+        any_divided = False
+        total_t0 = _time.time()
+        try:
+            for gen in range(n_generations):
+                gen_seed = base_lineage_seed + gen
+                # agent_id grows by one '0' per division, single-
+                # daughter lineage; matches sim.nf's encoding.
+                gen_agent_id = base_agent_id + ("0" * gen)
+
+                print(
+                    f"\n=== Lineage gen {gen}/{n_generations - 1} "
+                    f"(agent_id={gen_agent_id}, seed={gen_seed}) ===",
+                    flush=True,
+                )
+
+                # Build per-gen config locally (don't mutate self.config
+                # — get_metadata() reads it on every emit).
+                gen_config = deepcopy(self.config)
+                gen_config['seed'] = gen_seed
+                gen_config['agent_id'] = gen_agent_id
+                if daughter_state is not None:
+                    gen_config['initial_state'] = daughter_state
+                    gen_config['initial_state_file'] = None
+
+                # Gen 0 may be loaded from a pre-saved bundle (e.g.
+                # iter_test_division.py uses this to skip the ~5 min
+                # tick-up to the first division). The bundle is the
+                # full Composite document captured by
+                # ``composite_checkpoint_at``; it short-circuits both
+                # the build_composite_native and the realize-from-
+                # decls passes. Subsequent gens always rebuild from
+                # daughter_state (initial_state overlay).
+                bundle_path = (
+                    gen_config.get('initial_state_file')
+                    if gen == 0 and daughter_state is None
+                    else None)
+                is_local_bundle = (
+                    bundle_path
+                    and os.path.isdir(bundle_path)
+                    and os.path.isfile(
+                        os.path.join(bundle_path, 'document.json')))
+
+                if is_local_bundle:
+                    from process_bigraph.bundle import load_bundle
+                    print(f"Loading composite from bundle "
+                          f"{bundle_path}...", flush=True)
+                    t0 = _time.time()
+                    document = load_bundle(bundle_path, as_numpy=True)
+                    # IMPORTANT: do NOT call reseed_loaded_bundle /
+                    # _reseed_allocator_rng here. Those are for the
+                    # per-gen Nextflow path where each gen loads
+                    # MOTHER's daughter JSON and needs fresh
+                    # per-gen-seed RNGs. Our bundle is the cell at
+                    # t=checkpoint_at, mid-generation — the RNG state
+                    # has been advanced by N ticks and re-seeding
+                    # would erase that history (gen 0 at t=2530 then
+                    # diverges by ~10M counts vs the no-bundle path).
+                    # Reseeding still happens at gen N>=1 daughter
+                    # transitions via the build_composite_native call
+                    # in the else branch below.
+                    ecoli = Composite(
+                        {'skip_process_state': True,
+                         'run_steps_on_init': False,
+                         **document},
+                        core=core)
+                    print(f"  Loaded in {_time.time()-t0:.2f}s",
+                          flush=True)
+                else:
+                    # Build the cell via EcoliCellProcess: a real
+                    # process-bigraph Process whose ``initialize``
+                    # runs build_ecoli_document with the per-gen
+                    # seed and overlays daughter_state onto the
+                    # fresh build. The same class is used by the
+                    # MP / Ray runners so the lineage and parallel
+                    # paths share one cell-construction code path.
+                    # Validated by iter_test_ecoli_cell.py to be
+                    # byte-identical to the per-gen path's direct
+                    # build_composite_native + Composite call.
+                    from ecoli.composites.ecoli_cell_process import (
+                        EcoliCellProcess)
+                    print("Building (via EcoliCellProcess)...",
+                          flush=True)
+                    t0 = _time.time()
+                    cell = EcoliCellProcess(
+                        config={
+                            'lineage_seed': base_lineage_seed,
+                            'agent_id': gen_agent_id,
+                            'sim_data_path':
+                                gen_config['sim_data_path'],
+                            'initial_state': daughter_state or {},
+                            'sim_data': self._shared_sim_data,
+                            'sim_config': gen_config,
+                        },
+                        core=core,
+                    )
+                    ecoli = cell.inner_composite
+                    print(f"  Built + Composite created in "
+                          f"{_time.time()-t0:.2f}s", flush=True)
+
+                # Sync top-level global_time from the daughter cell's
+                # local global_time when starting from a daughter
+                # handoff (gen >= 1). Same logic as
+                # _run_composite_inner.
+                agent_t = ecoli.state.get('agents', {}).get(
+                    gen_agent_id, {}).get('global_time')
+                if agent_t is not None and float(agent_t) > 0:
+                    new_t = float(agent_t)
+                    ecoli.state['global_time'] = new_t
+                    for path in list(ecoli.front.keys()):
+                        ecoli.front[path]['time'] = new_t
+
+                self._composite = ecoli
+
+                # Emit configuration (advances parquet partition path
+                # for this gen) and the initial history row at the
+                # current global_time. Gen 0 starts at t=0; gen N
+                # starts at the previous division's global_time.
+                if emitter is not None:
+                    self._emit_lineage_configuration(emitter, ecoli)
+                    self._emit_composite_history(emitter, ecoli)
+
+                # Run to division. on_tick streams history rows to
+                # the shared emitter.
+                on_tick = (
+                    (lambda eco: self._emit_composite_history(
+                        emitter, eco))
+                    if emitter is not None else None)
+                divided, _t = run_to_division(
+                    ecoli,
+                    max_duration=self.max_duration,
+                    daughter_outdir=None,
+                    on_tick=on_tick)
+
+                if divided:
+                    any_divided = True
+                if not divided:
+                    print(f"  Gen {gen}: did not divide within "
+                          f"max_duration; halting lineage.",
+                          flush=True)
+                    break
+
+                # Capture daughter for next gen.
+                if gen + 1 >= n_generations:
+                    break
+                daughter_state = self._extract_lineage_daughter(
+                    ecoli, daughter_idx=0)
+                if daughter_state is None:
+                    print(f"  Gen {gen}: no daughter in state; "
+                          f"halting lineage.", flush=True)
+                    break
+
+            print(f"\nLineage completed in "
+                  f"{_time.time() - total_t0:.2f}s wall.", flush=True)
+        finally:
+            if emitter is not None:
+                emitter.success = (
+                    any_divided or not self.fail_at_max_duration)
+                emitter.finalize()
+
+    def _extract_lineage_daughter(self, ecoli, daughter_idx=0):
+        """Pull daughter-0's cell state from a divided composite for
+        in-process handoff to the next gen's build.
+
+        Mirrors :py:func:`~ecoli.composites.ecoli_composite.save_v2_daughters`'s
+        payload prep: deep-copies the agent subtree and runs
+        ``_v2_daughter_payload`` to drop edges, process refs,
+        allocator RNG, etc., and add bulk/unique dtype metadata.
+
+        Returns ``None`` if the composite did not divide.
+        """
+        from copy import deepcopy
+        from ecoli.composites.ecoli_composite import _v2_daughter_payload
+
+        agents = ecoli.state.get('agents', {})
+        sorted_ids = sorted(agents.keys())
+        if len(sorted_ids) < 2:
+            return None
+        target_id = sorted_ids[daughter_idx]
+        cell_copy = deepcopy(agents[target_id])
+        _v2_daughter_payload(cell_copy)
+        return cell_copy
+
+    def _lineage_agent_id(self, ecoli):
+        """Return the (single) active agent_id under single_daughters mode.
+
+        Returns the first key in ``ecoli.state['agents']``; ``None``
+        if no agents are present.
+        """
+        agents = ecoli.state.get('agents', {})
+        if not agents:
+            return None
+        # In single_daughters mode there is only one agent at a time.
+        # Use sorted to get a stable choice if a transient multi-agent
+        # state ever appears (shouldn't happen with single_daughters
+        # but defensive).
+        return sorted(agents.keys())[0]
+
+    def _emit_lineage_configuration(self, emitter, ecoli):
+        """Emit a parquet ``configuration`` row for the current agent_id.
+
+        Called at gen 0 startup and after each division (when agent_id
+        changes), to set ``emitter.partitioning_path`` so subsequent
+        history rows land in the new ``generation=N/agent_id=AID/``
+        partition.
+
+        Uses the composite's *current* agent_id (read from state),
+        not ``self.agent_id`` which still reflects gen 0's value.
+        """
+        agent_id = self._lineage_agent_id(ecoli)
+        if agent_id is None:
+            return
+        cfg_metadata = self.get_metadata()
+        cfg_metadata['experiment_id'] = self.experiment_id
+        cfg_metadata['variant'] = self.config.get('variant', 0)
+        cfg_metadata['lineage_seed'] = self.lineage_seed
+        cfg_metadata['agent_id'] = str(agent_id)
+        cfg_metadata['initial_global_time'] = float(
+            ecoli.state.get('global_time', 0.0))
+        cfg_metadata['output_metadata'] = self._collect_output_metadata()
+        emitter.emit({
+            'table': 'configuration',
+            'data': {'metadata': cfg_metadata},
+        })
+
     def _collect_output_metadata(self):
         """Walk the live composite's process/step instances and build
         the ``output_metadata`` dict v1 emits into ``configuration``.
@@ -1204,6 +1537,15 @@ class EcoliSim:
             # process-bigraph composite path: builds directly from sim_data
             # and does not require build_ecoli().
             self._run_composite()
+            return
+
+        if engine == "composite_lineage":
+            # In-process multi-generation runner: loops _run_composite_inner
+            # with daughter 0's state passed forward as the next gen's
+            # initial_state. Skips JSON daughter handoff between gens —
+            # everything stays in memory. One Python interpreter, one
+            # set of imports, one JIT cache, one sim_data pickle load.
+            self._run_composite_lineage()
             return
 
         if self.ecoli is None:

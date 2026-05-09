@@ -58,6 +58,7 @@ class LoadSimData:
         aa_supply_in_charging: bool = True,
         disable_ppgpp_elongation_inhibition: bool = False,
         emit_unique: bool = False,
+        sim_data: Optional["SimulationDataEcoli"] = None,
         **kwargs,
     ):
         """
@@ -168,9 +169,16 @@ class LoadSimData:
         # when calculating degradation
         self.degrade_misc = False
 
-        # load sim_data
-        with fsspec_open(sim_data_path, "rb") as sim_data_file:
-            self.sim_data: "SimulationDataEcoli" = pickle.load(sim_data_file)
+        # load sim_data — skip the pickle load when a caller passes a
+        # pre-loaded sim_data (e.g. the composite_lineage driver
+        # creates one LoadSimData per generation but shares the same
+        # ~100MB pickled object across all of them to avoid re-reading
+        # it from disk N times).
+        if sim_data is not None:
+            self.sim_data: "SimulationDataEcoli" = sim_data
+        else:
+            with fsspec_open(sim_data_path, "rb") as sim_data_file:
+                self.sim_data = pickle.load(sim_data_file)
 
         if condition is not None:
             self.sim_data.condition = condition

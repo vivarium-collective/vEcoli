@@ -1,0 +1,6 @@
+out/
+*.pq
+*.cPickle
+*.json
+.git/
+.venv/

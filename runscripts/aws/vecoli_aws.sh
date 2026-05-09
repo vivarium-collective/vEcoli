@@ -27,13 +27,27 @@ TMUX_SESSION="${VECOLI_AWS_TMUX:-vecoli-v2}"
 aws_cli() { aws --profile "$PROFILE" --region "$REGION" "$@"; }
 
 # Pull config-derived values via python so we don't reimplement JSON parsing.
+# read_cfg fails the script on missing keys; read_cfg_opt returns empty
+# string and lets the script keep going (used for fields that only some
+# variants set, e.g. ``aws.batch_queue`` only exists on the Nextflow
+# v[12]-aws configs, not on the MP / Ray ones).
 read_cfg() {
   [[ -f "$CONFIG_ABS" ]] || { echo "missing config: $CONFIG_ABS" >&2; exit 1; }
   python3 -c "import json,sys; c=json.load(open('$CONFIG_ABS')); print(c$1)"
 }
+read_cfg_opt() {
+  [[ -f "$CONFIG_ABS" ]] || return 0
+  python3 -c "import json,sys
+c = json.load(open('$CONFIG_ABS'))
+try:
+    print(c$1)
+except (KeyError, IndexError, TypeError):
+    pass" 2>/dev/null
+}
 EXP_ID=$(read_cfg "['experiment_id']")
-QUEUE=$(read_cfg "['aws']['batch_queue']")
+QUEUE=$(read_cfg_opt "['aws']['batch_queue']")    # may be empty for MP/Ray
 OUT_URI=$(read_cfg "['emitter_arg']['out_uri']")
+DEPLOY_MODE=$(read_cfg_opt "['aws']['deploy_mode']")
 BUCKET="${OUT_URI#s3://}"; BUCKET="${BUCKET%%/*}"
 PREFIX="${OUT_URI#s3://$BUCKET/}"   # e.g. vecoli-output/<exp_id>
 
@@ -115,6 +129,82 @@ cmd_bootstrap() {
 }
 cmd_launch()  { cmd_bootstrap; }
 cmd_resume()  { cmd_bootstrap resume; }
+
+# --- MP single-node variant -----------------------------------------------
+# Uses bootstrap_head_mp.sh (no AWS Batch, no Nextflow). Needs a big
+# instance because all 10 lineage workers run on the head.
+# Pick the config explicitly:
+#   VECOLI_AWS_CONFIG=configs/comparison_10s_16g_v2_mp_aws.json \
+#     ./runscripts/aws/vecoli_aws.sh setup-mp
+cmd_setup_mp() {
+  echo "Provisioning new MP head node ($(_mp_head_name), c7g.metal)..."
+  HEAD_INSTANCE_TYPE="c7g.metal" \
+    HEAD_NAME="$(_mp_head_name)" \
+    ROOT_VOL_GIB=200 \
+    bash "$SCRIPT_DIR/setup_head_node.sh"
+}
+
+cmd_launch_mp() {
+  local dns
+  dns=$(HEAD_NAME="$(_mp_head_name)" get_running_dns)
+  [[ -n "$dns" && "$dns" != "None" ]] || {
+    echo "no running MP head ($(_mp_head_name)). Run setup-mp first." >&2
+    exit 1; }
+  echo "scp bootstrap_head_mp.sh -> $dns"
+  scp -i "$KEY_FILE" "$SCRIPT_DIR/bootstrap_head_mp.sh" "ec2-user@$dns:~/"
+  local config_env="CONFIG_RELPATH='${CONFIG_REL}' "
+  local session_env=""
+  [[ -n "${SESSION:-}" ]] && session_env="SESSION='$SESSION' "
+  local sim_data_env=""
+  [[ -n "${SIM_DATA_S3_URI:-}" ]] && sim_data_env="SIM_DATA_S3_URI='$SIM_DATA_S3_URI' "
+  echo "running MP bootstrap (config=${CONFIG_REL}, session=${SESSION:-vecoli-v2-mp})..."
+  ssh -i "$KEY_FILE" "ec2-user@$dns" \
+    "${config_env}${session_env}${sim_data_env}bash ~/bootstrap_head_mp.sh"
+}
+
+# --- Ray cluster variant ---------------------------------------------------
+# bootstrap_head_ray.sh runs a small *driver* head that manages a
+# pre-allocated Ray cluster (1 head + 5 workers per the yaml) via
+# ``ray up`` / ``ray down``. The driver itself is t4g.large to keep
+# costs low; the heavy lifting is on the cluster's m5.4xlarge workers.
+cmd_setup_ray() {
+  echo "Provisioning new Ray driver head ($(_ray_head_name), t4g.large)..."
+  HEAD_INSTANCE_TYPE="t4g.large" \
+    HEAD_NAME="$(_ray_head_name)" \
+    bash "$SCRIPT_DIR/setup_head_node.sh"
+}
+
+cmd_launch_ray() {
+  local dns
+  dns=$(HEAD_NAME="$(_ray_head_name)" get_running_dns)
+  [[ -n "$dns" && "$dns" != "None" ]] || {
+    echo "no running Ray driver head ($(_ray_head_name)). Run setup-ray first." >&2
+    exit 1; }
+  echo "scp bootstrap_head_ray.sh + vecoli-ray-ec2-cluster.yaml -> $dns"
+  scp -i "$KEY_FILE" \
+    "$SCRIPT_DIR/bootstrap_head_ray.sh" \
+    "$SCRIPT_DIR/vecoli-ray-ec2-cluster.yaml" \
+    "ec2-user@$dns:~/"
+  local config_env="CONFIG_RELPATH='${CONFIG_REL}' "
+  local session_env=""
+  [[ -n "${SESSION:-}" ]] && session_env="SESSION='$SESSION' "
+  local sim_data_env=""
+  [[ -n "${SIM_DATA_S3_URI:-}" ]] && sim_data_env="SIM_DATA_S3_URI='$SIM_DATA_S3_URI' "
+  echo "running Ray bootstrap (config=${CONFIG_REL}, session=${SESSION:-vecoli-v2-ray})..."
+  ssh -i "$KEY_FILE" "ec2-user@$dns" \
+    "${config_env}${session_env}${sim_data_env}bash ~/bootstrap_head_ray.sh"
+}
+
+# Read head_name and tmux_session from the active config's aws block.
+# Falls back to per-variant defaults if the config doesn't override.
+_mp_head_name() {
+  python3 -c "import json; print(json.load(open('$CONFIG_ABS')).get('aws',{}).get('head_name','vecoli-v2-mp-head'))" 2>/dev/null \
+    || echo "vecoli-v2-mp-head"
+}
+_ray_head_name() {
+  python3 -c "import json; print(json.load(open('$CONFIG_ABS')).get('aws',{}).get('head_name','vecoli-v2-ray-head'))" 2>/dev/null \
+    || echo "vecoli-v2-ray-head"
+}
 
 cmd_ssh()    { exec ssh -i "$KEY_FILE" "ec2-user@$(require_running_dns)" "$@"; }
 cmd_attach() { exec ssh -i "$KEY_FILE" -t "ec2-user@$(require_running_dns)" "tmux attach -t $TMUX_SESSION"; }
@@ -316,7 +406,9 @@ cmd_help() {
 Usage: $(basename "$0") <command> [args]
 
 Lifecycle:
-  setup            Provision a new head node (t4g.large)
+  setup            Provision a new head node (t4g.large) for v1/v2-aws Nextflow
+  setup-mp         Provision a new MP-only head (c7g.metal, 64 vCPU)
+  setup-ray        Provision a new Ray-driver head (t4g.large)
   rebuild          Terminate existing head + provision fresh
   reboot           Reboot the head (preserves IP)
   stop             Stop the head, preserving EBS (incl. ~/.nextflow/ cache)
@@ -325,11 +417,20 @@ Lifecycle:
   terminate        Terminate the head (confirmed)
   cache push|pull  Sync ~/.nextflow/ to/from s3://.../_cache/<exp>/
 
-Workflow:
+Workflow (v1/v2-aws Nextflow + Batch):
   launch           scp bootstrap and start a fresh workflow run
   resume           same, but with RESUME=1 (Nextflow -resume)
   bootstrap [resume]
                    alias: launch / resume
+
+Workflow (v2-mp single-node, no Batch / no Nextflow):
+  launch-mp        scp bootstrap_head_mp.sh + start MP run on c7g.metal head
+                   (config: comparison_10s_16g_v2_mp_aws.json)
+
+Workflow (v2-ray cluster, ray up + 5 workers, no Batch / no Nextflow):
+  launch-ray       scp bootstrap_head_ray.sh + vecoli-ray-ec2-cluster.yaml,
+                   ``ray up`` 1 head + 5 workers, then run the lineage
+                   (config: comparison_10s_16g_v2_ray_aws.json)
 
 Observe:
   status           head state + Batch job counts + last S3 writes
@@ -367,6 +468,8 @@ EOF
 cmd="${1:-help}"; shift || true
 case "$cmd" in
   setup)      cmd_setup      "$@" ;;
+  setup-mp)   cmd_setup_mp   "$@" ;;
+  setup-ray)  cmd_setup_ray  "$@" ;;
   rebuild)    cmd_rebuild    "$@" ;;
   reboot)     cmd_reboot     "$@" ;;
   stop)       cmd_stop       "$@" ;;
@@ -376,6 +479,8 @@ case "$cmd" in
   terminate)  cmd_terminate  "$@" ;;
   bootstrap)  cmd_bootstrap  "$@" ;;
   launch)     cmd_launch     "$@" ;;
+  launch-mp)  cmd_launch_mp  "$@" ;;
+  launch-ray) cmd_launch_ray "$@" ;;
   resume)     cmd_resume     "$@" ;;
   status)     cmd_status     "$@" ;;
   jobs)       cmd_jobs       "$@" ;;

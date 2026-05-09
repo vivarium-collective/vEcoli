@@ -64,6 +64,13 @@ class MarkDPeriod(Step):
         )
         if len(division_time) < 2:
             return {}
+        # All chromosomes already marked: no work to do this tick. The
+        # composite-engine division Step (which fires on a separate
+        # mass-threshold check) hasn't caught up yet — it will fire in
+        # a later tick when mass crosses threshold. Returning {} avoids
+        # an empty-array .min() crash from the next line.
+        if has_triggered_division.all():
+            return {}
         # Set division time to be the minimum division time for a chromosome
         # that has not yet triggered cell division
         divide_at_time = division_time[~has_triggered_division].min()
@@ -256,6 +263,13 @@ class CompositeDivision(Division):
         'dry_mass_inc_dict': 'map[unum[fg]]',
         'seed': 'lineage_seed[integer]',
         'daughter_ids_function': 'function',
+        # Single-lineage mode: emit only daughter 0 in the _divide
+        # sentinel so the composite has exactly one agent at all
+        # times. The agent_id grows by one '0' per division and the
+        # cell line is followed in-place — no daughter proliferation,
+        # no per-gen Python rebuild, no JSON shuttle.
+        # Used by the composite_lineage engine.
+        'single_daughters': 'boolean',
     }
 
     def outputs(self):
@@ -326,6 +340,10 @@ class CompositeDivision(Division):
             states["full_chromosome"]["_entryState"].sum() >= 2
         ):
             daughter_ids = self.parameters["daughter_ids_function"](self.agent_id)
+            # Single-lineage mode: drop daughter 1 so the composite
+            # tracks one cell forward through divisions in-place.
+            if self.parameters.get("single_daughters", False):
+                daughter_ids = daughter_ids[:1]
             print(f"DIVIDE! MOTHER {self.agent_id} -> DAUGHTERS {daughter_ids}")
             # v2 framework only needs the daughter keys; state split
             # is schema-driven via _divide_state.

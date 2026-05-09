@@ -84,12 +84,21 @@ def get_state_from_file(
     path="",
 ):
     serialized_state = load_states(path)
-    # Parallelize deserialization of colony states
+    # Parallelize deserialization of colony states (many agents).
+    # For single-agent JSONs (e.g. daughter handoff in lineage runs),
+    # skip the ProcessPoolExecutor — it costs more than it saves and
+    # also breaks under multiprocessing.Pool workers, which are
+    # daemonic and can't spawn child processes.
     if "agents" in serialized_state:
         agents = serialized_state.pop("agents")
         n_agents = len(agents)
-        with concurrent.futures.ProcessPoolExecutor(n_agents) as executor:
-            deserialized_agents = executor.map(deserialize_value, agents.values())
+        if n_agents > 1:
+            with concurrent.futures.ProcessPoolExecutor(n_agents) as executor:
+                deserialized_agents = executor.map(
+                    deserialize_value, agents.values())
+        else:
+            deserialized_agents = [
+                deserialize_value(v) for v in agents.values()]
         numpy_agents = []
         for agent in deserialized_agents:
             numpy_agents.append(numpy_molecules(agent))

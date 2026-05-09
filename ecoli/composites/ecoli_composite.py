@@ -60,7 +60,7 @@ def _fill_schema_defaults(target, schema):
 # Document builder
 # ---------------------------------------------------------------------------
 
-def build_ecoli_document(core, sim_config):
+def build_ecoli_document(core, sim_config, load_sim_data=None):
     """Build a complete composite document from sim_config.
 
     The document contains:
@@ -71,10 +71,20 @@ def build_ecoli_document(core, sim_config):
 
     Returns a state dict shaped as ``{'agents': {<agent_id>: {...}}}``.
     Load with ``Composite({'state': document}, core=core)``.
+
+    Args:
+        load_sim_data: Optional pre-built ``LoadSimData`` to reuse.
+            When ``None`` (default), a fresh one is constructed from
+            ``sim_config`` (the v1 / per-gen / standard path). The
+            composite_lineage driver passes a pre-built one whose
+            ``sim_data`` pickle is shared across multiple per-gen
+            wrappers, so the seed_library precompute and the gen-0
+            build don't double-load the pickle.
     """
     from ecoli.library.sim_data import LoadSimData, RAND_MAX
 
-    load_sim_data = LoadSimData(**sim_config)
+    if load_sim_data is None:
+        load_sim_data = LoadSimData(**sim_config)
     agent_id = sim_config.get('agent_id', '0')
     time_step = sim_config.get('time_step', 1.0)
 
@@ -809,6 +819,15 @@ def _build_flow(config, load_sim_data, configs, classes, partitioned, time_step)
             # division.seed = config["seed"] without pre-deriving here).
             "seed": 0,
             "daughter_ids_function": daughter_phylogeny_id,
+            # Single-lineage mode: when True, CompositeDivision emits
+            # only daughter 0 in the _divide sentinel. Currently
+            # always False — both ``engine=composite`` (per-gen
+            # Nextflow) and ``engine=composite_lineage`` (managed
+            # loop in EcoliSim._run_composite_lineage) want both
+            # daughters in state at division and let the driver
+            # extract daughter 0. Reserved for a future tree-mode
+            # honest-composite design where division stays in-place.
+            "single_daughters": False,
         }
         configs["division"] = division_config
         classes["division"] = CompositeDivision

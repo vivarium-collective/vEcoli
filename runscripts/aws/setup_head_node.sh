@@ -26,14 +26,15 @@ VPC_ID="vpc-013f0c1012b271b06"
 PUBLIC_SUBNET_ID="subnet-06cc68d397fb72760"   # us-gov-west-1a, public
 INSTANCE_PROFILE_NAME="ECR"
 
-# t4g.large gives 8 GB RAM — t4g.medium's 4 GB OOMs when running anything
-# alongside Nextflow's JVM (e.g., the compare script).
-HEAD_INSTANCE_TYPE="t4g.large"
-HEAD_NAME="vecoli-v2-head"
-KEY_NAME="vecoli-head-key"
+# Defaults: t4g.large (8 GB RAM) for v1/v2-aws Nextflow workflows. The
+# MP-single-node variant overrides HEAD_INSTANCE_TYPE=c7g.metal (64
+# vCPU bare-metal) via env. ROOT_VOL_GIB scales with HEAD_INSTANCE_TYPE.
+HEAD_INSTANCE_TYPE="${HEAD_INSTANCE_TYPE:-t4g.large}"
+HEAD_NAME="${HEAD_NAME:-vecoli-v2-head}"
+KEY_NAME="${KEY_NAME:-vecoli-head-key}"
 KEY_FILE="${HOME}/.ssh/${KEY_NAME}.pem"
-SG_NAME="vecoli-head-ssh-sg"
-ROOT_VOL_GIB=30
+SG_NAME="${SG_NAME:-vecoli-head-ssh-sg}"
+ROOT_VOL_GIB="${ROOT_VOL_GIB:-30}"
 
 aws_cli() { aws --profile "$PROFILE" --region "$REGION" "$@"; }
 
