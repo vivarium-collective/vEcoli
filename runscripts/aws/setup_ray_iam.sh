@@ -161,6 +161,26 @@ aws_iam put-role-policy \
   --policy-name "$HEAD_POLICY_NAME" \
   --policy-document "$HEAD_POLICY_DOC"
 
+# --- 3. Head role also needs SSM agent registration -----------------------
+# EC2SSMRayCluster uses the SAME instance profile for both head and
+# workers. The cluster head and workers all run the SSM agent and must
+# register with SSM. The agent uses the instance role's perms for the
+# initial DescribeInstanceInformation / UpdateInstanceInformation
+# handshake — without AmazonSSMManagedInstanceCore the agent boots but
+# never registers, and EC2SSMRayCluster.__enter__ fails with "SSM agent
+# not online after 240s". Attach the AWS-managed policy to ECR (it
+# already has S3 + ECR perms; this just adds SSM agent registration).
+SSM_INSTANCE_CORE_ARN="arn:${PARTITION}:iam::aws:policy/AmazonSSMManagedInstanceCore"
+if aws_iam list-attached-role-policies --role-name "$HEAD_ROLE_NAME" \
+      --query 'AttachedPolicies[].PolicyArn' --output text \
+      | tr '\t' '\n' | grep -qx "$SSM_INSTANCE_CORE_ARN"; then
+  echo "  ✓ $HEAD_ROLE_NAME already has AmazonSSMManagedInstanceCore"
+else
+  echo "  + attaching AmazonSSMManagedInstanceCore to $HEAD_ROLE_NAME"
+  aws_iam attach-role-policy --role-name "$HEAD_ROLE_NAME" \
+    --policy-arn "$SSM_INSTANCE_CORE_ARN"
+fi
+
 cat <<EOF
 
 IAM setup complete.

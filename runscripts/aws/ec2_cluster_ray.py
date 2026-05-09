@@ -130,6 +130,16 @@ def main() -> int:
                 f"set +e; "
                 f"cd /vEcoli; "
                 f": > {log_path}; "
+                # AWS region must be set explicitly inside the Docker
+                # container — aiobotocore/s3fs don't auto-detect from
+                # IMDSv2 the way the AWS CLI does, so without these
+                # they default to commercial us-east-1 endpoints and
+                # hit "400 Bad Request" trying to HeadObject a
+                # GovCloud bucket. The wrapping ``aws s3 cp`` of the
+                # log later in this command works either way (CLI does
+                # auto-detect), but Python boto3 needs the env vars.
+                f"export AWS_REGION={cluster.region} "
+                f"AWS_DEFAULT_REGION={cluster.region}; "
                 # POLARS_MAX_THREADS=1 to avoid oversubscription on the
                 # multi-actor head — same setup MP runner uses.
                 f"POLARS_MAX_THREADS=1 "
