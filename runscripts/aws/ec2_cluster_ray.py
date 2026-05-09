@@ -126,18 +126,42 @@ def main() -> int:
     try:
         with cluster:
             log_path = "/tmp/lineage_ray.log"
+            # Extract just the bucket name from the s3 URI for diag.
+            bucket_for_diag = out_uri.split("/")[2] if out_uri.startswith(
+                "s3://") else "(non-s3 out_uri)"
             command = (
                 f"set +e; "
                 f"cd /vEcoli; "
                 f": > {log_path}; "
-                # AWS region must be set explicitly inside the Docker
-                # container — aiobotocore/s3fs don't auto-detect from
-                # IMDSv2 the way the AWS CLI does. The bucket-level
-                # IAM read perms (HeadBucket/ListBucket/
-                # GetBucketLocation) are granted by setup_ray_iam.sh's
-                # VEcoliRayS3BucketRead inline policy.
                 f"export AWS_REGION={cluster.region} "
                 f"AWS_DEFAULT_REGION={cluster.region}; "
+                # === IAM diagnostic block ===
+                # Run aws CLI bucket-level queries from inside the
+                # cluster head's container (same instance role as
+                # aiobotocore in the experiment) BEFORE the experiment
+                # starts. Tells us at a glance whether the cluster head
+                # has the bucket-level S3 perms granted by
+                # setup_ray_iam.sh:VEcoliRayS3BucketRead, vs whether
+                # aiobotocore is doing something different from CLI.
+                f"echo '[diag] === IAM check on cluster head (role) ==='"
+                f" >> {log_path}; "
+                f"aws sts get-caller-identity 2>&1 | head -3 "
+                f"  >> {log_path}; "
+                f"echo '[diag] aws s3api head-bucket {bucket_for_diag}'"
+                f" >> {log_path}; "
+                f"aws --region {cluster.region} s3api head-bucket "
+                f"  --bucket {bucket_for_diag} 2>&1 "
+                f"  >> {log_path}; "
+                f"echo \"[diag] head-bucket exit: $?\" >> {log_path}; "
+                f"echo '[diag] aws s3api get-bucket-location'"
+                f" >> {log_path}; "
+                f"aws --region {cluster.region} s3api get-bucket-location "
+                f"  --bucket {bucket_for_diag} 2>&1 "
+                f"  >> {log_path}; "
+                f"echo \"[diag] get-bucket-location exit: $?\" "
+                f"  >> {log_path}; "
+                f"echo '[diag] === end IAM check ===' >> {log_path}; "
+                # === end diagnostic ===
                 # POLARS_MAX_THREADS=1 to avoid oversubscription on the
                 # multi-actor head — same setup MP runner uses.
                 f"POLARS_MAX_THREADS=1 "
