@@ -39,6 +39,58 @@ import time
 import ray
 
 
+def _patch_s3fs_skip_create_bucket() -> None:
+    """Monkey-patch ``s3fs.S3FileSystem._mkdir`` to never call
+    ``CreateBucket``.
+
+    Why: ``parquet_emitter.finalize`` calls
+    ``self.filesystem.makedirs(...)`` which on S3 cascades into
+    ``s3fs._mkdir``, which calls ``_exists(bucket)`` to check if the
+    bucket exists, and falls back to ``CreateBucket`` if both
+    ``HeadBucket`` and ``GetBucketLocation`` silently fail.
+
+    On GovCloud with our role's perms, ``HeadBucket`` /
+    ``GetBucketLocation`` apparently return errors that aiobotocore
+    treats as "bucket doesn't exist", so s3fs tries ``CreateBucket``
+    which fails with ``InvalidToken`` — terminating every actor.
+
+    But in our deployment ALL S3 buckets pre-exist (the SMS API VPC
+    shared bucket). We never need ``CreateBucket``. Skipping the
+    call entirely is semantically correct: makedirs on S3 has no
+    real meaning (S3 is flat-keys), and the actual parquet write
+    proceeds without parent dirs.
+
+    This patch is loaded ONLY by the composite_lineage_ray runner;
+    it does NOT touch ``parquet_emitter.py`` (shared with v1
+    nextflow) and does NOT affect any other code path. The Batch
+    nextflow path runs in a different Python process with no patch.
+    """
+    try:
+        import s3fs
+    except ImportError:
+        return  # No s3fs installed; nothing to patch.
+
+    async def _mkdir_no_create_bucket(self, path, acl=False,
+                                       create_parents=True, **kwargs):
+        # All buckets in our deployment pre-exist. S3 has no real
+        # directories — writing the key directly is sufficient.
+        # Returning without calling _call_s3 means CreateBucket
+        # never runs, even when _exists() falsely reports the bucket
+        # missing (the GovCloud + aiobotocore quirk).
+        return
+
+    s3fs.S3FileSystem._mkdir = _mkdir_no_create_bucket
+    print(
+        "[ray] patched s3fs.S3FileSystem._mkdir to skip CreateBucket "
+        "(see _patch_s3fs_skip_create_bucket docstring)",
+        flush=True,
+    )
+
+
+# Patch BEFORE any import that might construct an S3FileSystem.
+_patch_s3fs_skip_create_bucket()
+
+
 @ray.remote
 class LineageActor:
     """One actor = one lineage. Holds the cell-line state (current
@@ -48,6 +100,12 @@ class LineageActor:
     """
 
     def __init__(self, sim_data, sim_data_path):
+        # Re-apply s3fs patch inside the actor process: Ray spawns
+        # actors as separate processes that pickle the class but
+        # don't re-execute module-level code, so the module-level
+        # _patch_s3fs_skip_create_bucket() call doesn't propagate
+        # here automatically.
+        _patch_s3fs_skip_create_bucket()
         # sim_data is the deserialized SimulationDataEcoli pulled
         # from Ray's object store. Keep a handle so the EcoliSim
         # below can pass it through into LoadSimData via the
