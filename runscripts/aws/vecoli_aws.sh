@@ -434,6 +434,64 @@ ns_compare_parity() {
   uv run --no-sync python "$SCRIPT_DIR/compare_v1_v2_at_gen.py" \
     --seed "$seed" --gen "$gen"
 }
+# Show how far each seed's lineage made it (max generation reached) in
+# v1 vs the active config's v2. Catches early-halt parity divergences
+# that ``compare parity`` misses (parity is per-seed-and-gen, this is
+# per-seed-across-gens).
+ns_compare_gens() {
+  local v1_id="${VECOLI_V1_ID:-comparison_10s_16g_v1_aws}"
+  local v2_id="${VECOLI_V2_ID:-$EXP_ID}"
+  local tmpdir; tmpdir=$(mktemp -d)
+  trap 'rm -rf "$tmpdir"' RETURN
+
+  _ns_max_gens_for() {
+    # S3 history layout:
+    #   vecoli-output/<exp>/<exp>/history/experiment_id=<exp>/
+    #     variant=0/lineage_seed=<N>/generation=<M>/agent_id=*/...
+    # We list once and pull the max gen seen per seed.
+    local exp="$1"
+    aws_cli s3 ls "s3://$BUCKET/vecoli-output/$exp/$exp/history/" \
+      --recursive 2>/dev/null \
+      | grep -oE 'lineage_seed=[0-9]+/generation=[0-9]+' \
+      | awk -F'[=/]' '
+          { seed=$2+0; gen=$4+0; if (gen>max[seed]) max[seed]=gen }
+          END { for (s in max) print s, max[s] }
+        ' \
+      | sort -n -k1
+  }
+
+  echo "Reading v1 ($v1_id) gens from S3..."
+  _ns_max_gens_for "$v1_id" > "$tmpdir/v1.txt"
+  echo "Reading v2 ($v2_id) gens from S3..."
+  _ns_max_gens_for "$v2_id" > "$tmpdir/v2.txt"
+
+  if [[ ! -s "$tmpdir/v1.txt" && ! -s "$tmpdir/v2.txt" ]]; then
+    echo "No history found in S3 for either run — wrong bucket/prefix?" >&2
+    return 1
+  fi
+
+  echo
+  printf "%-6s  %-8s  %-8s  %s\n" "seed" "v1_gen" "v2_gen" "delta"
+  printf "%-6s  %-8s  %-8s  %s\n" "----" "------" "------" "-----"
+  # Join on seed; missing rows in either side become "-".
+  join -a 1 -a 2 -e "-" -o 0,1.2,2.2 "$tmpdir/v1.txt" "$tmpdir/v2.txt" \
+    | awk '{
+        v1=$2; v2=$3;
+        if (v1=="-" || v2=="-") { delta="?" }
+        else { delta=v2-v1; if (delta>0) delta="+"delta }
+        printf "%-6s  %-8s  %-8s  %s\n", $1, v1, v2, delta
+      }'
+
+  # Summary: how many seeds reached the same gen in both runs
+  local match total
+  match=$(join "$tmpdir/v1.txt" "$tmpdir/v2.txt" | awk '$2==$3' | wc -l)
+  total=$(wc -l < "$tmpdir/v1.txt")
+  echo
+  echo "Match: $match / $total seeds reached the same generation in v1 and v2."
+  if (( match < total )); then
+    echo "Seeds where v2 fell short of v1 are parity-divergence candidates."
+  fi
+}
 ns_compare_report() {
   local v1_id="${VECOLI_V1_ID:-comparison_10s_16g_v1_aws}"
   local v2_id="${VECOLI_V2_ID:-$EXP_ID}"
@@ -535,6 +593,8 @@ Namespaces (recommended):
 
   compare <subcmd>  output analysis
     parity [SEED] [GEN]   diff v1 vs v2 bulk at SEED/GEN (default 0/3)
+    gens                  max gen reached per seed in v1 vs active v2
+                          (override v1 with VECOLI_V1_ID env)
     report                fetch+render v1 vs v2 markdown report
     export [html|pdf]     convert report to single-file artifact
 
@@ -612,6 +672,7 @@ case "$cmd" in
     sub="${1:-help}"; shift || true
     case "$sub" in
       parity) ns_compare_parity "$@" ;;
+      gens)   ns_compare_gens "$@" ;;
       report) ns_compare_report "$@" ;;
       export) ns_compare_export "$@" ;;
       help|*) cmd_help ;;

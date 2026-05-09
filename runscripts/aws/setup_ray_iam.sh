@@ -29,6 +29,14 @@ REGION="${AWS_REGION:-us-gov-west-1}"
 HEAD_INSTANCE_PROFILE="${HEAD_INSTANCE_PROFILE:-ECR}"
 HEAD_ROLE_NAME="${HEAD_ROLE_NAME:-ECR}"
 HEAD_POLICY_NAME="${HEAD_POLICY_NAME:-VEcoliRayClusterMgr}"
+S3_POLICY_NAME="${S3_POLICY_NAME:-VEcoliRayS3BucketRead}"
+
+# The output bucket vEcoli writes parquet to. Read perms (HeadBucket /
+# ListBucket / GetBucketLocation) are needed so s3fs.makedirs() can
+# verify the bucket exists and skip the CreateBucket fallback. Writes
+# are ALREADY granted by the existing ECR role for the Batch path.
+# Override via env if the bucket changes.
+S3_OUTPUT_BUCKET="${S3_OUTPUT_BUCKET:-smsvpctest-shared-sharedbucket60d199d6-abfvwv0day91}"
 
 WORKER_ROLE_NAME="${WORKER_ROLE_NAME:-ray-process-bigraph-node}"
 WORKER_INSTANCE_PROFILE="${WORKER_INSTANCE_PROFILE:-ray-process-bigraph-node}"
@@ -180,6 +188,43 @@ else
   aws_iam attach-role-policy --role-name "$HEAD_ROLE_NAME" \
     --policy-arn "$SSM_INSTANCE_CORE_ARN"
 fi
+
+# --- 4. Bucket-level read perms so s3fs.makedirs() doesn't fall back to ----
+#     CreateBucket. The existing ECR role has prefix-scoped Get/Put for the
+#     Batch path, but s3fs's _exists check needs HeadBucket/ListBucket on
+#     the bucket itself. Without these, s3fs assumes the bucket doesn't
+#     exist, calls CreateBucket as a fallback, and crashes with
+#     "InvalidToken" on GovCloud (commercial silently no-ops via
+#     BucketAlreadyOwnedByYou). The Batch task role doesn't hit this
+#     because it has broader S3 access by default.
+S3_POLICY_DOC=$(cat <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "BucketLevelReadForS3fs",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket",
+        "s3:GetBucketLocation"
+      ],
+      "Resource": "arn:${PARTITION}:s3:::${S3_OUTPUT_BUCKET}"
+    }
+  ]
+}
+EOF
+)
+if aws_iam get-role-policy \
+      --role-name "$HEAD_ROLE_NAME" \
+      --policy-name "$S3_POLICY_NAME" >/dev/null 2>&1; then
+  echo "Updating inline policy $S3_POLICY_NAME on $HEAD_ROLE_NAME"
+else
+  echo "Adding inline policy $S3_POLICY_NAME to $HEAD_ROLE_NAME"
+fi
+aws_iam put-role-policy \
+  --role-name "$HEAD_ROLE_NAME" \
+  --policy-name "$S3_POLICY_NAME" \
+  --policy-document "$S3_POLICY_DOC"
 
 cat <<EOF
 
