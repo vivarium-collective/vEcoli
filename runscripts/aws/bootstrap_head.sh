@@ -118,6 +118,7 @@ fi
 LOG_FILE="\$HOME/${SESSION}_workflow.log"
 tmux new-session -d -s "$SESSION" \
   "cd $VECOLI_DIR && source .venv/bin/activate && \
+   NXF_ANSI_LOG=false \
    python runscripts/workflow.py --config $CONFIG_RELPATH $RESUME_FLAG 2>&1 | tee ${LOG_FILE}"
 
 cat <<EOF

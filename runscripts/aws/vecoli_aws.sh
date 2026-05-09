@@ -119,12 +119,14 @@ cmd_resume()  { cmd_bootstrap resume; }
 cmd_ssh()    { exec ssh -i "$KEY_FILE" "ec2-user@$(require_running_dns)" "$@"; }
 cmd_attach() { exec ssh -i "$KEY_FILE" -t "ec2-user@$(require_running_dns)" "tmux attach -t $TMUX_SESSION"; }
 cmd_tail()   {
-  # Pick the log matching the active SESSION (set by bootstrap to write
-  # ~/${SESSION}_workflow.log). Fall back to the legacy ~/v2_workflow.log
-  # if no session-specific file exists yet.
+  # Tails ~/${TMUX_SESSION}_workflow.log (or legacy ~/v2_workflow.log) and
+  # strips Nextflow's ANSI cursor/redraw codes so the output is readable
+  # via tail -f (it'd otherwise be a flicker of escape sequences).
   local log="~/${TMUX_SESSION}_workflow.log"
   exec ssh -i "$KEY_FILE" "ec2-user@$(require_running_dns)" \
-    "if [[ -f ${log/#\~/\$HOME} ]]; then tail -f ${log}; else tail -f ~/v2_workflow.log; fi"
+    "F=${log/#\~/\$HOME}; \
+     [[ -f \$F ]] || F=\$HOME/v2_workflow.log; \
+     tail -f \$F | sed -u 's/\\x1b\\[[0-9;]*[a-zA-Z]//g; s/\\x1b\\][0-9];[^\\x07]*\\x07//g'"
 }
 
 cmd_reboot() {
