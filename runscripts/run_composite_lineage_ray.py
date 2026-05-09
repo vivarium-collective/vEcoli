@@ -106,11 +106,30 @@ class LineageActor:
         # _patch_s3fs_skip_create_bucket() call doesn't propagate
         # here automatically.
         _patch_s3fs_skip_create_bucket()
-        # sim_data is the deserialized SimulationDataEcoli pulled
-        # from Ray's object store. Keep a handle so the EcoliSim
-        # below can pass it through into LoadSimData via the
-        # ``sim_data=`` kwarg, skipping the per-gen pickle reload.
-        self._sim_data = sim_data
+
+        # Polars / object-store Rust SDK reads AWS_REGION at the
+        # process level, NOT from boto3's config or storage_options.
+        # Ray actor processes are spawned by ``ray start`` on cluster
+        # workers and do NOT inherit env from the driver. Without
+        # this, polars' parquet S3 PUT defaults to the commercial
+        # us-east-1 endpoint and gets ``InvalidToken`` from a
+        # GovCloud bucket. setdefault preserves any explicit override.
+        os.environ.setdefault("AWS_REGION", "us-gov-west-1")
+        os.environ.setdefault("AWS_DEFAULT_REGION", "us-gov-west-1")
+
+        # Ray's object store uses zero-copy plasma shared memory for
+        # numpy arrays, which deserializes them as READ-ONLY in actor
+        # processes. ``stochastic_arrow.evolve`` (called by
+        # complexation.calculate_request) takes Cython memoryviews
+        # which REQUIRE writable arrays — hits ``ValueError: buffer
+        # source array is read-only`` on the first complexation tick
+        # otherwise. Deep-copying once at actor startup gives this
+        # actor its own writable instance. Memory cost is ~one
+        # sim_data per actor (hundreds of MB) — fine on m5.4xlarge
+        # workers with 64 GB RAM and 10 lineages spread across 5
+        # workers (2 actors / worker).
+        import copy
+        self._sim_data = copy.deepcopy(sim_data)
         self._sim_data_path = sim_data_path
 
     def run_lineage(self, config_path, out_dir, out_uri, lineage_seed,
