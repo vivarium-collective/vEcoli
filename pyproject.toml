@@ -15,7 +15,12 @@ version = "1.1.0"
 description = "Whole Cell E. coli Model"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "numpy",
+    # Pin numpy explicitly so an accidental ``uv pip install -e .``
+    # (which BYPASSES uv.lock and resolves latest from PyPI) on a fresh
+    # head can't drift past 2.2.6 into a numpy that removed np.in1d.
+    # Matches the build-system requires AND uv.lock pin so all paths
+    # (Docker image, MP head venv, local dev) agree on numpy version.
+    "numpy==2.2.6",
     "scipy",
     "biopython",
     "cvxpy",
@@ -64,6 +69,22 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Minimal AWS client extras: pulled in by bootstrap_head*.sh via
+# ``uv sync --frozen --extra aws`` so production heads get exactly
+# boto3 + botocore[crt] from the lock — no ad-hoc ``uv pip install``.
+# Kept SEPARATE from [dev] so production heads don't pull pytest /
+# jupyter / etc. (and don't pull rdkit which is a 600 MB dep).
+aws = [
+    "boto3>=1.41.5",
+    "botocore[crt]>=1.41.5",
+]
+# Ray is intentionally NOT in any extras here. Adding ray (even as an
+# unselected extra) makes uv resolve its transitive constraints
+# cross-extra, which downgrades pydantic 2.x → 1.x and adds
+# opentelemetry/opencensus deps to the lock. The head never imports
+# ray directly (ec2_cluster_ray.py only uses EC2SSMRayCluster from
+# process-bigraph); ``import ray`` happens INSIDE the Docker image
+# during the cluster experiment. Pin ray IN THE DOCKERFILE only.
 dev = [
     "pytest",
     "pytest-cov",

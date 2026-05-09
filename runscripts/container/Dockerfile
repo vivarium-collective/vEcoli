@@ -50,11 +50,13 @@ ENV UV_CACHE_DIR=/root/.cache/uv
 # Silence warning about cache and sync targets being on different filesystems
 ENV UV_LINK_MODE=copy
 
-# Install the dependencies only to leverage Docker layer caching
+# Install the dependencies only to leverage Docker layer caching.
+# --extra aws pulls boto3/botocore[crt] from the lock; needed by all
+# AWS paths (Batch, MP, Ray) for S3 + boto3 calls.
 RUN --mount=type=cache,target=/root/.cache/uv \
   --mount=type=bind,source=uv.lock,target=uv.lock \
   --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-  uv sync --frozen --no-install-project
+  uv sync --frozen --no-install-project --extra aws
 
 # Activate the virtual environment
 ENV PATH="/vEcoli/.venv/bin:$PATH"
@@ -72,18 +74,19 @@ exec "$@"' > /entrypoint.sh && chmod +x /entrypoint.sh
 # Copy the project into the image (likely to change and invalidate the cache)
 ADD . /vEcoli
 
-# Install the project
+# Install the project (uses --extra aws so the project install matches
+# the dep install above).
 RUN --mount=type=cache,target=/root/.cache/uv \
-  uv sync --frozen
+  uv sync --frozen --extra aws
 
-# Install Ray (and the s3fs/boto3 stack for cloud parquet writes) for
-# the composite_lineage_ray variant. Ray isn't a core vEcoli dep so
-# it's added on top of the sync rather than via pyproject — keeps the
-# v1/v2-aws Batch image lean and only bumps it for the Ray path.
-# Same image works for all paths because Ray + boto3 are no-ops when
-# unused.
+# Ray for the composite_lineage_ray variant. NOT in pyproject.toml /
+# uv.lock because ray's transitive constraints (pydantic<2,
+# opentelemetry, opencensus) ripple cross-extra and downgrade pydantic
+# in the main lockfile. Pinning ray here gives reproducibility (same
+# version on every image build) without polluting the head/local
+# venv resolution. Update the version explicitly when needed.
 RUN --mount=type=cache,target=/root/.cache/uv \
-  uv pip install --no-cache 'ray[default]>=2.10' s3fs boto3
+  uv pip install --no-cache 'ray[default]==2.55.1'
 
 # Record Docker Image metadata in ENV variables, viewable by `docker inspect`
 # and accessible to programs in the container.

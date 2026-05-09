@@ -332,12 +332,9 @@ class ChromosomeReplication(PartitionedProcess):
             (domain_index_existing_oric,) = attrs(states["oriCs"], ["domain_index"])
 
             # Get indexes of the domains that would be getting child domains
-            # (domains that contain an origin). ``np.isin`` is the
-            # drop-in replacement for ``np.in1d``, which numpy 2.x
-            # removed (was deprecated in 1.25). Works on any-rank
-            # arrays; here both inputs are 1-D so behavior matches.
+            # (domains that contain an origin)
             new_parent_domains = np.where(
-                np.isin(domain_index_existing_domain, domain_index_existing_oric)
+                np.in1d(domain_index_existing_domain, domain_index_existing_oric)
             )[0]
 
             # Calculate counts of new replisomes and domains to add

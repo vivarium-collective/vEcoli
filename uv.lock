@@ -3975,6 +3975,10 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+aws = [
+    { name = "boto3" },
+    { name = "botocore", extra = ["crt"] },
+]
 dev = [
     { name = "boto3" },
     { name = "botocore", extra = ["crt"] },
@@ -4004,7 +4008,9 @@ requires-dist = [
     { name = "autograd" },
     { name = "bigraph-schema", specifier = ">=1.2.8" },
     { name = "biopython" },
+    { name = "boto3", marker = "extra == 'aws'", specifier = ">=1.41.5" },
     { name = "boto3", marker = "extra == 'dev'", specifier = ">=1.41.5" },
+    { name = "botocore", extras = ["crt"], marker = "extra == 'aws'", specifier = ">=1.41.5" },
     { name = "botocore", extras = ["crt"], marker = "extra == 'dev'", specifier = ">=1.41.5" },
     { name = "cvxpy" },
     { name = "dill" },
@@ -4025,7 +4031,7 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'dev'" },
     { name = "nbsphinx", marker = "extra == 'docs'" },
     { name = "numba" },
-    { name = "numpy" },
+    { name = "numpy", specifier = "==2.2.6" },
     { name = "orjson" },
     { name = "ortools", specifier = "<9.11" },
     { name = "pandas" },
@@ -4058,7 +4064,7 @@ requires-dist = [
     { name = "vl-convert-python" },
     { name = "xmltodict" },
 ]
-provides-extras = ["dev", "docs"]
+provides-extras = ["aws", "dev", "docs"]
 
 [[package]]
 name = "virtualenv"

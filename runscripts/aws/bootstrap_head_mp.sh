@@ -57,15 +57,11 @@ echo "vEcoli at $(git rev-parse --short HEAD) on $(git rev-parse --abbrev-ref HE
 [[ -d .venv ]] || uv venv
 # shellcheck disable=SC1091
 source .venv/bin/activate
-# Use --frozen against uv.lock so numpy / scipy / etc. don't drift
-# from the version we develop against locally. Without --frozen, a
-# fresh ``uv pip install -e .`` resolves to whatever's latest on PyPI
-# at bootstrap time — that's how a fresh head ended up with numpy 2.x
-# (which removed np.in1d) while local stayed on 1.x. Always frozen
-# from now on. s3fs/boto3 are added on top because they're not in
-# vEcoli's core deps.
-uv sync --frozen
-uv pip install s3fs boto3
+# --frozen against uv.lock for numpy/scipy/etc. + --extra aws for
+# boto3/botocore. s3fs is in main deps. NO ad-hoc ``uv pip install`` —
+# everything comes from the lock so the head's env exactly matches
+# what was tested locally. See memory:feedback_pin_via_lock_on_ec2.
+uv sync --frozen --extra aws
 
 if ! grep -qF "vEcoli/.venv/bin/activate" "$HOME/.bashrc"; then
   echo "source $VECOLI_DIR/.venv/bin/activate" >> "$HOME/.bashrc"

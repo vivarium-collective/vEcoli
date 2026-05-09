@@ -206,9 +206,20 @@ S3_POLICY_DOC=$(cat <<EOF
       "Effect": "Allow",
       "Action": [
         "s3:ListBucket",
-        "s3:GetBucketLocation"
+        "s3:GetBucketLocation",
+        "s3:HeadBucket",
+        "s3:ListAllMyBuckets"
       ],
-      "Resource": "arn:${PARTITION}:s3:::${S3_OUTPUT_BUCKET}"
+      "Resource": [
+        "arn:${PARTITION}:s3:::${S3_OUTPUT_BUCKET}",
+        "arn:${PARTITION}:s3:::${S3_OUTPUT_BUCKET}/*"
+      ]
+    },
+    {
+      "Sid": "ListAllMyBucketsAccountLevel",
+      "Effect": "Allow",
+      "Action": "s3:ListAllMyBuckets",
+      "Resource": "*"
     }
   ]
 }

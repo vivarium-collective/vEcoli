@@ -62,14 +62,13 @@ echo "vEcoli at $(git rev-parse --short HEAD) on $(git rev-parse --abbrev-ref HE
 [[ -d .venv ]] || uv venv
 # shellcheck disable=SC1091
 source .venv/bin/activate
-# Pin via uv.lock (numpy 2.x drift broke np.in1d on a fresh sync —
-# see bootstrap_head_mp.sh). s3fs/boto3/ray on top.
-uv sync --frozen
-uv pip install s3fs boto3
-# Ray client lib for the driver's ``import ray`` (driver doesn't
-# ``ray up``; it just uses EC2SSMRayCluster + ``ray.init(address='auto')``
-# inside the experiment script that runs INSIDE the cluster).
-uv pip install 'process-bigraph[ec2-ssm]' || uv pip install 'ray[default]>=2.10'
+# --frozen against uv.lock + --extra aws — same as the other heads.
+# Ray is intentionally NOT installed on the driver: ec2_cluster_ray.py
+# only imports EC2SSMRayCluster from process-bigraph; ``import ray``
+# only runs INSIDE the Docker image during the cluster experiment.
+# Keeping ray off the driver keeps pydantic 2.x (ray's transitive
+# constraint pulls in pydantic<2). See pyproject.toml [aws] extras.
+uv sync --frozen --extra aws
 
 if ! grep -qF "vEcoli/.venv/bin/activate" "$HOME/.bashrc"; then
   echo "source $VECOLI_DIR/.venv/bin/activate" >> "$HOME/.bashrc"
