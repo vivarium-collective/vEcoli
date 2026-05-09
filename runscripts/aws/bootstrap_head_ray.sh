@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
-# Bring up a Ray cluster on EC2 (1 head + 5 workers, pre-allocated, no
-# autoscale) and run the composite_lineage_ray workflow against it.
+# Bring up a Ray cluster on EC2 via SSM (NOT ``ray up``) and run the
+# composite_lineage_ray workflow against it.
 #
-# Runs on a small EC2 head node — it's the *driver*, not the cluster.
-# Ray's managed key lets it SSH to its own provisioned instances. The
-# driver doesn't run sims itself; it just calls
-# run_composite_lineage_ray.py --ray_address auto inside the cluster.
+# This head node is the *driver*: small instance, runs
+# runscripts/aws/ec2_cluster_ray.py which uses
+# ``process_bigraph.protocols.clusters.ec2_ssm.EC2SSMRayCluster`` to
+# provision real workers, dispatch the experiment, and tear down. No
+# ``ray up`` — the SSM path bypasses Ray's autoscaler and its
+# IAM-permission requirements (see memory:reference_ec2_ssm_ray_cluster).
 #
-# Pre-req: composite branch pushed; AWS GovCloud creds configured.
+# Pre-req: composite branch pushed; AWS GovCloud creds configured;
+# ECR has a vEcoli image with ray[default] installed (current
+# Dockerfile installs it after `uv sync`).
 
 set -euo pipefail
 
@@ -50,47 +54,51 @@ git checkout "$VECOLI_BRANCH" 2>/dev/null || git checkout -B "$VECOLI_BRANCH" "o
 git reset --hard "origin/$VECOLI_BRANCH"
 echo "vEcoli at $(git rev-parse --short HEAD) on $(git rev-parse --abbrev-ref HEAD)"
 
-# --- 5. uv sync + ray ------------------------------------------------------
+# --- 5. uv sync (driver only — actual sims run in cluster Docker) ----------
+# The head only needs boto3 + process-bigraph (for EC2SSMRayCluster).
+# It does NOT need vEcoli's full sim deps; the cluster pulls those from
+# the ECR image. Still install full vEcoli so the driver scripts and
+# memory tooling work.
 [[ -d .venv ]] || uv venv
 # shellcheck disable=SC1091
 source .venv/bin/activate
-uv pip install -e . s3fs boto3 'ray[default]>=2.10'
+uv pip install -e . s3fs boto3
+# Ray client lib for the driver's ``import ray`` (driver doesn't ray
+# up; it just uses EC2SSMRayCluster + ``ray.init(address='auto')``
+# inside the experiment script that runs INSIDE the cluster).
+uv pip install 'process-bigraph[ec2-ssm]' || uv pip install 'ray[default]>=2.10'
 
 if ! grep -qF "vEcoli/.venv/bin/activate" "$HOME/.bashrc"; then
   echo "source $VECOLI_DIR/.venv/bin/activate" >> "$HOME/.bashrc"
 fi
 
-# --- 6. config + sim_data resolution ---------------------------------------
+# --- 6. config + sim_data + image_uri resolution ---------------------------
 test -f "$CONFIG_RELPATH" || { echo "Missing $CONFIG_RELPATH"; exit 1; }
 EXP_ID=$(python -c "import json; print(json.load(open('$CONFIG_RELPATH'))['experiment_id'])")
 OUT_URI=$(python -c "import json; print(json.load(open('$CONFIG_RELPATH'))['emitter_arg']['out_uri'])")
-RAY_YAML=$(python -c "import json; print(json.load(open('$CONFIG_RELPATH'))['aws']['ray']['cluster_yaml'])")
-test -f "$RAY_YAML" || { echo "Missing Ray cluster yaml: $RAY_YAML"; exit 1; }
 
-# sim_data_path: prefer S3 if SIM_DATA_S3_URI env var set, else run
-# parca on the head once. Workers can pull from S3 via fsspec when
-# the runner passes the s3:// URI through to LoadSimData.
-if [[ -n "${SIM_DATA_S3_URI:-}" ]]; then
-  SIM_DATA_PATH="$SIM_DATA_S3_URI"
-  echo "Using sim_data from $SIM_DATA_PATH"
-else
-  SIM_DATA_LOCAL="$VECOLI_DIR/out/$EXP_ID/parca/kb/simData.cPickle"
-  if [[ ! -f "$SIM_DATA_LOCAL" ]]; then
-    echo "Running parca to produce $SIM_DATA_LOCAL (one-time)..."
-    python runscripts/parca.py --config "$CONFIG_RELPATH" --outdir "$VECOLI_DIR/out/$EXP_ID/parca"
-  fi
-  SIM_DATA_PATH="$SIM_DATA_LOCAL"
+# IMAGE_URI must be the ECR image with ray installed — see Dockerfile
+# `pip install ray` line. If unset, fall back to the standard v2-aws
+# image (assumes it was rebuilt with the updated Dockerfile).
+IMAGE_URI="${IMAGE_URI:-}"
+if [[ -z "$IMAGE_URI" ]]; then
+  ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+  IMAGE_URI="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/vecoli:v2-comparison-arm64"
+  echo "IMAGE_URI not set; defaulting to ${IMAGE_URI}"
 fi
 
-# --- 7. ray up -------------------------------------------------------------
-# Provisions head + workers. Ray manages SSH keys to its own nodes.
-echo "Provisioning Ray cluster from $RAY_YAML ..."
-ray up "$RAY_YAML" --yes --no-config-cache
-echo "Ray cluster up. Dashboard: http://<head_dns>:8265"
+# sim_data_path: must be S3 for the cluster — workers fetch via fsspec.
+if [[ -z "${SIM_DATA_S3_URI:-}" ]]; then
+  echo "ERROR: SIM_DATA_S3_URI must be set (cluster workers can't reach local files)" >&2
+  echo "Example: SIM_DATA_S3_URI=s3://bucket/.../parca/kb/simData.cPickle" >&2
+  exit 1
+fi
 
-# --- 8. launch run inside tmux so SSH disconnect doesn't kill it -----------
-# The driver does ray.init(address='auto') and submits actors. It runs
-# on this small head; the heavy work happens on the cluster's workers.
+# --- 7. launch driver inside tmux so SSH disconnect doesn't kill it --------
+# The driver is ec2_cluster_ray.py — provisions cluster, runs
+# experiment via SSM, tears down. Cluster lives in a separate set of
+# EC2 instances (provisioned by the driver via boto3); this head
+# node just steers.
 if tmux has-session -t "$SESSION" 2>/dev/null; then
   echo "tmux session '$SESSION' already exists. Attach with: tmux attach -t $SESSION"
   exit 0
@@ -98,26 +106,28 @@ fi
 LOG_FILE="\$HOME/${SESSION}_workflow.log"
 tmux new-session -d -s "$SESSION" \
   "cd $VECOLI_DIR && source .venv/bin/activate && \
-   POLARS_MAX_THREADS=1 \
-   python runscripts/run_composite_lineage_ray.py \
-     --config $CONFIG_RELPATH \
-     --sim_data_path $SIM_DATA_PATH \
-     --out_uri $OUT_URI \
-     --n_seeds $N_SEEDS \
-     --generations $GENERATIONS \
-     --max_duration $MAX_DURATION \
-     --ray_address auto \
+   IMAGE_URI='$IMAGE_URI' \
+   OUT_URI='$OUT_URI' \
+   SIM_DATA_URI='$SIM_DATA_S3_URI' \
+   CONFIG_RELPATH='$CONFIG_RELPATH' \
+   N_SEEDS=$N_SEEDS \
+   GENERATIONS=$GENERATIONS \
+   MAX_DURATION=$MAX_DURATION \
+   python runscripts/aws/ec2_cluster_ray.py \
      2>&1 | tee ${LOG_FILE}"
 
 cat <<EOF
 
-Ray workflow launched in tmux session '$SESSION'.
+Ray driver launched in tmux session '$SESSION'.
   Tail log:    tail -f ~/${SESSION}_workflow.log
   Attach:      tmux attach -t $SESSION
   Detach:      Ctrl+B then D
   Outputs to:  $OUT_URI
 
-When the run finishes, tear the cluster down:
-  ray down $RAY_YAML --yes
+The driver provisions the cluster, runs the experiment via SSM, and
+tears down on completion. If you need to cancel mid-run:
+  ssh ec2-user@<head-dns> 'tmux kill-session -t $SESSION'
+  # then manually terminate any stray cluster instances tagged with
+  # the cluster_id (visible in the driver's startup logs).
 
 EOF

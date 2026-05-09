@@ -76,6 +76,15 @@ ADD . /vEcoli
 RUN --mount=type=cache,target=/root/.cache/uv \
   uv sync --frozen
 
+# Install Ray (and the s3fs/boto3 stack for cloud parquet writes) for
+# the composite_lineage_ray variant. Ray isn't a core vEcoli dep so
+# it's added on top of the sync rather than via pyproject — keeps the
+# v1/v2-aws Batch image lean and only bumps it for the Ray path.
+# Same image works for all paths because Ray + boto3 are no-ops when
+# unused.
+RUN --mount=type=cache,target=/root/.cache/uv \
+  uv pip install --no-cache 'ray[default]>=2.10' s3fs boto3
+
 # Record Docker Image metadata in ENV variables, viewable by `docker inspect`
 # and accessible to programs in the container.
 ARG git_hash=""
