@@ -321,7 +321,7 @@ ns_run_cancel() {
   fi
 }
 ns_run_status() {
-  local id state dns
+  local id state dns tmux_alive=0
   id=$(get_instance_id)
   if [[ -z "$id" || "$id" == "None" ]]; then
     echo "Head ($HEAD_NAME): none"
@@ -333,8 +333,13 @@ ns_run_status() {
     echo "Head ($HEAD_NAME): $id  state=$state  dns=${dns:-N/A}"
     if [[ "$state" == "running" ]]; then
       echo "Tmux session '$TMUX_SESSION':"
-      ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no "ec2-user@$dns" \
-        "tmux ls 2>/dev/null | grep -F '$TMUX_SESSION' || echo '  (not running)'" 2>/dev/null
+      if ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no "ec2-user@$dns" \
+          "tmux ls 2>/dev/null | grep -qF '$TMUX_SESSION'" 2>/dev/null; then
+        echo "  (running)"
+        tmux_alive=1
+      else
+        echo "  (not running)"
+      fi
     fi
   fi
   echo
@@ -349,6 +354,18 @@ ns_run_status() {
   echo "Last S3 writes for $EXP_ID:"
   aws_cli s3 ls --recursive "s3://$BUCKET/$PREFIX/" 2>/dev/null \
     | sort -k1,2 | tail -3 | awk '{print "  "$1, $2, "  ", $4}'
+  # Diagnostic: if the head is running but tmux isn't, the workflow
+  # finished or crashed. Show the tail of the log so the user can
+  # see why without an extra ssh.
+  if [[ -n "${dns:-}" && "${state:-}" == "running" && "$tmux_alive" -eq 0 ]]; then
+    echo
+    echo "Tmux not running but head is. Last 20 lines of ~/${TMUX_SESSION}_workflow.log:"
+    ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no "ec2-user@$dns" \
+      "F=\$HOME/${TMUX_SESSION}_workflow.log; \
+       [[ -f \$F ]] || F=\$HOME/v2_workflow.log; \
+       [[ -f \$F ]] && tail -20 \"\$F\" | sed 's/^/  /' \
+       || echo '  (no log file at \$F)'" 2>/dev/null
+  fi
 }
 ns_run_jobs() {
   [[ -n "$QUEUE" ]] || { echo "no Batch queue (variant=${DEPLOY_MODE})"; return; }

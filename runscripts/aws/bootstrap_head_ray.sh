@@ -62,9 +62,12 @@ echo "vEcoli at $(git rev-parse --short HEAD) on $(git rev-parse --abbrev-ref HE
 [[ -d .venv ]] || uv venv
 # shellcheck disable=SC1091
 source .venv/bin/activate
-uv pip install -e . s3fs boto3
-# Ray client lib for the driver's ``import ray`` (driver doesn't ray
-# up; it just uses EC2SSMRayCluster + ``ray.init(address='auto')``
+# Pin via uv.lock (numpy 2.x drift broke np.in1d on a fresh sync —
+# see bootstrap_head_mp.sh). s3fs/boto3/ray on top.
+uv sync --frozen
+uv pip install s3fs boto3
+# Ray client lib for the driver's ``import ray`` (driver doesn't
+# ``ray up``; it just uses EC2SSMRayCluster + ``ray.init(address='auto')``
 # inside the experiment script that runs INSIDE the cluster).
 uv pip install 'process-bigraph[ec2-ssm]' || uv pip install 'ray[default]>=2.10'
 
