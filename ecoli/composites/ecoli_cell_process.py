@@ -32,6 +32,7 @@ Used as the unit of work in:
     EcoliCellProcess agents in a ``map[EcoliCellProcess]``;
     division at the outer level naturally creates more.
 """
+import os
 from copy import deepcopy
 from typing import Any, Optional
 
@@ -194,7 +195,33 @@ class EcoliCellProcess(Process):
 
         state = build_ecoli_document(
             self.core, sim_config, load_sim_data=gen_lsd)
-        return Composite(
+        if os.environ.get('VECOLI_DEBUG_DIVIDE'):
+            import sys as _sys
+            try:
+                bulk = state.get('agents', {}).get(self.agent_id, {}).get('bulk')
+                if bulk is not None and hasattr(bulk, 'dtype') and bulk.dtype.names and 'count' in bulk.dtype.names:
+                    print(f'[divide-debug] _build_inner_composite agent_id={self.agent_id} '
+                          f'BEFORE Composite() bulk.count.sum={int(bulk["count"].sum())}',
+                          file=_sys.stderr, flush=True)
+            except Exception as e:
+                print(f'[divide-debug] _build_inner_composite check err: {e}',
+                      file=_sys.stderr, flush=True)
+        composite = Composite(
             {'schema': {}, 'state': state,
              'run_steps_on_init': True},
             core=self.core)
+        if os.environ.get('VECOLI_DEBUG_DIVIDE'):
+            import sys as _sys
+            try:
+                bulk = composite.state.get('agents', {}).get(self.agent_id, {}).get('bulk')
+                if bulk is not None and hasattr(bulk, 'dtype') and bulk.dtype.names and 'count' in bulk.dtype.names:
+                    print(f'[divide-debug] _build_inner_composite agent_id={self.agent_id} '
+                          f'AFTER Composite() bulk.count.sum={int(bulk["count"].sum())}',
+                          file=_sys.stderr, flush=True)
+                else:
+                    print(f'[divide-debug] _build_inner_composite AFTER Composite() bulk={type(bulk).__name__}',
+                          file=_sys.stderr, flush=True)
+            except Exception as e:
+                print(f'[divide-debug] _build_inner_composite AFTER err: {e}',
+                      file=_sys.stderr, flush=True)
+        return composite

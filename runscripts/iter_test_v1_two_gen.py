@@ -5,8 +5,20 @@ just a few ticks (enough for parity comparison vs v2).
 Usage:
     uv run --no-sync python runscripts/iter_test_v1_two_gen.py 12
 
+Env overrides:
+    V1_OUT_DIR        override the output directory (default
+                      ``out/iter_test_v1_seed{N}``).
+    V1_SIM_DATA_PATH  override the sim_data file (default the local
+                      variant_sim_data path). Use this to run v1
+                      against an exact-match sim_data (e.g. v1's
+                      production parca output) when comparing to v2.
+    OMP_NUM_THREADS / MKL_NUM_THREADS / OPENBLAS_NUM_THREADS / etc.
+                      v1 normally runs multi-threaded BLAS; export
+                      these = 1 BEFORE invoking python to match the
+                      single-threaded v2-MP runner exactly.
+
 Outputs:
-    out/iter_test_v1_seed{N}/
+    {V1_OUT_DIR}/
       EXPERIMENT_ID_PLACEHOLDER/history/.../generation=1/...     gen 0 mother
       daughter_states/daughter_state_0.json                       saved at divide
       gen2/EXPERIMENT_ID_PLACEHOLDER/history/.../generation=2/... gen 1 daughter, first 10 ticks
@@ -17,9 +29,11 @@ import time
 
 if __name__ == "__main__":
     seed = int(sys.argv[1]) if len(sys.argv) > 1 else 12
-    base_out = os.path.abspath(f"out/iter_test_v1_seed{seed}")
+    base_out = os.path.abspath(
+        os.environ.get("V1_OUT_DIR") or f"out/iter_test_v1_seed{seed}")
     sim_data_path = os.path.abspath(
-        "out/comparison_10s_16g_v2_local/variant_sim_data/0.cPickle")
+        os.environ.get("V1_SIM_DATA_PATH")
+        or "out/comparison_10s_16g_v2_local/variant_sim_data/0.cPickle")
     if not os.path.isfile(sim_data_path):
         sys.exit(f"sim_data missing: {sim_data_path}")
 

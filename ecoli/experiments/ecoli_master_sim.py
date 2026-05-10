@@ -1530,6 +1530,17 @@ class EcoliSim:
         """
         global_t = float(ecoli.state.get('global_time', 0.0))
         agents = ecoli.state.get('agents', {})
+        if os.environ.get('VECOLI_DEBUG_DIVIDE'):
+            import sys as _sys
+            for aid, ag in agents.items():
+                if not isinstance(ag, dict):
+                    continue
+                bulk = ag.get('bulk')
+                if bulk is not None and hasattr(bulk, 'dtype') \
+                        and bulk.dtype.names and 'count' in bulk.dtype.names:
+                    print(f'[divide-debug] _emit_composite_history t={global_t} '
+                          f'agent_id={aid!r} bulk.count.sum={int(bulk["count"].sum())}',
+                          file=_sys.stderr, flush=True)
         emit_agents = {}
         # Only these agent subtrees are emitted. Anything else (process
         # nodes, infrastructure stores) is not time-series data.

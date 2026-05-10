@@ -896,6 +896,8 @@ class ParquetEmitter(Emitter):
             self.executor = BlockingExecutor()
         # Buffer emits for each listener in a Numpy array
         self.buffered_emits: dict[str, Any] = {}
+        # None until first ``configuration`` emit installs a hive path.
+        self.partitioning_path: Optional[str] = None
         # Remember most specific Polars type for each column
         self.pl_types: dict[str, pl.DataType | DataTypeClass] = {}
         # Remember NumPy type for each column
@@ -998,9 +1000,40 @@ class ParquetEmitter(Emitter):
                 "agent_id": agent_id,
             }
             self.experiment_id = quoted_experiment_id
-            self.partitioning_path = os.path.join(
+            new_partitioning_path = os.path.join(
                 *(f"{k}={v}" for k, v in partitioning_keys.items())
             )
+            # Mid-run partition rotation (gen N → gen N+1 in
+            # composite_lineage / MP / Ray): flush pending buffered
+            # history rows to the OLD partition before pointing the
+            # buffer at the NEW one. Without this, mother's emits that
+            # haven't reached the batch_size boundary spill into the
+            # daughter's partition file and the daughter parquet's
+            # earliest rows hold mother data (full bulk, not halved).
+            if (self.partitioning_path is not None
+                    and self.partitioning_path != new_partitioning_path
+                    and self.num_emits > 0
+                    and (self.num_emits % self.batch_size) != 0):
+                self.last_batch_future.result()
+                pending = self.num_emits % self.batch_size
+                trim = {
+                    k: v[:pending] for k, v in self.buffered_emits.items()
+                }
+                outfile = os.path.join(
+                    self.out_uri,
+                    self.experiment_id,
+                    "history",
+                    self.partitioning_path,
+                    f"{self.num_emits}.pq",
+                )
+                self.filesystem.makedirs(
+                    os.path.dirname(outfile), exist_ok=True)
+                json_to_parquet(
+                    trim, outfile, self.pl_types, self.filesystem)
+                # Reset buffer + emit counter for the new partition.
+                self.buffered_emits = {}
+                self.num_emits = 0
+            self.partitioning_path = new_partitioning_path
             data = flatten_dict(data)
             config_emit: dict[str, Any] = {}
             config_schema: dict[str, pl.DataType] = {}
