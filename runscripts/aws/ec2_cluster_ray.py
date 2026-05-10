@@ -162,6 +162,11 @@ def main() -> int:
     sim_data_uri = os.environ["SIM_DATA_URI"]
     config_relpath = os.environ.get(
         "CONFIG_RELPATH", "configs/comparison_10s_16g_v2_ray_aws.json")
+    # CLI-supplied experiment_id (vecoli_aws.sh assigns one per
+    # ``run launch ray`` and persists it in a sidecar). Forwarded as
+    # ``--experiment-id`` to run_composite_lineage_ray.py so all S3
+    # output / synthetic_trace land under the unique ID.
+    experiment_id = os.environ.get("EXPERIMENT_ID", "")
 
     # Per-run sim settings (n_seeds, generations, max_duration) come
     # from the config — we only need them locally for log messages
@@ -273,6 +278,7 @@ def main() -> int:
                 f"python -u runscripts/run_composite_lineage_ray.py "
                 f"  --config {config_relpath} "
                 f"  --ray_address auto "
+                f"""{f"  --experiment-id {experiment_id} " if experiment_id else ""}"""
                 f"  > {log_path} 2>&1; "
                 f"rc=$?; "
                 f'echo "=== experiment exit: $rc ===" >> {log_path}; '

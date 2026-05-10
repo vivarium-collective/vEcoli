@@ -61,6 +61,10 @@ cache/
 nextflow_temp
 trace-*
 
+# vecoli_aws.sh CLI state (per-variant experiment_id sidecars) #
+################################################################
+.vecoli-aws-state/
+
 # Virtual environment #
 #######################
 .venv/

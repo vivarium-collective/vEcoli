@@ -1,0 +1,7 @@
+{
+    "inherit_from": ["iter_v2.json"],
+    "experiment_id": "iter_v2_long",
+    "max_duration": 2969,
+    "lineage_seed": 12,
+    "seed": 12
+}

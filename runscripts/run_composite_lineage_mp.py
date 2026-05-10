@@ -89,6 +89,7 @@ _WORKER_OUT_URI = None
 _WORKER_GENERATIONS = None
 _WORKER_MAX_DURATION = None
 _WORKER_SIM_DATA_PATH = None
+_WORKER_EXPERIMENT_ID = None
 
 
 def _run_one_lineage(seed):
@@ -113,6 +114,8 @@ def _run_one_lineage(seed):
     sim.config['agent_id'] = '0'
     sim.config['generations'] = _WORKER_GENERATIONS
     sim.config['max_duration'] = _WORKER_MAX_DURATION
+    if _WORKER_EXPERIMENT_ID:
+        sim.config['experiment_id'] = _WORKER_EXPERIMENT_ID
     # ParquetEmitter prefers out_uri when set (fsspec-aware S3/GCS),
     # falls back to out_dir for local paths.
     if _WORKER_OUT_URI:
@@ -142,6 +145,10 @@ def main():
     parser.add_argument('--config', required=True)
     parser.add_argument('--n_workers', type=int, default=None,
                         help='Pool size; defaults to n_init_sims from config')
+    parser.add_argument('--experiment-id', dest='experiment_id', default=None,
+                        help='Override config experiment_id. Used by '
+                             'vecoli_aws.sh to inject auto-generated unique '
+                             'IDs per launch.')
     args = parser.parse_args()
 
     # Read every other knob from the config.
@@ -152,6 +159,8 @@ def main():
     # it, but here we just need a few top-level values. Walk inherits
     # manually so the runner doesn't depend on importing EcoliSim.
     cfg = _resolve_inherited_config(args.config, cfg)
+    if args.experiment_id:
+        cfg['experiment_id'] = args.experiment_id
 
     sim_data_path = cfg.get('sim_data_path')
     if not sim_data_path:
@@ -182,7 +191,7 @@ def main():
     base = LoadSimData(sim_data_path=sim_data_path, seed=base_seed)
     global _PRELOADED_SIM_DATA, _WORKER_CONFIG_PATH, _WORKER_OUT_DIR
     global _WORKER_OUT_URI, _WORKER_GENERATIONS, _WORKER_MAX_DURATION
-    global _WORKER_SIM_DATA_PATH
+    global _WORKER_SIM_DATA_PATH, _WORKER_EXPERIMENT_ID
     _PRELOADED_SIM_DATA = base.sim_data
     _WORKER_CONFIG_PATH = os.path.abspath(args.config)
     _WORKER_OUT_DIR = os.path.abspath(out_dir) if out_dir else None
@@ -193,6 +202,7 @@ def main():
         sim_data_path
         if sim_data_path.startswith(('s3://', 'gs://'))
         else os.path.abspath(sim_data_path))
+    _WORKER_EXPERIMENT_ID = args.experiment_id
     print(f"[mp]   Loaded in {time.time()-t0:.2f}s. "
           f"Spawning {n_workers} workers for {n_seeds} seeds "
           f"(generations={generations}, max_duration={max_duration})...",

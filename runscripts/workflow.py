@@ -7,6 +7,7 @@ import pathlib
 import random
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import warnings
@@ -1049,12 +1050,36 @@ def _gcloud_image_exists(full_image_uri: str) -> bool:
     return result.returncode == 0
 
 
-def _confirm_overwrite(image: str) -> bool:
+def _confirm_overwrite(image: str, force: bool = False) -> bool:
     """Prompt the user to confirm building and pushing container image to
     an existing AWS ECR repository or GCP Artifact Registry manifest.
 
     Returns True if the user confirms, False otherwise.
+
+    Auto-confirm without prompting when:
+      - ``force=True`` (caller passed ``--build-image`` explicitly, or
+        otherwise opted in unambiguously), or
+      - stdin is not a TTY (CI, automated CLIs).
+
+    Note: tmux ALWAYS allocates a pty even for detached sessions, so
+    ``isatty()`` alone isn't enough to detect "no human is here" when
+    the call is happening inside ``tmux new-session -d ... 'python ...'``.
+    The ``force`` parameter is the reliable signal.
     """
+    if force:
+        print(
+            f"Image '{image}' already exists in the registry. "
+            f"Forcing overwrite (--build-image / build_image=true was explicit).",
+            flush=True,
+        )
+        return True
+    if not sys.stdin.isatty():
+        print(
+            f"Image '{image}' already exists in the registry. "
+            f"Auto-confirming overwrite (stdin not a TTY).",
+            flush=True,
+        )
+        return True
     response = (
         input(f"Image '{image}' already exists in the registry. Continue? [y/N] ")
         .strip()
@@ -1063,7 +1088,12 @@ def _confirm_overwrite(image: str) -> bool:
     return response in ("y", "yes")
 
 
-def run_ecr_script(image: str, build: bool, region: str = "us-gov-west-1") -> str:
+def run_ecr_script(
+    image: str,
+    build: bool,
+    region: str = "us-gov-west-1",
+    force: bool = False,
+) -> str:
     """
     Run the ECR build script to either build/push or just resolve the URI.
 
@@ -1071,6 +1101,8 @@ def run_ecr_script(image: str, build: bool, region: str = "us-gov-west-1") -> st
         image: Image specification, either full URI or repo:tag format.
         build: If True, build and push the image. If False, just resolve the URI.
         region: AWS region for ECR (e.g., 'us-gov-west-1' for GovCloud).
+        force: When True (caller explicitly opted in via ``--build-image``),
+            skip the "image already exists" confirmation prompt.
 
     Returns:
         Full ECR image URI.
@@ -1108,7 +1140,7 @@ def run_ecr_script(image: str, build: bool, region: str = "us-gov-west-1") -> st
 
     if build:
         if _ecr_image_exists(repo_name, image_tag, region) and not _confirm_overwrite(
-            f"{repo_name}:{image_tag}"
+            f"{repo_name}:{image_tag}", force=force
         ):
             raise SystemExit("Aborted: will not supersede existing ECR image.")
         print(
@@ -1382,10 +1414,54 @@ def main():
         help="Only build workflow files (main.nf, nextflow.config, workflow_config.json) "
         "without executing the workflow. Temp files are preserved for inspection.",
     )
+    parser.add_argument(
+        "--no-build-image",
+        action="store_true",
+        default=False,
+        help="Skip the container image build/push step even if aws.build_image "
+        "or gcloud.build_image is true in the config. Use when the image is "
+        "already in the registry (e.g. pushed via runscripts/aws/vecoli_aws.sh "
+        "image push) and you only want to launch the workflow against it. "
+        "Avoids the interactive 'Image already exists. Continue? [y/N]' "
+        "prompt that hangs on non-interactive launches.",
+    )
+    parser.add_argument(
+        "--build-image",
+        action="store_true",
+        default=False,
+        help="Force aws.build_image and gcloud.build_image to true, even "
+        "if the config says false. Symmetric to --no-build-image. Used by "
+        "vecoli_aws.sh's ``run launch <alias> --build`` to trigger an "
+        "on-head ECR build regardless of what the config has on disk.",
+    )
+    parser.add_argument(
+        "--experiment-id",
+        type=str,
+        default=None,
+        help="Override the experiment_id from the config. Useful when an "
+        "external CLI (runscripts/aws/vecoli_aws.sh) auto-generates a unique "
+        "ID per launch. When set, suffix_time is skipped; the supplied ID "
+        "is used verbatim.",
+    )
     args = parser.parse_args()
+    if args.no_build_image and args.build_image:
+        parser.error("--no-build-image and --build-image are mutually exclusive")
     config = load_config_with_inheritance(config_file)
     user_config = load_config_with_inheritance(args.config)
     _merge_configs(config, user_config)
+    if args.no_build_image:
+        if isinstance(config.get("aws"), dict):
+            config["aws"]["build_image"] = False
+        if isinstance(config.get("gcloud"), dict):
+            config["gcloud"]["build_image"] = False
+    if args.build_image:
+        if isinstance(config.get("aws"), dict):
+            config["aws"]["build_image"] = True
+        if isinstance(config.get("gcloud"), dict):
+            config["gcloud"]["build_image"] = True
+    if args.experiment_id is not None:
+        config["experiment_id"] = args.experiment_id
+        config["suffix_time"] = False
 
     experiment_id = config["experiment_id"]
     if experiment_id is None:
@@ -1523,6 +1599,7 @@ def main():
             container_image,
             build=aws_config_dict.get("build_image", False),
             region=aws_region,
+            force=args.build_image,
         )
         nf_config = nf_config.replace("IMAGE_NAME", full_image_uri)
         nf_config = nf_config.replace(
@@ -1546,7 +1623,7 @@ def main():
         if gcloud_config.get("build_image", False):
             full_gcloud_uri = image_prefix + container_image
             if _gcloud_image_exists(full_gcloud_uri) and not _confirm_overwrite(
-                full_gcloud_uri
+                full_gcloud_uri, force=args.build_image
             ):
                 raise SystemExit(
                     "Aborted: will not supersede existing Artifact Registry image."

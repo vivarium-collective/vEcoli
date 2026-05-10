@@ -42,19 +42,34 @@ fi
 export PATH="$HOME/.local/bin:$PATH"
 hash -r
 
-# --- 4. clone vEcoli on composite -------------------------------------------
-if [[ ! -d "$VECOLI_DIR/.git" ]]; then
-  git clone --filter=blob:none "$VECOLI_REPO" "$VECOLI_DIR"
+# --- 4. fetch vEcoli code ---------------------------------------------------
+# SKIP_GIT_RESET=1 (CLI rsynced local) → trust files, don't touch git.
+# SKIP_GIT_RESET=0 (default / --from-origin) → clone + reset to origin.
+if [[ "${SKIP_GIT_RESET:-0}" == "1" ]]; then
+  if [[ ! -d "$VECOLI_DIR" ]]; then
+    echo "$VECOLI_DIR missing on head — first launch needs --from-origin to clone." >&2
+    exit 1
+  fi
+  cd "$VECOLI_DIR"
+  if [[ -d .git ]]; then
+    echo "vEcoli at $(git rev-parse --short HEAD 2>/dev/null || echo "?") (rsynced from CLI; skipping git reset)"
+  else
+    echo "vEcoli (rsynced from CLI; no .git on head)"
+  fi
+else
+  if [[ ! -d "$VECOLI_DIR/.git" ]]; then
+    git clone --filter=blob:none "$VECOLI_REPO" "$VECOLI_DIR"
+  fi
+  cd "$VECOLI_DIR"
+  current_origin=$(git remote get-url origin 2>/dev/null || true)
+  if [[ "$current_origin" != "$VECOLI_REPO" ]]; then
+    git remote set-url origin "$VECOLI_REPO"
+  fi
+  git fetch --all --tags
+  git checkout "$VECOLI_BRANCH" 2>/dev/null || git checkout -B "$VECOLI_BRANCH" "origin/$VECOLI_BRANCH"
+  git reset --hard "origin/$VECOLI_BRANCH"
+  echo "vEcoli at $(git rev-parse --short HEAD) on $(git rev-parse --abbrev-ref HEAD)"
 fi
-cd "$VECOLI_DIR"
-current_origin=$(git remote get-url origin 2>/dev/null || true)
-if [[ "$current_origin" != "$VECOLI_REPO" ]]; then
-  git remote set-url origin "$VECOLI_REPO"
-fi
-git fetch --all --tags
-git checkout "$VECOLI_BRANCH" 2>/dev/null || git checkout -B "$VECOLI_BRANCH" "origin/$VECOLI_BRANCH"
-git reset --hard "origin/$VECOLI_BRANCH"
-echo "vEcoli at $(git rev-parse --short HEAD) on $(git rev-parse --abbrev-ref HEAD)"
 
 # --- 5. uv sync (driver only — actual sims run in cluster Docker) ----------
 # The head only needs boto3 + process-bigraph (for EC2SSMRayCluster).
@@ -146,10 +161,15 @@ fi
 # experiment via SSM, tears down. Cluster lives in a separate set of
 # EC2 instances (provisioned by the driver via boto3); this head
 # node just steers.
+# CLI-supplied experiment_id forwarded as EXPERIMENT_ID env so
+# ec2_cluster_ray.py can pass it through as --experiment-id to
+# run_composite_lineage_ray.py (vecoli_aws.sh assigns one per
+# ``run launch ray`` and persists it in a sidecar).
 if tmux has-session -t "$SESSION" 2>/dev/null; then
   echo "tmux session '$SESSION' already exists. Attach with: tmux attach -t $SESSION"
   exit 0
 fi
+[[ -n "${EXPERIMENT_ID:-}" ]] && echo "Using CLI-supplied experiment_id=${EXPERIMENT_ID}"
 LOG_FILE="\$HOME/${SESSION}_workflow.log"
 tmux new-session -d -s "$SESSION" \
   "cd $VECOLI_DIR && source .venv/bin/activate && \
@@ -157,6 +177,7 @@ tmux new-session -d -s "$SESSION" \
    OUT_URI='$OUT_URI' \
    SIM_DATA_URI='$SIM_DATA_S3_URI' \
    CONFIG_RELPATH='$CONFIG_RELPATH' \
+   EXPERIMENT_ID='${EXPERIMENT_ID:-}' \
    python runscripts/aws/ec2_cluster_ray.py \
      2>&1 | tee ${LOG_FILE}"
 

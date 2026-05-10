@@ -58,7 +58,15 @@ class Complexation(PartitionedProcess):
             'bulk': 'bulk_array',
             'listeners': {
                 'complexation_listener': {
-                    'complexation_events': 'overwrite[divide_share[array[integer[64]]]]',
+                    # Match v1 listener_schema default
+                    # ``[0] * len(self.reaction_ids)`` (line ~98 in
+                    # this file's ports_schema). Without an explicit
+                    # _default, v2's bare array[T] defaults to ``[0]``
+                    # (length-1) which diverges from v1 at t=0.
+                    'complexation_events': {
+                        '_type': 'overwrite[divide_share[array[integer[64]]]]',
+                        '_default': [0] * len(self.reaction_ids),
+                    },
                 },
             },
         }

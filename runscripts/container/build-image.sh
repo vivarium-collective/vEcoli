@@ -29,17 +29,22 @@ trap cleanup EXIT INT TERM
 IMAGE="${USER}-image"
 RUN_LOCAL=0
 BUILD_APPTAINER=0
+PLATFORM=""
 
-usage_str="Usage: build-image.sh [-i IMAGE] [-l] [-a]
+usage_str="Usage: build-image.sh [-i IMAGE] [-l] [-a] [-p PLATFORM]
   -i: Docker tag of image to build; defaults to \"$IMAGE\".
   -a: Build Apptainer image (cannot use with -l).
-  -l: Build Docker image locally (defaults to Cloud Build)."
+  -l: Build Docker image locally (defaults to Cloud Build).
+  -p: Target platform for Docker build (e.g. linux/arm64, linux/amd64).
+      When set, uses ``docker buildx build --platform`` so x86_64 hosts
+      can produce arm64 images via QEMU emulation. No-op for the
+      Cloud Build / Apptainer paths."
 
 print_usage() {
   echo "$usage_str"
 }
 
-while getopts 'i:la' flag; do
+while getopts 'i:lap:' flag; do
   case "${flag}" in
   a)
     if [ "$RUN_LOCAL" -ne 0 ]; then
@@ -58,6 +63,7 @@ while getopts 'i:la' flag; do
       RUN_LOCAL=1
     fi
     ;;
+  p) PLATFORM="${OPTARG}" ;;
   *)
     print_usage
     exit 1
@@ -72,12 +78,31 @@ mkdir -p source-info
 git diff HEAD >source-info/git_diff.txt
 
 if [ "$RUN_LOCAL" -ne 0 ]; then
-  echo "=== Locally building Docker Image ${IMAGE} ==="
+  echo "=== Locally building Docker Image ${IMAGE} (platform=${PLATFORM:-host}) ==="
   echo "=== git hash ${GIT_HASH}, git branch ${GIT_BRANCH} ==="
-  docker build -f runscripts/container/Dockerfile -t "${IMAGE}" \
-    --build-arg git_hash="${GIT_HASH}" \
-    --build-arg git_branch="${GIT_BRANCH}" \
-    --build-arg timestamp="${TIMESTAMP}" .
+  if [ -n "$PLATFORM" ]; then
+    # buildx required for cross-platform builds; --load drops the result
+    # into the local Docker daemon so subsequent ``docker tag`` /
+    # ``docker push`` work without further changes.
+    if ! docker buildx inspect >/dev/null 2>&1; then
+      echo "ERROR: docker buildx not available — required for --platform builds." >&2
+      echo "  Install Docker Desktop, or initialize a builder once with:" >&2
+      echo "    docker buildx create --use" >&2
+      echo "  Then for x86_64→arm64 emulation:" >&2
+      echo "    docker run --privileged --rm tonistiigi/binfmt --install arm64" >&2
+      exit 1
+    fi
+    docker buildx build --platform "$PLATFORM" --load \
+      -f runscripts/container/Dockerfile -t "${IMAGE}" \
+      --build-arg git_hash="${GIT_HASH}" \
+      --build-arg git_branch="${GIT_BRANCH}" \
+      --build-arg timestamp="${TIMESTAMP}" .
+  else
+    docker build -f runscripts/container/Dockerfile -t "${IMAGE}" \
+      --build-arg git_hash="${GIT_HASH}" \
+      --build-arg git_branch="${GIT_BRANCH}" \
+      --build-arg timestamp="${TIMESTAMP}" .
+  fi
 elif [ "$BUILD_APPTAINER" -ne 0 ]; then
   # Create a temporary file for find exclude patterns
   EXCLUDE_PATTERNS=$(mktemp)

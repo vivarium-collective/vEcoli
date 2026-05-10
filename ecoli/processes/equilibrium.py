@@ -56,8 +56,14 @@ class Equilibrium(PartitionedProcess):
             'bulk': 'bulk_array',
             'listeners': {
                 'equilibrium_listener': {
-                    # Reaction rates — counts per second
-                    'reaction_rates': 'overwrite[divide_share[array[float[1/s]]]]',
+                    # Reaction rates — counts per second.
+                    # _default matches v1 listener_schema (line ~123
+                    # in this file's ports_schema): zeros of length
+                    # len(reaction_ids).
+                    'reaction_rates': {
+                        '_type': 'overwrite[divide_share[array[float[1/s]]]]',
+                        '_default': [0.0] * len(self.reaction_ids),
+                    },
                 },
             },
         }

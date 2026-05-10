@@ -62,9 +62,20 @@ class RnaMaturation(PartitionedProcess):
                 'rna_maturation_listener': {
                     'total_maturation_events': 'overwrite[divide_share[integer]]{0}',
                     'total_degraded_ntps': 'overwrite[divide_share[integer]]{0}',
-                    'unprocessed_rnas_consumed': 'overwrite[divide_share[array[integer[64]]]]',
-                    'mature_rnas_generated': 'overwrite[divide_share[array[integer[64]]]]',
-                    'maturation_enzyme_counts': 'overwrite[divide_share[array[integer[64]]]]',
+                    # _default mirrors v1 listener_schema (lines
+                    # ~118+ in this file's ports_schema).
+                    'unprocessed_rnas_consumed': {
+                        '_type': 'overwrite[divide_share[array[integer[64]]]]',
+                        '_default': [0] * len(self.unprocessed_rna_ids),
+                    },
+                    'mature_rnas_generated': {
+                        '_type': 'overwrite[divide_share[array[integer[64]]]]',
+                        '_default': [0] * len(self.mature_rna_ids),
+                    },
+                    'maturation_enzyme_counts': {
+                        '_type': 'overwrite[divide_share[array[integer[64]]]]',
+                        '_default': [0] * len(self.rna_maturation_enzyme_ids),
+                    },
                 },
             },
         }

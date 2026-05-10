@@ -81,15 +81,28 @@ class RibosomeData(Step):
                     'rRNA5S_initiated': 'overwrite[divide_share[integer]]{0}',
                     'rRNA16S_initiated': 'overwrite[divide_share[integer]]{0}',
                     'rRNA23S_initiated': 'overwrite[divide_share[integer]]{0}',
-                    'mRNA_TU_index': 'overwrite[divide_share[array[integer[64]]]]',
-                    'n_ribosomes_on_each_mRNA': 'overwrite[divide_share[array[integer[64]]]]',
+                    # Variable-length per-mRNA arrays. v1
+                    # listener_schema default is [] (line ~133 in
+                    # ports_schema). v2's bare array[T] default is
+                    # ``[0]`` (length-1) which diverges at t=0.
+                    'mRNA_TU_index': {
+                        '_type': 'overwrite[divide_share[array[integer[64]]]]',
+                        '_default': [],
+                    },
+                    'n_ribosomes_on_each_mRNA': {
+                        '_type': 'overwrite[divide_share[array[integer[64]]]]',
+                        '_default': [],
+                    },
                     # Probabilities (dimensionless floats in [0,1])
                     'total_rRNA_init_prob': 'overwrite[divide_share[float]]{0.0}',
                     'rRNA5S_init_prob': 'overwrite[divide_share[float]]{0.0}',
                     'rRNA16S_init_prob': 'overwrite[divide_share[float]]{0.0}',
                     'rRNA23S_init_prob': 'overwrite[divide_share[float]]{0.0}',
-                    # Mass per polysome — femtograms
-                    'protein_mass_on_polysomes': 'overwrite[divide_share[array[float[fg]]]]',
+                    # Mass per polysome — femtograms (v1 default [])
+                    'protein_mass_on_polysomes': {
+                        '_type': 'overwrite[divide_share[array[float[fg]]]]',
+                        '_default': [],
+                    },
                 },
             },
             'next_update_time': 'overwrite[divide_share[float]]',

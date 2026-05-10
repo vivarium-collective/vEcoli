@@ -214,7 +214,16 @@ DEFAULT_V1_REF = (
 
 
 def cmd_save(args):
-    """Run composite_lineage to t=at, pickle the live composite."""
+    """Run composite_lineage to t=at, emit parquet at every tick,
+    pickle the live composite at the end.
+
+    Save emits a NORMAL parquet stream during the mother's run-up to
+    division. That's necessary for after-the-fact divergence checks
+    (full-column diff vs v1 reference at any tick t<=at) without
+    rerunning the whole sim. Earlier versions used `emitter='null'`
+    to save a few seconds — the trade-off was that any divergence
+    investigation needed an extra full rerun. Not worth it.
+    """
     with chdir(ROOT):
         os.makedirs(os.path.dirname(args.pickle) or '.', exist_ok=True)
         from ecoli.experiments.ecoli_master_sim import EcoliSim
@@ -225,11 +234,23 @@ def cmd_save(args):
             sim.config['lineage_seed'] = args.seed
             sim.config['seed'] = args.seed
         sim.max_duration = int(args.at)
-        sim.config['emitter'] = 'null'
+        # Emit parquet at every tick — same shape as a normal sim
+        # run, so post-hoc full-column parity diffs work without
+        # any rerun. Output goes next to the pickle for easy
+        # cross-reference.
+        parquet_dir = (args.parquet_out or
+                       os.path.join(os.path.dirname(args.pickle) or '.',
+                                    'mother_history'))
+        sim.config['emitter'] = 'parquet'
+        sim.config['emitter_arg'] = {
+            'out_dir': os.path.abspath(parquet_dir),
+            'threaded': False,
+        }
         sim.divide = True
 
         print(f'[save] building composite to t={args.at}, seed={args.seed}',
               flush=True)
+        print(f'[save]   parquet → {parquet_dir}', flush=True)
         t0 = time.monotonic()
         sim.run()
         # composite engine stores the live Composite on self._composite,
@@ -496,6 +517,10 @@ def main():
                     help='sim-time to checkpoint at — default 2969 = '
                     'one tick before seed-12 divide at 2970')
     ps.add_argument('--pickle', default=DEFAULT_PICKLE)
+    ps.add_argument('--parquet_out', default=None,
+                    help='Where to emit per-tick mother parquet '
+                    '(default: <pickle_dir>/mother_history). Used '
+                    'for post-hoc full-column parity diff vs v1 ref.')
 
     pr = sub.add_parser('run')
     pr.add_argument('--pickle', default=DEFAULT_PICKLE)

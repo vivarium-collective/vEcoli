@@ -239,7 +239,11 @@ class PolypeptideElongation(PartitionedProcess):
                     # n_trna-length arrays
                     'net_charged': {'_type': 'overwrite[divide_share[array[integer[64]]]]', '_default': trna_i},
                     'fraction_trna_charged': {'_type': 'overwrite[divide_share[array[float]]]', '_default': trna_f},
-                    'trna_charged': {'_type': 'overwrite[divide_share[array[integer[64]]]]', '_default': trna_i},
+                    # trna_charged is keyed by AMINO ACID (n_aa=21),
+                    # NOT by trna (n_trna=86) — see v1 ports_schema
+                    # ``[0] * len(self.amino_acids)`` (line ~564).
+                    # Was mistakenly using trna_i which is n_trna-length.
+                    'trna_charged': {'_type': 'overwrite[divide_share[array[integer[64]]]]', '_default': aa_i},
                     'ntp_used': {'_type': 'overwrite[divide_share[array[integer[64]]]]', '_default': trna_i},
                     # n_aa-length fractions and supply
                     'fraction_aa_to_elongate': {'_type': 'overwrite[divide_share[array[float]]]', '_default': aa_f},

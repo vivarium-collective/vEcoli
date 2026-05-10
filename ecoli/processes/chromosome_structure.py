@@ -188,9 +188,26 @@ class ChromosomeStructure(Step):
                     'n_codirectional_collisions': 'overwrite[divide_share[integer]]{0}',
                     'n_empty_fork_collisions': 'overwrite[divide_share[integer]]{0}',
                     'n_removed_ribosomes': 'overwrite[divide_share[integer]]{0}',
-                    'headon_collision_coordinates': 'overwrite[divide_share[array[integer[64]]]]',
-                    'codirectional_collision_coordinates': 'overwrite[divide_share[array[integer[64]]]]',
-                    'empty_fork_collision_coordinates': 'overwrite[divide_share[array[integer[64]]]]',
+                    # Variable-length coordinate lists. v1's
+                    # listener_schema default is [] (empty list) — the
+                    # process appends real coordinates only when a
+                    # collision occurs. v2's bare ``array[integer[64]]``
+                    # default is [0] (single-zero), which silently
+                    # diverges from v1 every tick where no collision
+                    # happened. Force [] via _default so v2's listener
+                    # emit matches v1's exactly.
+                    'headon_collision_coordinates': {
+                        '_type': 'overwrite[divide_share[array[integer[64]]]]',
+                        '_default': [],
+                    },
+                    'codirectional_collision_coordinates': {
+                        '_type': 'overwrite[divide_share[array[integer[64]]]]',
+                        '_default': [],
+                    },
+                    'empty_fork_collision_coordinates': {
+                        '_type': 'overwrite[divide_share[array[integer[64]]]]',
+                        '_default': [],
+                    },
                     'incomplete_transcription_events': 'overwrite[divide_share[array[integer[64]]]]',
                 },
             },

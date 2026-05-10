@@ -7,6 +7,7 @@ Cell Division
 from typing import Any, Dict
 
 import binascii
+import os
 import numpy as np
 from ecoli.library.bigraph_bridge import BigraphProcess as Process, BigraphStep as Step
 
@@ -292,7 +293,8 @@ class CompositeDivision(Division):
     def inputs(self):
         # Same default seeding for the input side so the read sees the
         # configured threshold, not None, when no upstream write has
-        # happened yet.
+        # happened yet. The reset semantics live on the outputs side
+        # (the divider), not here.
         threshold = self.parameters.get("division_threshold")
         return {
             'division_variable': 'union[boolean,float]',
@@ -327,13 +329,24 @@ class CompositeDivision(Division):
     def update(self, states, interval=None):
         if states["division_threshold"] == "mass_distribution":
             current_media_id = states["media_id"]
-            return {
-                "division_threshold": (
-                    states["division_variable"]
-                    + self.dry_mass_inc_dict[current_media_id].asNumber(units.fg)
-                    * self.division_mass_multiplier
-                )
-            }
+            new_threshold = (
+                states["division_variable"]
+                + self.dry_mass_inc_dict[current_media_id].asNumber(units.fg)
+                * self.division_mass_multiplier
+            )
+            # DEBUG: print the anchor when the threshold first
+            # converts from "mass_distribution" string to a float.
+            # Compare with v1's parquet cell_mass at the same tick.
+            if os.environ.get('VECOLI_DEBUG_DIVISION'):
+                import sys as _sys
+                print(f"[div-debug] agent={self.agent_id} "
+                      f"seed={self.parameters['seed']} "
+                      f"anchor_mass={states['division_variable']:.10f} "
+                      f"dry_mass_inc={self.dry_mass_inc_dict[current_media_id].asNumber(units.fg):.10f} "
+                      f"multiplier={self.division_mass_multiplier:.10f} "
+                      f"threshold={new_threshold:.10f}",
+                      file=_sys.stderr, flush=True)
+            return {"division_threshold": new_threshold}
 
         division_variable = states["division_variable"]
         if (division_variable >= states["division_threshold"]) and (

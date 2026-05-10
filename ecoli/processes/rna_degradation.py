@@ -121,9 +121,18 @@ class RnaDegradation(PartitionedProcess):
             'RNAs': RNA_ARRAY,
             'listeners': {
                 'rna_degradation_listener': {
-                    'count_rna_degraded': 'overwrite[divide_share[array[integer[64]]]]',
+                    # _default mirrors v1 listener_schema (lines ~263+
+                    # in this file's ports_schema): zeros sized by
+                    # all_rna_ids / cistron_ids respectively.
+                    'count_rna_degraded': {
+                        '_type': 'overwrite[divide_share[array[integer[64]]]]',
+                        '_default': [0] * len(self.all_rna_ids),
+                    },
                     'nucleotides_from_degradation': 'overwrite[divide_share[integer]]{0}',
-                    'count_RNA_degraded_per_cistron': 'overwrite[divide_share[array[integer[64]]]]',
+                    'count_RNA_degraded_per_cistron': {
+                        '_type': 'overwrite[divide_share[array[integer[64]]]]',
+                        '_default': [0] * len(self.cistron_ids),
+                    },
                     'fraction_active_endornases': 'overwrite[divide_share[float]]{0.0}',
                     'diff_relative_first_order_decay': 'overwrite[divide_share[float]]{0.0}',
                     'fract_endo_rrna_counts': 'overwrite[divide_share[float]]',

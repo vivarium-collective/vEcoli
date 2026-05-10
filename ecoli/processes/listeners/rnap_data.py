@@ -72,11 +72,30 @@ class RnapData(Step):
             'listeners': {
                 'rnap_data': {
                     'rna_init_event_per_cistron': f'overwrite[array[{self.n_cistrons},integer[64]]]',
-                    'active_rnap_coordinates': 'overwrite[divide_share[array[integer[64]]]]',
-                    'active_rnap_domain_indexes': 'overwrite[divide_share[array[integer]]]',
-                    'active_rnap_unique_indexes': 'overwrite[divide_share[array[integer[64]]]]',
-                    'active_rnap_on_stable_RNA_indexes': 'overwrite[divide_share[array[integer[64]]]]',
-                    'active_rnap_n_bound_ribosomes': 'overwrite[divide_share[array[integer[64]]]]',
+                    # Variable-length per-active-RNAP arrays. v1
+                    # listener_schema default is [] (lines ~101+ in
+                    # this file's ports_schema). v2's bare array[T]
+                    # default is [0] which diverges at t=0.
+                    'active_rnap_coordinates': {
+                        '_type': 'overwrite[divide_share[array[integer[64]]]]',
+                        '_default': [],
+                    },
+                    'active_rnap_domain_indexes': {
+                        '_type': 'overwrite[divide_share[array[integer]]]',
+                        '_default': [],
+                    },
+                    'active_rnap_unique_indexes': {
+                        '_type': 'overwrite[divide_share[array[integer[64]]]]',
+                        '_default': [],
+                    },
+                    'active_rnap_on_stable_RNA_indexes': {
+                        '_type': 'overwrite[divide_share[array[integer[64]]]]',
+                        '_default': [],
+                    },
+                    'active_rnap_n_bound_ribosomes': {
+                        '_type': 'overwrite[divide_share[array[integer[64]]]]',
+                        '_default': [],
+                    },
                 },
             },
             'next_update_time': 'overwrite[divide_share[float]]',

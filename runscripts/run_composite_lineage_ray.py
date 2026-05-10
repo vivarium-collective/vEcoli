@@ -137,7 +137,7 @@ class LineageActor:
         self._sim_data_path = sim_data_path
 
     def run_lineage(self, config_path, out_dir, out_uri, lineage_seed,
-                    generations, max_duration):
+                    generations, max_duration, experiment_id=None):
         """Run a full N-generation lineage for one ``lineage_seed``."""
         # Polars on every cell for safety (oversubscription on
         # multi-actor boxes).
@@ -152,6 +152,8 @@ class LineageActor:
         sim.config['agent_id'] = '0'
         sim.config['generations'] = generations
         sim.config['max_duration'] = max_duration
+        if experiment_id:
+            sim.config['experiment_id'] = experiment_id
         # Prefer out_uri (cloud) when set; ParquetEmitter routes via
         # fsspec. Falls back to local out_dir for tests.
         if out_uri:
@@ -182,6 +184,10 @@ def main():
     parser.add_argument('--ray_address', default=None,
                         help='Existing Ray cluster address (default: '
                              'spawn local). E.g. ray://head:10001 or "auto"')
+    parser.add_argument('--experiment-id', dest='experiment_id', default=None,
+                        help='Override config experiment_id. Used by '
+                             'vecoli_aws.sh to inject auto-generated unique '
+                             'IDs per launch.')
     args = parser.parse_args()
 
     # Read every other knob from the config (with inherited parents
@@ -190,6 +196,8 @@ def main():
     with open(args.config) as f:
         cfg = json.load(f)
     cfg = _resolve_inherited_config(args.config, cfg)
+    if args.experiment_id:
+        cfg['experiment_id'] = args.experiment_id
 
     sim_data_path = cfg.get('sim_data_path')
     if not sim_data_path:
@@ -239,7 +247,7 @@ def main():
     futures = [
         actor.run_lineage.remote(
             config_abs, out_dir_abs, out_uri, seed,
-            generations, max_duration)
+            generations, max_duration, args.experiment_id)
         for actor, seed in zip(actors, seeds)
     ]
 

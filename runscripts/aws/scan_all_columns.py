@@ -74,9 +74,102 @@ def col_status(a, b):
             for i, (x, y) in enumerate(zip(a, b)):
                 eq = True
                 if isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
-                    eq = x.shape == y.shape and np.array_equal(x, y)
+                    if x.shape != y.shape:
+                        eq = False
+                    elif (x.dtype == object and len(x) > 0
+                          and isinstance(x[0], np.ndarray)):
+                        # Object-array-of-ndarrays (parquet 2-D listener
+                        # emit, e.g. n_bound_TF_per_TU = (3277, 23)).
+                        # np.array_equal can't traverse this; stack
+                        # into a true 2-D scalar array first.
+                        try:
+                            ax = np.stack(x.tolist())
+                            ay = np.stack(y.tolist())
+                            eq = (ax.shape == ay.shape
+                                  and np.array_equal(
+                                      ax, ay,
+                                      equal_nan=(ax.dtype.kind == 'f')))
+                        except Exception:
+                            # Fall through to per-element compare on
+                            # ragged-shape object arrays
+                            eq = True
+                            for xi, yi in zip(x, y):
+                                if (isinstance(xi, np.ndarray)
+                                        and isinstance(yi, np.ndarray)
+                                        and xi.shape == yi.shape
+                                        and np.array_equal(xi, yi)):
+                                    continue
+                                eq = False; break
+                    else:
+                        # NaN-aware for float arrays.
+                        eq = np.array_equal(
+                            x, y, equal_nan=(x.dtype.kind == 'f'))
                 elif isinstance(x, list) and isinstance(y, list):
-                    eq = len(x) == len(y) and not any(xi != yi for xi, yi in zip(x, y))
+                    # Recurse via numpy. Handle three nested-list shapes:
+                    #   (a) flat list of scalars  → np.asarray → 1-D
+                    #       array of int/float/bool — kind in 'iufb'.
+                    #   (b) uniform list-of-lists → np.asarray → 2-D
+                    #       array of scalars — same kind check.
+                    #   (c) list-of-ndarrays (parquet sometimes
+                    #       deserializes 2-D listener emits this way)
+                    #       → np.asarray gives a 1-D OBJECT array of
+                    #       inner ndarrays. np.stack lifts those into
+                    #       a proper 2-D scalar array.
+                    try:
+                        ax = np.asarray(x)
+                        ay = np.asarray(y)
+                        if (ax.dtype == object
+                                and len(x) > 0
+                                and isinstance(x[0], np.ndarray)):
+                            ax = np.stack(x)
+                            ay = np.stack(y)
+                        if ax.shape != ay.shape:
+                            eq = False
+                        else:
+                            kind = ax.dtype.kind if ax.dtype != object else 'O'
+                            if kind == 'f':
+                                eq = np.array_equal(ax, ay, equal_nan=True)
+                            elif kind in ('i', 'u', 'b'):
+                                eq = np.array_equal(ax, ay)
+                            else:
+                                # True ragged / opaque object arrays
+                                eq = True
+                                for xi, yi in zip(x, y):
+                                    if xi is yi:
+                                        continue
+                                    try:
+                                        same = (isinstance(xi, np.ndarray)
+                                                and isinstance(yi, np.ndarray)
+                                                and xi.shape == yi.shape
+                                                and np.array_equal(xi, yi))
+                                    except Exception:
+                                        same = False
+                                    if same:
+                                        continue
+                                    if xi == yi:
+                                        continue
+                                    if (isinstance(xi, float)
+                                            and isinstance(yi, float)
+                                            and math.isnan(xi)
+                                            and math.isnan(yi)):
+                                        continue
+                                    eq = False; break
+                    except Exception:
+                        # Per-element NaN-aware fallback (was the
+                        # original 1-D path)
+                        if len(x) != len(y):
+                            eq = False
+                        else:
+                            eq = True
+                            for xi, yi in zip(x, y):
+                                if xi == yi:
+                                    continue
+                                if (isinstance(xi, float)
+                                        and isinstance(yi, float)
+                                        and math.isnan(xi)
+                                        and math.isnan(yi)):
+                                    continue
+                                eq = False; break
                 else:
                     eq = (x == y) or (
                         isinstance(x, float) and isinstance(y, float)

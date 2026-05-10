@@ -191,7 +191,10 @@ class Metabolism(Step):
                 },
                 'enzyme_kinetics': {
                     # Counts→molar conversion (mmol/L = mM)
-                    'counts_to_molar': {'_type': 'overwrite[divide_share[float[mM]]]', '_default': 0.0},
+                    # v1 listener_schema default is 1.0 (line ~470 in
+                    # this file's ports_schema). Match it so v2's t=0
+                    # pre-tick emit shows the same value.
+                    'counts_to_molar': {'_type': 'overwrite[divide_share[float[mM]]]', '_default': 1.0},
                     # Counts (dimensionless)
                     'metabolite_counts_init': 'overwrite[divide_share[array[integer[64]]]]',
                     'metabolite_counts_final': 'overwrite[divide_share[array[integer[64]]]]',

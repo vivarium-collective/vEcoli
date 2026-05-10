@@ -465,20 +465,27 @@ def _strip_v2_edges(d):
 
 
 def _v2_daughter_payload(agent_state):
-    """Prepare a v2 cell state for JSON serialization.
+    """Prepare a v2 cell state for in-memory daughter handoff (and
+    JSON serialization for nextflow).
 
-    Matches v1's ``prepare_save_state`` (drop ``process`` and
-    ``allocator_rng``, add bulk/unique dtype metadata) plus v2-specific
-    edge stripping. Everything else v1 ships, v2 ships — listeners,
-    boundary, process_state, allocate, request, next_update_time, etc.
+    **Mirrors v1's ``prepare_save_state`` exactly.** v1 ships
+    everything from ``state.get_value(condition=not_a_process)``
+    minus two unserializable keys (``process``, ``allocator_rng``)
+    plus dtype metadata. v2 does the same, with v2-specific edge
+    stripping (vivarium stores processes in a separate registry;
+    v2 keeps them as state nodes with ``address`` + ``instance``
+    after realize, so we strip those).
+
+    Don't add per-key resets here — that's whack-a-mole. If a
+    listener / process_state / accumulator diverges from v1, the
+    fix belongs at the schema level (divide_reset on the type) or
+    in the relevant process's state semantics, not as an ad-hoc
+    drop in this function. The job here is "ship the same thing
+    v1 ships".
     """
-    from ecoli.experiments.ecoli_master_sim import prepare_save_state
-
     _strip_v2_edges(agent_state)
     agent_state.pop('process', None)
     agent_state.pop('allocator_rng', None)
-    # v1 dtype metadata (same as prepare_save_state but resilient to
-    # already-stripped fields).
     if 'bulk' in agent_state and hasattr(agent_state['bulk'], 'dtype'):
         agent_state['bulk_dtypes'] = str(agent_state['bulk'].dtype)
     if 'unique' in agent_state and isinstance(agent_state['unique'], dict):

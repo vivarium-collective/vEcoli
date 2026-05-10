@@ -74,16 +74,32 @@ class Allocator(Step):
         }
 
     def outputs(self):
+        # NOTE: v1 PARITY HACK — the ``listeners.atp.*`` ports are
+        # intentionally NOT declared here (even though
+        # ``next_update`` does return values for them). v1's
+        # ``allocator_topology`` in ``ecoli_composite.py:126`` only
+        # wires ``request``/``allocate``/``bulk`` — the allocator's
+        # listener output goes to a phantom port and is silently
+        # dropped. As a result v1's parquet emits all-zeros for
+        # ``listeners.atp.atp_requested`` and
+        # ``listeners.atp.atp_allocated_initial`` (the listener
+        # stays at its ``listener_schema`` default).
+        #
+        # v2 composite auto-wires from ``outputs()`` declarations,
+        # so declaring these here would actually persist the
+        # writes — and break parity with v1 in every tick.
+        # Dropping them mirrors v1's broken behavior.
+        #
+        # **TODO (v1 fix)**: the right fix is to add
+        # ``"listeners": ("listeners",)`` to ``allocator_topology``
+        # in ``ecoli_composite.py`` so v1 ALSO emits the real ATP
+        # request/allocation per tick. Once that's in and a
+        # full-column parity check confirms v1 emits real values,
+        # restore the listener declaration here and drop this
+        # comment. Until then, parity wins.
         return {
             'allocate': 'overwrite[divide_share[map[map[overwrite[array[integer[64]]]]]]]',
             'request': 'overwrite[divide_share[map[map[list[integer]]]]]',
-            'listeners': {
-                'atp': {
-                    # length n_processes; written as numpy arrays
-                    'atp_requested': f'overwrite[array[{self.n_processes},integer[64]]]',
-                    'atp_allocated_initial': f'overwrite[array[{self.n_processes},integer[64]]]',
-                },
-            },
         }
 
     # Constructor
