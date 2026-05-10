@@ -812,7 +812,7 @@ ns_head_start() {
   aws_cli ec2 wait instance-running --instance-ids "$id"
   local dns; dns=$(get_running_dns)
   echo "Running. New public DNS: $dns"
-  echo "If your laptop's IP changed: $(basename "$0") head refresh-sg"
+  echo "If your laptop's IP changed: $(basename "$0") head refresh-sg $STATE_KEY"
 }
 ns_head_refresh_sg() {
   local sg_id ip
@@ -1150,8 +1150,9 @@ ns_image_build() {
   if (( needs_cross == 1 )); then
     echo "WARNING: cross-building $tag — host=${host_arch} target=${platform}." >&2
     echo "  This is slow (5–15 min via QEMU). For native ARM64 batch builds," >&2
-    echo "  prefer ``run launch <alias> --build`` which builds on the head node" >&2
-    echo "  (t4g.large = ARM64) — or run head ssh + build-and-push-ecr.sh there." >&2
+    echo "  prefer ``$(basename "$0") run launch $STATE_KEY --build`` which" >&2
+    echo "  builds on the head node (t4g.large = ARM64), or ssh into the head" >&2
+    echo "  via ``$(basename "$0") head ssh $STATE_KEY`` and build there." >&2
   fi
 
   echo "Building Docker image for alias '$STATE_KEY': $tag (local=$local_build, platform=${platform:-host})..."
@@ -1255,7 +1256,8 @@ ns_run_launch() {
 
   local dns; dns=$(get_running_dns)
   if [[ -z "$dns" || "$dns" == "None" ]]; then
-    echo "no running head ($HEAD_NAME) — run ``head setup $STATE_KEY`` first" >&2
+    echo "no running head ($HEAD_NAME)." >&2
+    echo "Run: $(basename "$0") head setup $STATE_KEY" >&2
     return 1
   fi
 
@@ -1281,6 +1283,15 @@ ns_run_launch() {
   fi
 
   _run_bootstrap_on_head "$extra_env"
+
+  local cli; cli=$(basename "$0")
+  echo
+  echo "Launched alias=$STATE_KEY  session=$TMUX_SESSION  exp_id=$EXP_ID"
+  echo "Next:"
+  echo "  $cli run tail   $STATE_KEY    # follow live tmux log"
+  echo "  $cli run status $STATE_KEY    # head + tmux + Batch + S3 dashboard"
+  echo "  $cli run log    $STATE_KEY    # driver + cluster log (post-run)"
+  echo "  $cli run cancel $STATE_KEY    # kill tmux + Batch jobs"
 }
 ns_run_resume() { ns_run_launch --resume "$@"; }
 
@@ -1454,7 +1465,8 @@ ns_run_status() {
   # 6. Tail-on-crash ---------------------------------------------------------
   if [[ -n "${dns:-}" && "${state:-}" == "running" && "$tmux_alive" -eq 0 ]]; then
     echo
-    echo "  Tmux not running but head is. Last 20 lines of ~/${TMUX_SESSION}_workflow.log:"
+    echo "  Tmux dead, head alive — last 20 driver-log lines below."
+    echo "  Full diagnostics: $(basename "$0") run log $STATE_KEY"
     ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no "ec2-user@$dns" \
       "F=\$HOME/${TMUX_SESSION}_workflow.log; \
        [[ -f \$F ]] || F=\$HOME/v2_workflow.log; \
@@ -1662,7 +1674,7 @@ ns_run_log() {
       else
         echo
         echo "(No local trace--${EXP_ID}--*.csv yet — run"
-        echo " 'compare report' to fetch it from S3 first.)"
+        echo " ``$(basename "$0") compare report`` to fetch it from S3 first.)"
       fi
       ;;
   esac
@@ -1817,6 +1829,202 @@ ns_compare_gens() {
     echo "Seeds where v2 fell short of v1 are parity-divergence candidates."
   fi
 }
+
+# Resolve <alias> → echo "<exp_id>\t<bucket>\t<prefix>\t<base>\t<config_rel>".
+# Doesn't touch globals (so it's safe to call for two aliases in one
+# function). Sidecar value used as exp_id when present, else config base.
+_resolve_alias_coords() {
+  local key="$1"
+  local cfg; cfg=$(_alias_to_config "$key")
+  if [[ -z "$cfg" ]]; then
+    echo "Unknown alias: $key" >&2; return 1
+  fi
+  local cfg_abs="$REPO_ROOT/$cfg"
+  if [[ ! -f "$cfg_abs" ]]; then
+    echo "Missing config: $cfg_abs" >&2; return 1
+  fi
+  local base out_uri bucket prefix exp_id
+  base=$(python3 -c "import json; print(json.load(open('$cfg_abs'))['experiment_id'])")
+  out_uri=$(python3 -c "import json; print(json.load(open('$cfg_abs'))['emitter_arg']['out_uri'])")
+  bucket="${out_uri#s3://}"; bucket="${bucket%%/*}"
+  prefix="${out_uri#s3://$bucket/}"
+  exp_id="$base"
+  local sidecar="$STATE_DIR/${key}.experiment-id"
+  if [[ -f "$sidecar" ]]; then
+    exp_id=$(<"$sidecar"); exp_id="${exp_id//$'\n'/}"
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\n' "$exp_id" "$bucket" "$prefix" "$base" "$cfg"
+}
+
+# Per-gen wall comparison between two aliases via S3 file-mtime proxy.
+# The LAST file written under .../lineage_seed=N/generation=M/ approximates
+# gen finish; gen wall = max(mtime_M) - max(mtime_{M-1}) per seed (with
+# launch_time from the EXP_ID timestamp suffix as the gen-1 baseline).
+# See memory:perf_mp_vs_nf_2026_05_10 for the methodology.
+ns_compare_time() {
+  local a="${1:-}" b="${2:-}"
+  if [[ -z "$a" || "$a" == --* || -z "$b" || "$b" == --* ]]; then
+    echo "usage: $(basename "$0") compare time <alias_a> <alias_b> [--gens 1,2,...] [--until N]" >&2
+    return 1
+  fi
+  shift 2
+  local gens_csv="" until_n=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --gens|--generations) gens_csv="$2"; shift 2 ;;
+      --until)              until_n="$2";  shift 2 ;;
+      *) echo "compare time: unknown arg '$1'" >&2; return 1 ;;
+    esac
+  done
+  if [[ -n "$until_n" ]]; then
+    if [[ -z "$gens_csv" ]]; then
+      gens_csv=$(seq -s, 1 "$until_n")
+    else
+      echo "compare time: --gens and --until are mutually exclusive" >&2; return 1
+    fi
+  fi
+
+  local a_coords b_coords
+  a_coords=$(_resolve_alias_coords "$a") || return 1
+  b_coords=$(_resolve_alias_coords "$b") || return 1
+  local a_exp a_bucket a_prefix
+  IFS=$'\t' read -r a_exp a_bucket a_prefix _ _ <<<"$a_coords"
+  local b_exp b_bucket b_prefix
+  IFS=$'\t' read -r b_exp b_bucket b_prefix _ _ <<<"$b_coords"
+
+  local tmpdir; tmpdir=$(mktemp -d)
+  trap 'rm -rf "$tmpdir"' RETURN
+
+  # out_uri = s3://<bucket>/<prefix-incl-base>; after auto-rotation the
+  # actual files live under <prefix>/<full_exp_id>/history/...
+  echo "Listing S3 history for $a (exp=$a_exp)..."
+  aws_cli s3 ls --recursive "s3://$a_bucket/$a_prefix/$a_exp/history/" \
+    > "$tmpdir/a.txt" 2>/dev/null || true
+  echo "Listing S3 history for $b (exp=$b_exp)..."
+  aws_cli s3 ls --recursive "s3://$b_bucket/$b_prefix/$b_exp/history/" \
+    > "$tmpdir/b.txt" 2>/dev/null || true
+
+  if [[ ! -s "$tmpdir/a.txt" && ! -s "$tmpdir/b.txt" ]]; then
+    echo "No history under either S3 prefix — wrong bucket/prefix?" >&2
+    return 1
+  fi
+
+  python3 - "$a" "$b" "$tmpdir/a.txt" "$tmpdir/b.txt" "$a_exp" "$b_exp" "$gens_csv" <<'PY'
+import sys, re, datetime, statistics
+
+a_label, b_label, a_path, b_path, a_exp, b_exp, gens_csv = sys.argv[1:8]
+gen_filter = set()
+if gens_csv:
+    gen_filter = set(int(x) for x in gens_csv.split(",") if x.strip())
+
+PAT = re.compile(r"lineage_seed=(\d+)/generation=(\d+)")
+
+def gen_finish(path):
+    """Returns {(seed, gen): max_epoch} from `aws s3 ls --recursive` output."""
+    finish = {}
+    try:
+        f = open(path)
+    except FileNotFoundError:
+        return finish
+    with f:
+        for line in f:
+            parts = line.split(None, 3)
+            if len(parts) < 4:
+                continue
+            date_s, time_s, _size, key = parts
+            m = PAT.search(key)
+            if not m:
+                continue
+            seed, gen = int(m.group(1)), int(m.group(2))
+            try:
+                # aws s3 ls prints in LOCAL time; naive .timestamp() converts
+                # local→epoch correctly.
+                e = datetime.datetime.strptime(
+                    f"{date_s} {time_s}", "%Y-%m-%d %H:%M:%S"
+                ).timestamp()
+            except ValueError:
+                continue
+            cur = finish.get((seed, gen), 0)
+            if e > cur:
+                finish[(seed, gen)] = e
+    return finish
+
+def parse_launch(exp_id):
+    """EXP_ID's trailing _YYYYMMDD-HHMMSS is the UTC launch stamp."""
+    m = re.search(r"_(\d{8})-(\d{6})$", exp_id)
+    if not m:
+        return None
+    d, t = m.group(1), m.group(2)
+    iso = f"{d[:4]}-{d[4:6]}-{d[6:]}T{t[:2]}:{t[2:4]}:{t[4:]}+00:00"
+    return datetime.datetime.fromisoformat(iso).timestamp()
+
+def per_gen_walls(finish, launch_epoch):
+    """Returns {seed: {gen: wall_seconds}}. Uses launch as gen-1 baseline."""
+    by_seed = {}
+    for (s, g), e in finish.items():
+        by_seed.setdefault(s, {})[g] = e
+    walls = {}
+    for s, gens in by_seed.items():
+        prev = launch_epoch if launch_epoch else min(gens.values())
+        sw = {}
+        for g in sorted(gens):
+            sw[g] = max(0.0, gens[g] - prev)
+            prev = gens[g]
+        walls[s] = sw
+    return walls
+
+def filter_gens(walls, keep):
+    if not keep:
+        return walls
+    return {s: {g: v for g, v in gw.items() if g in keep}
+            for s, gw in walls.items()}
+
+a_walls = filter_gens(per_gen_walls(gen_finish(a_path), parse_launch(a_exp)),
+                      gen_filter)
+b_walls = filter_gens(per_gen_walls(gen_finish(b_path), parse_launch(b_exp)),
+                      gen_filter)
+
+all_gens = set()
+for sw in (a_walls, b_walls):
+    for s in sw:
+        all_gens.update(sw[s].keys())
+sorted_gens = sorted(all_gens)
+if not sorted_gens:
+    print("No matching generations found (filter too narrow?).")
+    sys.exit(1)
+
+def fmt(s):
+    return "    -" if s is None else f"{s/60:5.1f}"
+
+def print_table(label, exp_id, walls):
+    seeds = sorted(walls.keys())
+    print(f"\n{label}  (exp={exp_id})")
+    if not seeds:
+        print("  (no data)")
+        return
+    print("  seed " + "  ".join(f"  g{g:<3}" for g in sorted_gens))
+    for s in seeds:
+        row = "  ".join(fmt(walls[s].get(g)) for g in sorted_gens)
+        print(f"  {s:>4}  {row}")
+
+print_table(a_label, a_exp, a_walls)
+print_table(b_label, b_exp, b_walls)
+
+print("\nPer-gen median wall (min) and ratio:")
+print(f"  {'gen':>4}  {a_label:>10}  {b_label:>10}  {'ratio':>7}")
+for g in sorted_gens:
+    a_vals = [w[g] for w in a_walls.values() if g in w]
+    b_vals = [w[g] for w in b_walls.values() if g in w]
+    a_med = statistics.median(a_vals) if a_vals else None
+    b_med = statistics.median(b_vals) if b_vals else None
+    if a_med is not None and b_med is not None and b_med > 0:
+        ratio = a_med / b_med
+        print(f"  {g:>4}  {a_med/60:>10.1f}  {b_med/60:>10.1f}  {ratio:>6.2f}x")
+    else:
+        print(f"  {g:>4}  {fmt(a_med):>10}  {fmt(b_med):>10}  {'—':>7}")
+PY
+}
+
 ns_compare_full_parity() {
   # Run runscripts/aws/compute_full_parity.py on the head node —
   # diffs EVERY parquet column (not just bulk) for v1 vs v2 across
@@ -1996,168 +2204,250 @@ ns_compare_export() {
   esac
 }
 
-# --- 10. Help / dispatch ----------------------------------------------------
-cmd_help() {
+
+# --- 10. Help -------------------------------------------------------------
+# Top-level help — namespaces, alias model, env vars. Per-namespace help
+# (``<ns> help``) shows the subcommands for just that namespace.
+_help_top() {
   cat <<EOF
-Usage: $(basename "$0") <namespace> <subcmd> <alias> [args]
-       $(basename "$0") help
-
-Aliases are dynamic. Built-in defaults (auto-seeded on first use):
-  v1       configs/comparison_10s_16g_v1_aws.json     nextflow_batch
-  v2       configs/comparison_10s_16g_v2_aws.json     nextflow_batch
-  mp       configs/comparison_10s_16g_v2_mp_aws.json  mp_single_node
-  ray      configs/comparison_10s_16g_v2_ray_aws.json ray_cluster
-  compare  configs/compare_head.json                  comparison_head
-
-Add more with ``experiment new <alias> <config>``. The registry lives at
-.vecoli-aws-state/aliases.tsv (gitignored). ``experiment list`` prints
-the current map.
-
-Each alias is independent: its own config, head (Name tag
-``vecoli-<alias>-head``), tmux session (``vecoli-<alias>``), and
-experiment_id sidecar (``.vecoli-aws-state/<alias>.experiment-id``).
-``run launch <alias>`` rotates the sidecar id; downstream subcmds read
-it until the next launch.
+Usage: $(basename "$0") <namespace> <subcmd> [<alias>] [args]
+       $(basename "$0") <namespace> help   # subcommand details
+       $(basename "$0") help               # this screen
 
 Namespaces:
-  experiment <subcmd>             alias lifecycle (no alias arg on `new`/`list`)
-    new <alias> <config> [<method>] [-f]
-                                  register alias→config (method optional;
-                                  can be set later via `head setup`)
-    list                          show registered aliases + configs + methods
-    end <alias> [--terminate-head] [--rm]
-                                  cancel running work + clear sidecar;
-                                  --terminate-head also kills the EC2,
-                                  --rm also unregisters the alias
-    rm <alias> [-f]               unregister (refuses if head still running)
+  experiment   alias lifecycle (register, list, end, remove)
+  head         EC2 head-node lifecycle (setup, ssh, sync, terminate)
+  image        Docker image lifecycle (build, push, pull, list)
+  run          workflow execution (launch, status, tail, log, cancel)
+  cache        Nextflow .nextflow/ S3 cache (push, pull, ls, rm)
+  compare      v1↔v2 output analysis (parity, gens, report, export)
 
-  head <subcmd> <alias>           EC2 head-node lifecycle
-    setup [<method>]   provision new head; method is batch | multiprocessing
-                       | ray. Required on first setup of a new alias;
-                       optional after (registry remembers). Picks the
-                       bootstrap script + default instance type.
-    setup-ray-iam      one-time IAM grant for Ray cluster mode (run from
-                       laptop with admin perms; idempotent)
-    terminate-all [--cancel-jobs]
-                       NUKE every EC2 tagged vecoli-* (confirmed prompt).
-                       --cancel-jobs ALSO terminates active Batch jobs
-                       across all queues in the alias registry (jobs
-                       outlive their heads otherwise; they run on
-                       Batch-managed compute and keep billing).
-                       Does NOT touch: Batch queue/compute env, ECR
-                       images, S3 outputs, sidecars, alias registry.
-    list             show every non-terminated EC2 tagged with the
-                     alias's HEAD_NAME (surfaces dupes)
-    dedupe           keep the oldest running head, terminate the rest
-    sync [-c]        rsync local vEcoli repo → alias's head; -c also
-                     docker-cp's host code into the running vecoli_ray
-                     container (skip image rebuild for head-side code
-                     changes)
-    rebuild          terminate + setup
-    reboot | stop | start | terminate
-    refresh-sg       re-add current public IP to SSH SG
-    dns | ssh [cmd] | attach
+Aliases bind <name> → (config, method, image_tag) in
+.vecoli-aws-state/aliases.tsv. Built-in seeds (auto-written on first use):
 
-  image <subcmd> <alias>      Docker image lifecycle (image_tag is per-alias)
-    build [--tag TAG] [--platform PLATFORM] [--cloud]
-                          build image for <alias> using its registered
-                          image_tag (4th col of aliases.tsv). --tag
-                          overrides for this build only. Auto-infers
-                          platform from tag (-arm64 / -amd64) and
-                          cross-builds via buildx if host arch differs.
-    push  [--tag TAG]     ECR login + tag + push for <alias>'s image
-    pull  [--tag TAG]     pull <alias>'s image from ECR + retag locally
-    list  [REPO]          list all ECR repository images (no alias)
+  v1 v2     comparison_*_aws.json          batch           Nextflow on Batch
+  mp        comparison_*_mp_aws.json       multiprocessing single-node
+  ray       comparison_*_ray_aws.json      ray             EC2 cluster via SSM
+  compare   compare_head.json              comparison      v1↔v2 analysis head
 
-  run <subcmd> <alias>        workflow execution
-    launch [--resume] [--build] [--from-origin]
-                          assign new experiment_id, scp bootstrap,
-                          start workflow in tmux. ``--resume`` reuses
-                          the variant's sidecar experiment_id (must
-                          have been launched once before).
-                          Defaults:
-                            - skip in-workflow image rebuild (image
-                              namespace owns build/push). Use ``--build``
-                              to let workflow.py rebuild+push.
-                            - rsync local working tree → head and tell
-                              bootstrap to skip ``git reset``. Lets
-                              local edits run without commit + push.
-                              Use ``--from-origin`` for clean / production
-                              runs that pull origin/composite instead.
-    resume                shorthand for ``launch --resume``
-    id                    print the active experiment_id for this alias
-                          (sidecar value, or BASE if no run yet)
-    cancel                kill tmux + terminate Batch jobs (if any)
-    status                head + tmux + Batch (if any) + last S3 writes
-    jobs [STATUS]         list Batch jobs (Nextflow only)
-    tail                  tail tmux log on head (live, follows)
-    log [-n N]            print driver log + variant-specific
-                          experiment log (S3 lineage_ray.log for
-                          Ray, trace CSV for nextflow). Use after a
-                          run finishes/fails to diagnose without
-                          attaching to tmux.
+Each alias is independent: own EC2 (Name tag vecoli-<alias>-head), tmux
+session (vecoli-<alias>), and experiment_id sidecar
+(.vecoli-aws-state/<alias>.experiment-id). ``run launch <alias>`` rotates
+the sidecar id; downstream subcmds read it.
 
-  cache <subcmd> <alias>      Nextflow .nextflow/ S3 cache (push|pull|ls|rm)
+Quick start (new alias myrun, batch method):
+  $(basename "$0") experiment new myrun configs/foo.json batch vecoli:my-arm64
+  $(basename "$0") head setup     myrun
+  $(basename "$0") image build    myrun
+  $(basename "$0") image push     myrun
+  $(basename "$0") run launch     myrun
+  $(basename "$0") run status     myrun
+  $(basename "$0") experiment end myrun --terminate-head --rm
 
-  compare <subcmd>            pairwise output analysis (defaults to ``compare``
-                              alias's head; override with VECOLI_AWS_CONFIG_VARIANT)
-    bootstrap             one-time setup on the comparison head: scp +
-                          run bootstrap_head_compare.sh (clone vEcoli,
-                          uv sync). Run AFTER ``head setup compare``.
-    parity [SEED] [GEN]   diff v1 vs v2 bulk at SEED/GEN (default 0/3)
-    full-parity           run compute_full_parity.py on head — every
-                          parquet column at every common timestep
-                          (NOT just bulk). Defaults v1-id/v2-id from
-                          .vecoli-aws-state/{v1,v2}.experiment-id
-                          sidecars. Args: --seeds 0,1 --gens 1,2
-                          --v1-id ID --v2-id ID
-    gens                  max gen reached per seed in v1 vs v2 sidecar
-                          (override with VECOLI_V1_ID / VECOLI_V2_ID env)
-    report [--gens 1,2] [--seeds 0,1] [--v1-id ID] [--v2-id ID]
-           [--extra-ids label=ID,...] [--no-history]
-                          fetch+render N-way markdown report. v1/v2/mp/
-                          ray IDs default to .vecoli-aws-state/<alias>.experiment-id
-                          sidecars (extras auto-discovered for any
-                          non-v1/v2/compare alias with a sidecar).
-    export [html|pdf]     convert report to single-file artifact
-
-Examples:
-  $(basename "$0") experiment new myrun configs/foo.json batch vecoli:my-tag-arm64
-  $(basename "$0") experiment list                          # show all aliases + methods + images
-  $(basename "$0") head setup myrun batch                   # first time: pin method
-  $(basename "$0") image build myrun                        # build image registered for myrun
-  $(basename "$0") image push  myrun                        # push to ECR
-  $(basename "$0") run launch myrun                         # rsync local, fresh exp_id
-  $(basename "$0") run tail myrun                           # follow myrun's log
-  $(basename "$0") run id myrun                             # active experiment_id
-  $(basename "$0") run launch myrun --from-origin           # pull origin instead of rsync
-  $(basename "$0") run launch myrun --build                 # rebuild image (on the head)
-  $(basename "$0") experiment end myrun --terminate-head --rm   # tear down + remove
-  $(basename "$0") head terminate-all --cancel-jobs         # full cleanup
-                                                            #   (jobs + heads;
-                                                            #    Batch queue stays)
-
-Env overrides (rarely needed; CLI args take precedence):
+Env overrides (rarely needed):
   VECOLI_AWS_PROFILE   AWS CLI profile (default: $PROFILE)
   VECOLI_AWS_REGION    AWS region      (default: $REGION)
-  VECOLI_AWS_CONFIG    config path     (used when no <alias> supplied)
   VECOLI_AWS_KEY       SSH key         (default: $KEY_FILE)
+  VECOLI_AWS_CONFIG    config path     (when no <alias> supplied)
   VECOLI_AWS_HEAD_NAME EC2 Name tag    (override alias-derived default)
   VECOLI_AWS_TMUX      tmux session    (override alias-derived default)
-  HEAD_INSTANCE_TYPE   override default for the active alias
-  SIM_DATA_S3_URI      S3 URI of pre-built simData.cPickle (skips parca on head)
-  IMAGE_URI            ECR URI for Ray cluster image (Ray alias only)
+  HEAD_INSTANCE_TYPE   instance size   (override alias-derived default)
+  SIM_DATA_S3_URI      S3 URI of pre-built simData.cPickle
+  IMAGE_URI            ECR URI for Ray cluster (ray alias only)
 
-To add a new execution mode (batch / mp / ray are built in):
-  1. New bootstrap: runscripts/aws/bootstrap_head_<mode>.sh
-  2. Add a case branch in _use_variant for the new aws.deploy_mode value.
-  3. Configs using that mode get picked up automatically.
+Add a new method:
+  1. New bootstrap script: runscripts/aws/bootstrap_head_<method>.sh
+  2. Add a case branch in _use_variant mapping the method to its bootstrap
+     and default instance type.
+  3. Register aliases that use it via ``experiment new <alias> <cfg> <method>``.
 EOF
 }
 
-# Variant-aware namespace dispatcher: consume optional variant token (first
-# non-flag arg after the subcmd), call _use_variant, then forward the rest
-# to the named function.
+_help_experiment() {
+  cat <<EOF
+Usage: $(basename "$0") experiment <subcmd> [args]
+
+  new <alias> <config> [<method>] [<image_tag>] [-f]
+                       register alias→config in .vecoli-aws-state/aliases.tsv.
+                       method:    batch | multiprocessing | ray | comparison
+                                  (optional; settable later via ``head setup``)
+                       image_tag: e.g. vecoli:my-arm64 (optional; settable later)
+                       -f:        overwrite an existing alias.
+  list                 show all registered aliases + methods + images +
+                       active experiment_id (sidecar) + config path.
+  end <alias> [--terminate-head] [--rm]
+                       soft-stop: cancel running work + clear sidecar.
+                       --terminate-head: also terminate the EC2 head.
+                       --rm: also unregister the alias.
+  rm <alias> [-f]      hard remove (refuses if alias still has a running head;
+                       -f overrides).
+  help                 this screen
+EOF
+}
+
+_help_head() {
+  cat <<EOF
+Usage: $(basename "$0") head <subcmd> <alias> [args]
+
+  setup <alias> [<method>]
+                       provision an EC2 head for the alias. method must be
+                       batch | multiprocessing | ray | comparison; required
+                       on first setup of a new alias, optional after (registry
+                       remembers). Picks bootstrap script + default instance
+                       type. Idempotent: starts a stopped head, reuses a
+                       running one.
+  setup-ray-iam <alias>
+                       one-time IAM grant for ray cluster mode (run from a
+                       box with admin perms; idempotent).
+  list <alias>         show every non-terminated EC2 with this alias's
+                       HEAD_NAME tag (surfaces dupes).
+  dedupe <alias>       keep oldest running head, terminate the rest.
+  sync <alias> [-c|--container]
+                       rsync local repo → ~/vEcoli on head (skips
+                       .git/.venv/out/__pycache__). -c also docker-cp's
+                       host code into the running vecoli_ray container.
+  rebuild <alias>      terminate + setup.
+  reboot <alias>       warm reboot (keeps EBS, keeps public IP).
+  stop   <alias>       halt (preserves EBS root volume; public IP changes).
+  start  <alias>       resume a stopped head.
+  terminate <alias>    permanent delete (EBS gone). Confirmed prompt.
+  refresh-sg <alias>   re-add current public IP to the SSH security group.
+  dns    <alias>       print the running head's public DNS.
+  ssh    <alias> [cmd] ssh into the head (executes cmd if provided).
+  attach <alias>       ssh + tmux attach to the alias's session.
+
+  terminate-all [--cancel-jobs]
+                       NUKE every EC2 tagged vecoli-* (no alias arg, confirmed).
+                       --cancel-jobs ALSO terminates active Batch jobs across
+                       every queue in the alias registry (jobs run on
+                       Batch-managed compute and outlive their heads).
+                       Does NOT touch: Batch queue, ECR images, S3 outputs,
+                       sidecars, alias registry.
+  help                 this screen
+EOF
+}
+
+_help_image() {
+  cat <<EOF
+Usage: $(basename "$0") image <subcmd> <alias> [args]
+
+  build <alias> [--tag TAG] [--platform PLATFORM] [--cloud]
+                       build Docker image for <alias> using its registered
+                       image_tag (4th col of aliases.tsv). --tag overrides
+                       the registry for this build only. Auto-infers platform
+                       from tag (-arm64 / -amd64) and cross-builds via
+                       ``docker buildx`` if host arch differs.
+  push <alias> [--tag TAG]
+                       ECR login + tag + push for <alias>'s image. Prints
+                       full ECR URI on success (auto-resolved by ``run launch``
+                       for ray).
+  pull <alias> [--tag TAG]
+                       pull <alias>'s image from ECR + retag locally.
+  list [REPO]          list ECR repository contents (no alias arg; default
+                       repository is ``vecoli``).
+  help                 this screen
+EOF
+}
+
+_help_run() {
+  cat <<EOF
+Usage: $(basename "$0") run <subcmd> <alias> [args]
+
+  launch <alias> [--resume] [--build] [--from-origin]
+                       rotate experiment_id sidecar, rsync local repo → head,
+                       start workflow in tmux. Defaults match the iteration
+                       loop:
+                         - skip in-workflow image rebuild (use ``image build/push``
+                           yourself; --build to opt back in).
+                         - rsync local working tree to head (skips
+                           .git/.venv/out/__pycache__) so local edits run
+                           without commit + push. --from-origin to clean-pull
+                           origin/composite instead.
+                       --resume reuses the last sidecar exp_id (must have
+                       launched once before).
+  resume <alias>       shorthand for ``launch --resume``.
+  id     <alias>       print the active experiment_id (sidecar value, or
+                       config base if no run yet).
+  cancel <alias>       kill tmux on head + terminate Batch jobs in the
+                       alias's queue.
+  status <alias>       coherent dashboard: head EC2 + tmux + Batch (scoped
+                       to active exp_id) + S3 object count + last write age.
+                       Tails the driver log if tmux died.
+  jobs   <alias> [STATUS]
+                       list Batch jobs in alias's queue (Nextflow only;
+                       default STATUS=RUNNING).
+  tail   <alias>       live-tail tmux log on head (sed-strips ANSI).
+  log    <alias> [-n N]
+                       print driver log + variant-specific cluster log
+                       (lineage_ray.log for ray; nextflow trace + failed-task
+                       CloudWatch streams for batch). Use after a run finishes
+                       or fails.
+  help                 this screen
+EOF
+}
+
+_help_cache() {
+  cat <<EOF
+Usage: $(basename "$0") cache <subcmd> <alias>
+
+S3-back the head's ~/vEcoli/.nextflow/ work directory under
+s3://<out_bucket>/_cache/<exp_id>/.nextflow/. Lets a fresh head pick up where
+a previous run left off (Nextflow only).
+
+  push <alias>   sync ~/.nextflow/ on head → S3 cache.
+  pull <alias>   sync S3 cache → ~/.nextflow/ on head.
+  ls   <alias>   list cached snapshot for the alias's active exp_id.
+  rm   <alias>   delete cached snapshot (confirmed).
+  help           this screen
+EOF
+}
+
+_help_compare() {
+  cat <<EOF
+Usage: $(basename "$0") compare <subcmd> [<alias>] [args]
+
+Pairwise output analysis between v1 and v2 runs. Defaults v1/v2/extras IDs from
+the per-alias sidecars (v1.experiment-id, v2.experiment-id, plus any other
+alias's sidecar for the N-way report). Runs on <alias>'s head; defaults to
+the ``compare`` alias (a dedicated comparison head — m7g.xlarge with 200 GB
+EBS for synced parquet).
+
+  bootstrap [<alias>]
+                       one-shot: scp + run bootstrap_head_compare.sh to
+                       install uv + clone vEcoli + uv sync. Run AFTER
+                       ``head setup compare``.
+  parity [<alias>] [SEED] [GEN]
+                       diff v1 vs v2 bulk at SEED/GEN (default 0/3).
+  full-parity [<alias>] [--seeds 0,1] [--gens 1,2] [--v1-id ID] [--v2-id ID]
+                       all-columns parity scan via compute_full_parity.py;
+                       writes out/full_parity__<v1>__<v2>.tsv{,.cols}.
+  gens [<alias>]       max generation reached per seed in v1 vs v2 (catches
+                       early-halt seeds parity scans miss).
+  time <alias_a> <alias_b> [--gens 1,2,...] [--until N]
+                       per-gen wall-time comparison via S3 file-mtime proxy.
+                       Two aliases positional (no default). --gens filters
+                       output to specific gens; --until N is shorthand for
+                       --gens 1,2,...,N. Prints per-seed tables + median
+                       ratio per gen (a/b).
+  report [<alias>] [--gens 1,2] [--seeds 0,1] [--v1-id ID] [--v2-id ID]
+         [--extra-ids label=ID,...] [--engine-cost N] [--out path]
+         [--no-history] [--no-fetch]
+                       fetch + render N-way markdown report. Extras
+                       auto-discovered from any alias sidecar (mp, ray, etc.).
+                       --no-fetch reuses out/<exp>/ already on head (fast
+                       iteration on report formatting).
+  export [<alias>] [html|pdf] [path/to/report.md]
+                       convert markdown report → single-file artifact via
+                       pandoc (+ weasyprint for pdf).
+  help                 this screen
+EOF
+}
+
+# --- 11. Dispatch ---------------------------------------------------------
+
+# Consume optional alias token at $1 (any non-flag positional), call
+# _use_variant, then forward the rest to <fn>. Used by every namespace
+# whose subcmds take an alias as their first positional.
 _dispatch_variant() {
   local fn="$1"; shift
   local v=""
@@ -2168,71 +2458,86 @@ _dispatch_variant() {
   "$fn" "$@"
 }
 
-# Top-level dispatch — namespace OR legacy alias.
+# Strict variant: consume $1 as alias only if it resolves in the registry
+# (or is a literal config path). Otherwise default to <default_alias>.
+# Used by ``compare`` whose subcmds also take positional args (seed/gen,
+# html/pdf) that mustn't be misread as aliases.
+_dispatch_with_default_alias() {
+  local fn="$1" default_alias="$2"; shift 2
+  local v="$default_alias"
+  case "${1:-}" in
+    -*|"") ;;
+    *)
+      local cfg; cfg=$(_alias_to_config "$1")
+      if [[ -n "$cfg" ]]; then v="$1"; shift; fi
+      ;;
+  esac
+  _use_variant "$v" || exit 1
+  "$fn" "$@"
+}
+
 cmd="${1:-help}"; shift || true
 case "$cmd" in
-  # Namespaces -------------------------------------------------------------
-  head)
-    sub="${1:-help}"; shift || true
-    case "$sub" in
-      setup)         _dispatch_variant ns_head_setup "$@" ;;
-      setup-ray-iam) _dispatch_variant ns_head_setup_ray_iam "$@" ;;
-      terminate)     _dispatch_variant ns_head_terminate "$@" ;;
-      terminate-all) ns_head_terminate_all "$@" ;;
-      list)          _dispatch_variant ns_head_list "$@" ;;
-      dedupe)        _dispatch_variant ns_head_dedupe "$@" ;;
-      sync)          _dispatch_variant ns_head_sync "$@" ;;
-      rebuild)       _dispatch_variant ns_head_rebuild "$@" ;;
-      reboot)        _dispatch_variant ns_head_reboot "$@" ;;
-      stop)          _dispatch_variant ns_head_stop "$@" ;;
-      start)         _dispatch_variant ns_head_start "$@" ;;
-      refresh-sg)    _dispatch_variant ns_head_refresh_sg "$@" ;;
-      dns)           _dispatch_variant ns_head_dns "$@" ;;
-      ssh)           _dispatch_variant ns_head_ssh "$@" ;;
-      attach)        _dispatch_variant ns_head_attach "$@" ;;
-      help|*)        cmd_help ;;
-    esac
-    ;;
   experiment)
     sub="${1:-help}"; shift || true
     case "$sub" in
-      new)  ns_experiment_new "$@" ;;
-      list) ns_experiment_list "$@" ;;
-      end)  _dispatch_variant ns_experiment_end "$@" ;;
-      rm)   _dispatch_variant ns_experiment_rm "$@" ;;
-      help|*) cmd_help ;;
+      new)              ns_experiment_new "$@" ;;
+      list)             ns_experiment_list "$@" ;;
+      end)              _dispatch_variant ns_experiment_end "$@" ;;
+      rm)               _dispatch_variant ns_experiment_rm  "$@" ;;
+      help|-h|--help)   _help_experiment ;;
+      *) echo "experiment: unknown subcmd '$sub'" >&2; _help_experiment >&2; exit 1 ;;
+    esac
+    ;;
+  head)
+    sub="${1:-help}"; shift || true
+    case "$sub" in
+      setup)            _dispatch_variant ns_head_setup         "$@" ;;
+      setup-ray-iam)    _dispatch_variant ns_head_setup_ray_iam "$@" ;;
+      terminate)        _dispatch_variant ns_head_terminate     "$@" ;;
+      terminate-all)    ns_head_terminate_all "$@" ;;
+      list)             _dispatch_variant ns_head_list       "$@" ;;
+      dedupe)           _dispatch_variant ns_head_dedupe     "$@" ;;
+      sync)             _dispatch_variant ns_head_sync       "$@" ;;
+      rebuild)          _dispatch_variant ns_head_rebuild    "$@" ;;
+      reboot)           _dispatch_variant ns_head_reboot     "$@" ;;
+      stop)             _dispatch_variant ns_head_stop       "$@" ;;
+      start)            _dispatch_variant ns_head_start      "$@" ;;
+      refresh-sg)       _dispatch_variant ns_head_refresh_sg "$@" ;;
+      dns)              _dispatch_variant ns_head_dns        "$@" ;;
+      ssh)              _dispatch_variant ns_head_ssh        "$@" ;;
+      attach)           _dispatch_variant ns_head_attach     "$@" ;;
+      help|-h|--help)   _help_head ;;
+      *) echo "head: unknown subcmd '$sub'" >&2; _help_head >&2; exit 1 ;;
     esac
     ;;
   image)
-    # build/push/pull each take an alias (image_tag is per-alias in
-    # the registry). list is variant-independent (lists ECR repo).
     sub="${1:-help}"; shift || true
     case "$sub" in
-      build) _dispatch_variant ns_image_build "$@" ;;
-      push)  _dispatch_variant ns_image_push  "$@" ;;
-      pull)  _dispatch_variant ns_image_pull  "$@" ;;
-      list)  ns_image_list "$@" ;;
-      help|*) cmd_help ;;
+      build)            _dispatch_variant ns_image_build "$@" ;;
+      push)             _dispatch_variant ns_image_push  "$@" ;;
+      pull)             _dispatch_variant ns_image_pull  "$@" ;;
+      list)             ns_image_list "$@" ;;
+      help|-h|--help)   _help_image ;;
+      *) echo "image: unknown subcmd '$sub'" >&2; _help_image >&2; exit 1 ;;
     esac
     ;;
   run)
     sub="${1:-help}"; shift || true
     case "$sub" in
-      launch) _dispatch_variant ns_run_launch "$@" ;;
-      resume) _dispatch_variant ns_run_resume "$@" ;;
-      id)     _dispatch_variant ns_run_id     "$@" ;;
-      cancel) _dispatch_variant ns_run_cancel "$@" ;;
-      status) _dispatch_variant ns_run_status "$@" ;;
-      jobs)   _dispatch_variant ns_run_jobs   "$@" ;;
-      tail)   _dispatch_variant ns_run_tail   "$@" ;;
-      log)    _dispatch_variant ns_run_log    "$@" ;;
-      help|*) cmd_help ;;
+      launch)           _dispatch_variant ns_run_launch "$@" ;;
+      resume)           _dispatch_variant ns_run_resume "$@" ;;
+      id)               _dispatch_variant ns_run_id     "$@" ;;
+      cancel)           _dispatch_variant ns_run_cancel "$@" ;;
+      status)           _dispatch_variant ns_run_status "$@" ;;
+      jobs)             _dispatch_variant ns_run_jobs   "$@" ;;
+      tail)             _dispatch_variant ns_run_tail   "$@" ;;
+      log)              _dispatch_variant ns_run_log    "$@" ;;
+      help|-h|--help)   _help_run ;;
+      *) echo "run: unknown subcmd '$sub'" >&2; _help_run >&2; exit 1 ;;
     esac
     ;;
   cache)
-    # cache <subcmd> <variant>: peel subcmd FIRST, then variant inline
-    # (can't reuse _dispatch_variant because it consumes variant from
-    # position 0, but we want it from position 1 here).
     sub="${1:-help}"; shift || true
     case "$sub" in
       push|pull|ls|rm)
@@ -2240,64 +2545,29 @@ case "$cmd" in
         _use_variant "$v" || exit 1
         ns_cache "$sub" "$@"
         ;;
-      help|*) cmd_help ;;
+      help|-h|--help)   _help_cache ;;
+      *) echo "cache: unknown subcmd '$sub'" >&2; _help_cache >&2; exit 1 ;;
     esac
     ;;
   compare)
-    # compare uses v1/v2 sidecars internally for the ID defaults, but the
-    # SSH target (HEAD_NAME) needs to be the comparison head — not v2's
-    # workflow head. Default to the ``compare`` alias so the dedicated
-    # compare head is used; override with VECOLI_AWS_CONFIG_VARIANT to
-    # run on a workflow head instead. The compare config still points at
-    # the same shared bucket so BUCKET/PREFIX resolve identically.
-    _use_variant "${VECOLI_AWS_CONFIG_VARIANT:-compare}" || exit 1
     sub="${1:-help}"; shift || true
     case "$sub" in
-      parity) ns_compare_parity "$@" ;;
-      full-parity) ns_compare_full_parity "$@" ;;
-      gens)   ns_compare_gens "$@" ;;
-      report) ns_compare_report "$@" ;;
-      export) ns_compare_export "$@" ;;
-      bootstrap)
-        # One-shot: scp + run bootstrap_head_compare.sh on the
-        # comparison head. ``head setup`` only provisions the EC2;
-        # this installs uv + clones vEcoli + uv sync. After this
-        # the report / parity subcmds can run.
-        _run_bootstrap_on_head ;;
-      help|*) cmd_help ;;
+      parity)           _dispatch_with_default_alias ns_compare_parity      compare "$@" ;;
+      full-parity)      _dispatch_with_default_alias ns_compare_full_parity compare "$@" ;;
+      gens)             _dispatch_with_default_alias ns_compare_gens        compare "$@" ;;
+      time)             ns_compare_time "$@" ;;
+      report)           _dispatch_with_default_alias ns_compare_report      compare "$@" ;;
+      export)           _dispatch_with_default_alias ns_compare_export      compare "$@" ;;
+      bootstrap)        _dispatch_with_default_alias _run_bootstrap_on_head compare "$@" ;;
+      help|-h|--help)   _help_compare ;;
+      *) echo "compare: unknown subcmd '$sub'" >&2; _help_compare >&2; exit 1 ;;
     esac
     ;;
-  # Legacy aliases ---------------------------------------------------------
-  # Plain aliases — same variant-positional behavior as the namespaced
-  # forms (e.g. ``setup v1`` ≡ ``head setup v1``).
-  setup)         _dispatch_variant ns_head_setup "$@" ;;
-  rebuild)       _dispatch_variant ns_head_rebuild "$@" ;;
-  reboot)        _dispatch_variant ns_head_reboot "$@" ;;
-  stop)          _dispatch_variant ns_head_stop "$@" ;;
-  start)         _dispatch_variant ns_head_start "$@" ;;
-  refresh-sg)    _dispatch_variant ns_head_refresh_sg "$@" ;;
-  terminate)     _dispatch_variant ns_head_terminate "$@" ;;
-  dns)           _dispatch_variant ns_head_dns "$@" ;;
-  ssh)           _dispatch_variant ns_head_ssh "$@" ;;
-  attach)        _dispatch_variant ns_head_attach "$@" ;;
-  bootstrap|launch) _dispatch_variant ns_run_launch "$@" ;;
-  resume)        _dispatch_variant ns_run_resume "$@" ;;
-  status)        _dispatch_variant ns_run_status "$@" ;;
-  jobs)          _dispatch_variant ns_run_jobs "$@" ;;
-  tail)          _dispatch_variant ns_run_tail "$@" ;;
-  report)
-    _use_variant "${VECOLI_AWS_CONFIG_VARIANT:-compare}" || exit 1
-    ns_compare_report "$@" ;;
-  export)
-    _use_variant "${VECOLI_AWS_CONFIG_VARIANT:-compare}" || exit 1
-    ns_compare_export "$@" ;;
-  # Variant-suffixed legacies (setup-mp / launch-ray / etc.) are removed —
-  # use the new positional form instead (``head setup mp``, ``run launch ray``).
-  help|-h|--help) cmd_help ;;
+  help|-h|--help) _help_top ;;
   *)
     echo "Unknown command: $cmd" >&2
-    echo
-    cmd_help
+    echo >&2
+    _help_top >&2
     exit 1
     ;;
 esac

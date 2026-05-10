@@ -1381,6 +1381,7 @@ class EcoliSim:
 
         Returns ``None`` if the composite did not divide.
         """
+        import os
         from copy import deepcopy
         from ecoli.composites.ecoli_composite import _v2_daughter_payload
 
@@ -1390,7 +1391,34 @@ class EcoliSim:
             return None
         target_id = sorted_ids[daughter_idx]
         cell_copy = deepcopy(agents[target_id])
+        if os.environ.get('VECOLI_DEBUG_DIVIDE'):
+            import sys as _sys
+            try:
+                bulk = cell_copy.get('bulk')
+                if bulk is not None and hasattr(bulk, 'dtype'):
+                    if bulk.dtype.names and 'count' in bulk.dtype.names:
+                        print(f'[divide-debug] _extract_lineage_daughter target={target_id!r} '
+                              f'bulk.count.sum={int(bulk["count"].sum())}',
+                              file=_sys.stderr, flush=True)
+                    else:
+                        print(f'[divide-debug] _extract_lineage_daughter target={target_id!r} '
+                              f'bulk dtype={bulk.dtype} (no count field)',
+                              file=_sys.stderr, flush=True)
+            except Exception as e:
+                print(f'[divide-debug] _extract_lineage_daughter err: {e}',
+                      file=_sys.stderr, flush=True)
         _v2_daughter_payload(cell_copy)
+        if os.environ.get('VECOLI_DEBUG_DIVIDE'):
+            import sys as _sys
+            try:
+                bulk = cell_copy.get('bulk')
+                if bulk is not None and hasattr(bulk, 'dtype') and bulk.dtype.names:
+                    if 'count' in bulk.dtype.names:
+                        print(f'[divide-debug] _extract_lineage_daughter AFTER payload '
+                              f'bulk.count.sum={int(bulk["count"].sum())}',
+                              file=_sys.stderr, flush=True)
+            except Exception:
+                pass
         return cell_copy
 
     def _lineage_agent_id(self, ecoli):

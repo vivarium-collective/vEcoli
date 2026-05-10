@@ -166,7 +166,7 @@ fi
 # run_composite_lineage_ray.py (vecoli_aws.sh assigns one per
 # ``run launch ray`` and persists it in a sidecar).
 if tmux has-session -t "$SESSION" 2>/dev/null; then
-  echo "tmux session '$SESSION' already exists. Attach with: tmux attach -t $SESSION"
+  echo "tmux session '$SESSION' already exists; not relaunching."
   exit 0
 fi
 [[ -n "${EXPERIMENT_ID:-}" ]] && echo "Using CLI-supplied experiment_id=${EXPERIMENT_ID}"
@@ -180,19 +180,5 @@ tmux new-session -d -s "$SESSION" \
    EXPERIMENT_ID='${EXPERIMENT_ID:-}' \
    python runscripts/aws/ec2_cluster_ray.py \
      2>&1 | tee ${LOG_FILE}"
-
-cat <<EOF
-
-Ray driver launched in tmux session '$SESSION'.
-  Tail log:    tail -f ~/${SESSION}_workflow.log
-  Attach:      tmux attach -t $SESSION
-  Detach:      Ctrl+B then D
-  Outputs to:  $OUT_URI
-
-The driver provisions the cluster, runs the experiment via SSM, and
-tears down on completion. If you need to cancel mid-run:
-  ssh ec2-user@<head-dns> 'tmux kill-session -t $SESSION'
-  # then manually terminate any stray cluster instances tagged with
-  # the cluster_id (visible in the driver's startup logs).
-
-EOF
+echo "Ray driver launched (session=$SESSION, log=~/${SESSION}_workflow.log)."
+echo "Driver provisions the cluster, runs the experiment via SSM, then tears down."

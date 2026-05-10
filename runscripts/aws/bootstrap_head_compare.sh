@@ -53,12 +53,4 @@ uv sync --frozen --extra aws --no-dev \
   || uv sync --extra aws --no-dev \
   || true
 
-echo
-echo "Compare head ready. Use:"
-echo "  vecoli_aws.sh compare report                  # render v1_v2_report.md"
-echo "  vecoli_aws.sh compare full-parity             # all-columns scan to TSV"
-echo "  vecoli_aws.sh compare gens                    # max-gen-per-seed table"
-echo
-echo "Override defaults via env on the local side, e.g.:"
-echo "  VECOLI_V1_ID=... VECOLI_V2_ID=... \\"
-echo "  VECOLI_REPORT_GENS=1,2 vecoli_aws.sh compare report"
+echo "Compare head ready (uv synced, vEcoli at $(git rev-parse --short HEAD 2>/dev/null || echo "?"))."

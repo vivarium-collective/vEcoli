@@ -166,7 +166,7 @@ else
 fi
 
 if tmux has-session -t "$SESSION" 2>/dev/null; then
-  echo "tmux session '$SESSION' already exists. Attach with: tmux attach -t $SESSION"
+  echo "tmux session '$SESSION' already exists; not relaunching."
   exit 0
 fi
 LOG_FILE="\$HOME/${SESSION}_workflow.log"
@@ -174,19 +174,4 @@ tmux new-session -d -s "$SESSION" \
   "cd $VECOLI_DIR && source .venv/bin/activate && \
    NXF_ANSI_LOG=false \
    python runscripts/workflow.py --config $CONFIG_RELPATH $RESUME_FLAG $BUILD_FLAG $EXP_ID_FLAG 2>&1 | tee ${LOG_FILE}"
-
-cat <<EOF
-
-Workflow launched in tmux session '$SESSION'.
-  Tail log:    tail -f ~/${SESSION}_workflow.log
-  Attach:      tmux attach -t $SESSION
-  Detach:      Ctrl+B then D
-  Outputs to:  $(python -c "import json;print(json.load(open('$CONFIG_RELPATH'))['emitter_arg']['out_uri'])")
-
-When the run finishes, generate the v1 vs v2 comparison report from the head:
-  cd $VECOLI_DIR
-  source .venv/bin/activate
-  # Pull v1 + v2 nextflow trace CSVs from S3, then:
-  python runscripts/v1_v2_report.py --help
-
-EOF
+echo "Workflow launched (session=$SESSION, log=~/${SESSION}_workflow.log)."

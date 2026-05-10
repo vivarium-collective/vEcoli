@@ -151,7 +151,7 @@ if [[ -n "${EXPERIMENT_ID:-}" ]]; then
   echo "Using CLI-supplied experiment_id=${EXPERIMENT_ID}"
 fi
 if tmux has-session -t "$SESSION" 2>/dev/null; then
-  echo "tmux session '$SESSION' already exists. Attach with: tmux attach -t $SESSION"
+  echo "tmux session '$SESSION' already exists; not relaunching."
   exit 0
 fi
 LOG_FILE="\$HOME/${SESSION}_workflow.log"
@@ -161,13 +161,4 @@ tmux new-session -d -s "$SESSION" \
    python runscripts/run_composite_lineage_mp.py \
      --config $CONFIG_RELPATH $EXP_ID_FLAG \
      2>&1 | tee ${LOG_FILE}"
-
-cat <<EOF
-
-MP workflow launched in tmux session '$SESSION'.
-  Tail log:    tail -f ~/${SESSION}_workflow.log
-  Attach:      tmux attach -t $SESSION
-  Detach:      Ctrl+B then D
-  Outputs to:  $OUT_URI
-
-EOF
+echo "MP workflow launched (session=$SESSION, log=~/${SESSION}_workflow.log)."

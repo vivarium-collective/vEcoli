@@ -120,6 +120,16 @@ def build_ecoli_document(core, sim_config, load_sim_data=None):
 
     # 4. Get initial cell state from sim_data
     cell_state = _get_initial_state(load_sim_data, sim_config)
+    if os.environ.get('VECOLI_DEBUG_DIVIDE'):
+        import sys as _sys
+        try:
+            bulk = cell_state.get('bulk') if isinstance(cell_state, dict) else None
+            if bulk is not None and hasattr(bulk, 'dtype') and bulk.dtype.names and 'count' in bulk.dtype.names:
+                print(f'[divide-debug] build_ecoli_document agent_id={sim_config.get("agent_id")} '
+                      f'cell_state[bulk].count.sum={int(bulk["count"].sum())} (after _get_initial_state)',
+                      file=_sys.stderr, flush=True)
+        except Exception as e:
+            print(f'[divide-debug] build_ecoli_document err: {e}', file=_sys.stderr, flush=True)
     _make_arrays_writeable(cell_state)
 
     # 5. Add infrastructure topologies (allocator, unique_update)
