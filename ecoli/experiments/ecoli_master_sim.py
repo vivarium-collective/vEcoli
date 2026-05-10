@@ -923,15 +923,28 @@ class EcoliSim:
             agent_id = self.config.get('agent_id', '0')
             cli_seed = int(self.config.get('seed', 0))
             sim_data_path = self.config['sim_data_path']
-            reseed_loaded_bundle(
-                document, sim_data_path, cli_seed, agent_id=agent_id)
+            # ``skip_reseed_on_load=True`` for mid-cycle (within-gen)
+            # resume: preserve the saved rng_state on every process
+            # and the saved allocator_rng so the resumed run advances
+            # the SAME RNG sequence the continuous run would have. The
+            # default (False) is correct for daughter handoff between
+            # generations — v1 reseeds per-process at each gen start.
+            skip = bool(self.config.get('skip_reseed_on_load', False))
+            if not skip:
+                reseed_loaded_bundle(
+                    document, sim_data_path, cli_seed, agent_id=agent_id)
             ecoli = Composite(
                 {'skip_process_state': True,
                  'run_steps_on_init': False,
                  **document},
                 core=core)
-            _reseed_allocator_rng(
-                ecoli.state, sim_data_path, cli_seed, agent_id=agent_id)
+            if not skip:
+                _reseed_allocator_rng(
+                    ecoli.state, sim_data_path, cli_seed, agent_id=agent_id)
+            else:
+                print('  [skip_reseed_on_load=True] preserved saved '
+                      'rng_state and allocator_rng (mid-cycle resume)',
+                      flush=True)
             print(f"  Loaded in {_time.time()-t0:.2f}s", flush=True)
         else:
             # Build from sim_data. If initial_state_file points at a

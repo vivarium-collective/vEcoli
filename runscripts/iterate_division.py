@@ -37,13 +37,34 @@ def cmd_save(args):
     With ``--from-bundle``, resumes from an existing bundle and only
     runs the delta to ``checkpoint_at`` — so iterating a pre-division
     checkpoint forward by ±N seconds doesn't re-simulate from t=0.
+
+    NOTE: division time is seed-dependent. Calibrate
+    ``--checkpoint-at`` per seed:
+      seed 0,1: divide ≈ t=2530, checkpoint at ~2400 works
+      seed 12:  divide ≈ t=2970, checkpoint at ~2900 works
+      seed 13:  divide ≈ t=2730 (varies), checkpoint at ~2600
+    Pick a value 70-150s before expected divide.
     """
     with chdir(ROOT):
         from ecoli.experiments.ecoli_master_sim import EcoliSim
         sim = EcoliSim.from_file()
         sim.config['engine'] = 'composite'
+        if args.seed is not None:
+            sim.config['lineage_seed'] = args.seed
+            sim.config['seed'] = args.seed
         sim.max_duration = int(args.checkpoint_at)
-        sim.emitter = 'null'
+        # When --parquet-out is given, emit parquet alongside the
+        # bundle save. Use sim.config (not sim.emitter attribute) —
+        # the attribute path doesn't always propagate to the
+        # composite engine's emitter selection.
+        if args.parquet_out:
+            sim.config['emitter'] = 'parquet'
+            sim.config['emitter_arg'] = {
+                'out_dir': os.path.abspath(args.parquet_out),
+                'threaded': False,
+            }
+        else:
+            sim.config['emitter'] = 'null'
         sim.divide = True
         sim.config['composite_checkpoint_at'] = args.checkpoint_at
         sim.config['composite_checkpoint_dir'] = args.checkpoint_dir
@@ -51,7 +72,8 @@ def cmd_save(args):
             sim.config['initial_state_file'] = args.from_bundle
             source = f'resuming from {args.from_bundle}'
         else:
-            source = 'fresh build'
+            source = (f'fresh build (seed={args.seed})' if args.seed is not None
+                      else 'fresh build')
 
         print(f'[save] {source}, running to sim-t={args.checkpoint_at}s, '
               f'saving to {args.checkpoint_dir}/', flush=True)
@@ -79,6 +101,13 @@ def cmd_run(args):
         sim.emitter = 'null'
         sim.divide = True
         sim.config['initial_state_file'] = args.checkpoint_dir
+        # Mid-cycle resume — preserve saved rng_state + allocator_rng
+        # so the resumed run continues the SAME RNG sequence the
+        # original continuous run had. Without this, the load path
+        # reseeds processes at gen-start (v1-mirror), which is wrong
+        # for within-gen resume and changes mother bulk at divide
+        # time — daughters then diverge from v1.
+        sim.config['skip_reseed_on_load'] = True
         sim.daughter_outdir = args.daughter_outdir
 
         print(f'[run] loading {args.checkpoint_dir}, running up to {args.extra}s '
@@ -103,12 +132,21 @@ def main():
     sub = p.add_subparsers(dest='cmd', required=True)
 
     p_save = sub.add_parser('save', help='Create pre-division checkpoint')
-    p_save.add_argument('--checkpoint-at', type=float, default=1800.0,
-                        help='Sim-time to checkpoint at (default 1800s)')
+    p_save.add_argument(
+        '--checkpoint-at', type=float, default=2400.0,
+        help='Sim-time to checkpoint at (seed-dependent; '
+             'see docstring. seed 0,1 → 2400; seed 12 → 2900)')
+    p_save.add_argument('--seed', type=int, default=None,
+                        help='lineage_seed for the cell (default: config)')
     p_save.add_argument('--checkpoint-dir', default='out/pre_divide')
     p_save.add_argument('--from-bundle', default=None,
                         help='Resume from an existing bundle directory '
                         'instead of building fresh from sim_data')
+    p_save.add_argument(
+        '--parquet-out', default=None,
+        help='If set, also emit parquet to this dir during the build. '
+             'Useful for verifying checkpoint-state parity vs a v1 '
+             'reference run before trusting the bundle for iteration.')
 
     p_run = sub.add_parser('run', help='Load checkpoint + run to division')
     p_run.add_argument('--checkpoint-dir', default='out/pre_divide')
