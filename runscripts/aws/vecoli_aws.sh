@@ -612,16 +612,52 @@ ns_run_log() {
       echo " runner streams to tmux and isn't uploaded separately)"
       ;;
     nextflow_batch|"")
+      # Pull the stderr of any FAILED nextflow tasks. Nextflow's
+      # driver log contains lines like
+      #   [xx/yyyyyy] NOTE: Process `runParca` failed
+      # where xx/yyy is the workdir hash. We scan the driver log for
+      # those, then aws s3 cp each task's .command.err.
+      local nf_workroot="s3://${BUCKET}/${PREFIX}/${EXP_ID}/${EXP_ID}/nextflow/nextflow_workdirs"
+      local failed_hashes
+      if [[ -n "$dns" && "$dns" != "None" ]]; then
+        # Re-fetch the driver log fresh (the earlier ssh call already
+        # printed it; here we just need the failed-task hashes).
+        failed_hashes=$(ssh -i "$KEY_FILE" "ec2-user@$dns" \
+          "F=\$HOME/${TMUX_SESSION}_workflow.log; \
+           [[ -f \$F ]] || F=\$HOME/v2_workflow.log; \
+           [[ -f \$F ]] && grep -oE '\\[[0-9a-f]{2}/[0-9a-f]{6,}\\] NOTE: Process .* failed' \$F \
+             | grep -oE '[0-9a-f]{2}/[0-9a-f]{6,}' | sort -u" 2>/dev/null || true)
+      fi
+      if [[ -n "$failed_hashes" ]]; then
+        echo "=== Failed Nextflow task stderr ==="
+        for hash in $failed_hashes; do
+          echo
+          echo "--- $hash ---"
+          # workdir keys begin with the hash but have a longer suffix
+          local err_key
+          err_key=$(aws_cli s3 ls --recursive "${nf_workroot}/${hash}" 2>/dev/null \
+                   | awk '{print $NF}' | grep '/.command.err$' | head -1)
+          if [[ -n "$err_key" ]]; then
+            ${n:+aws_cli s3 cp "s3://${BUCKET}/${err_key}" - 2>/dev/null | tail -n "$n"} \
+              ${n:-aws_cli s3 cp "s3://${BUCKET}/${err_key}" - 2>/dev/null}
+          else
+            echo "(no .command.err under ${nf_workroot}/${hash})"
+          fi
+        done
+      fi
       local trace; trace=$(ls -t "$REPO_ROOT"/trace--"$EXP_ID"--*.csv 2>/dev/null | head -1)
       if [[ -n "$trace" ]]; then
+        echo
         echo "=== Nextflow trace (${trace##*/}) ==="
         echo "Sample (first 5 task rows):"
         head -1 "$trace"
         head -6 "$trace" | tail -5
         echo
-        echo "(For per-task stderr, check CloudWatch Logs group"
-        echo " /aws/batch/job for jobName matching '${EXP_ID}_*'.)"
+        echo "(For per-task stderr beyond the failed ones above, check"
+        echo " CloudWatch Logs group /aws/batch/job for jobName"
+        echo " matching '${EXP_ID}_*'.)"
       else
+        echo
         echo "(No local trace--${EXP_ID}--*.csv yet — run"
         echo " 'compare report' to fetch it from S3 first.)"
       fi
