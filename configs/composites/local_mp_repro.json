@@ -1,0 +1,19 @@
+{
+    "_comment": "Local MP runner config for reproducing the AWS multi-seed divergence. Mirrors comparison_10s_16g_v2_mp_aws.json's per-cell behavior but with seeds 5,6,7,8 (4 concurrent workers) and 2 gens for fast iteration.",
+    "inherit_from": ["../comparison_10s_16g.json"],
+    "experiment_id": "local_mp_repro",
+    "engine": "composite_lineage",
+    "sim_data_path": "out/comparison_10s_16g_v2_local/parca/kb/simData.cPickle",
+    "emitter_arg": {
+        "out_uri": "out/local_mp_repro",
+        "threaded": false
+    },
+    "lineage_seed": 5,
+    "n_init_sims": 4,
+    "generations": 2,
+    "max_duration": 3000,
+    "fail_at_max_duration": false,
+    "single_daughters": true,
+    "progress_bar": false,
+    "analysis_options": {}
+}

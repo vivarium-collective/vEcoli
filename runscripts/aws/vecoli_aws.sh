@@ -59,30 +59,41 @@ aws_cli() { aws --profile "$PROFILE" --region "$REGION" "$@"; }
 # path (``configs/foo.json``) also works as an ad-hoc one-shot. Falls
 # back to VECOLI_AWS_CONFIG env var if neither is supplied.
 _REGISTRY="$STATE_DIR/aliases.tsv"
-# Registry schema: TSV with 3 columns — alias, config, method.
-# ``method`` is one of: batch | multiprocessing | ray (canonical), and
+# Registry schema: TSV with 4 columns — alias, config, method, image_tag.
+# ``method`` is one of: batch | multiprocessing | ray | comparison (canonical), and
 # determines the bootstrap script + default head instance type at
 # ``head setup`` / ``run launch`` time.
+# ``image_tag`` is the Docker tag (e.g. ``vecoli:v2-comparison-arm64``)
+# associated with the alias. Used by ``image build/push/pull <alias>``,
+# and (for ray) auto-resolved into IMAGE_URI for the worker cluster.
+# May be empty for aliases that don't use an image (e.g. mp).
 # Built-in defaults — written to the registry on first read so the user
 # starts with the same 4 entries the original hardcoded version had.
 _seed_registry_if_missing() {
   if [[ ! -f "$_REGISTRY" ]]; then
     mkdir -p "$STATE_DIR"
     cat > "$_REGISTRY" <<'EOF'
-v1	configs/comparison_10s_16g_v1_aws.json	batch
-v2	configs/comparison_10s_16g_v2_aws.json	batch
+v1	configs/comparison_10s_16g_v1_aws.json	batch	vecoli:v2-comparison-arm64
+v2	configs/comparison_10s_16g_v2_aws.json	batch	vecoli:v2-comparison-arm64
 mp	configs/comparison_10s_16g_v2_mp_aws.json	multiprocessing
-ray	configs/comparison_10s_16g_v2_ray_aws.json	ray
+ray	configs/comparison_10s_16g_v2_ray_aws.json	ray	vecoli:v2-ray-amd64
+compare	configs/compare_head.json	comparison
 EOF
-    echo "Seeded $_REGISTRY with default aliases (v1/v2/mp/ray)" >&2
+    echo "Seeded $_REGISTRY with default aliases (v1/v2/mp/ray/compare)" >&2
+  fi
+  # Backfill ``compare`` for users whose registry was seeded before
+  # this alias existed; idempotent.
+  if [[ -f "$_REGISTRY" ]] && ! grep -qE '^compare\s' "$_REGISTRY" 2>/dev/null; then
+    printf 'compare\tconfigs/compare_head.json\tcomparison\n' >> "$_REGISTRY"
+    echo "Backfilled 'compare' alias in $_REGISTRY" >&2
   fi
   _migrate_registry_2col_to_3col
+  _migrate_registry_3col_to_4col
 }
 
 # Migrate aliases.tsv from the older 2-column format (alias, config) to
-# the current 3-column format (alias, config, method). Fills method
-# from a heuristic on alias name when not present; leaves a warning
-# trail so the user can fix anything misclassified.
+# the 3-column format (alias, config, method). Fills method from a
+# heuristic on alias name when not present.
 _migrate_registry_2col_to_3col() {
   [[ -f "$_REGISTRY" ]] || return 0
   local first; first=$(head -1 "$_REGISTRY" 2>/dev/null || echo "")
@@ -104,6 +115,32 @@ _migrate_registry_2col_to_3col() {
         m="batch" ;;
     esac
     printf '%s\t%s\t%s\n' "$a" "$cfg" "$m" >> "$tmp"
+  done < "$_REGISTRY"
+  mv "$tmp" "$_REGISTRY"
+}
+
+# Migrate 3-column to 4-column (adding image_tag). Defaults inferred
+# from method: batch → vecoli:v2-comparison-arm64 (matches existing v1/v2
+# configs); ray → vecoli:v2-ray-amd64; multiprocessing → empty (no
+# image needed for the local-venv MP runner).
+_migrate_registry_3col_to_4col() {
+  [[ -f "$_REGISTRY" ]] || return 0
+  local first; first=$(head -1 "$_REGISTRY" 2>/dev/null || echo "")
+  [[ -z "$first" ]] && return 0
+  local cols; cols=$(printf '%s' "$first" | awk -F'\t' '{print NF}')
+  if [[ "$cols" -ge 4 ]]; then return 0; fi
+  echo "Migrating $_REGISTRY 3→4 cols (adding image_tag column)..." >&2
+  local tmp; tmp=$(mktemp)
+  while IFS=$'\t' read -r a cfg m _; do
+    [[ -z "$a" ]] && continue
+    local img=""
+    case "$m" in
+      batch)           img="vecoli:v2-comparison-arm64" ;;
+      ray)             img="vecoli:v2-ray-amd64" ;;
+      multiprocessing) img="" ;;
+      *)               img="" ;;
+    esac
+    printf '%s\t%s\t%s\t%s\n' "$a" "$cfg" "$m" "$img" >> "$tmp"
   done < "$_REGISTRY"
   mv "$tmp" "$_REGISTRY"
 }
@@ -145,18 +182,23 @@ _registry_list() {
   _seed_registry_if_missing
   cat "$_REGISTRY"
 }
-# Idempotent registry write: add or update <alias> → <config> + <method>.
-# Method is preserved from any existing row when the caller passes "" for it.
+# Idempotent registry write: add or update <alias> → <config> + <method>
+# + <image_tag>. Any of method/image_tag passed as "" preserves the
+# existing value (so callers can update one column without clobbering
+# the other).
 _registry_set() {
-  local key="$1" cfg="$2" method="${3:-}"
+  local key="$1" cfg="$2" method="${3:-}" image="${4:-}"
   _seed_registry_if_missing
-  # Carry over the existing method if the caller didn't specify one.
+  # Carry over existing values for fields the caller left blank.
   if [[ -z "$method" ]]; then
     method=$(awk -F'\t' -v k="$key" '$1==k { print $3; exit }' "$_REGISTRY")
   fi
+  if [[ -z "$image" ]]; then
+    image=$(awk -F'\t' -v k="$key" '$1==k { print $4; exit }' "$_REGISTRY")
+  fi
   local tmp; tmp=$(mktemp)
   awk -F'\t' -v k="$key" '$1!=k { print }' "$_REGISTRY" > "$tmp"
-  printf '%s\t%s\t%s\n' "$key" "$cfg" "$method" >> "$tmp"
+  printf '%s\t%s\t%s\t%s\n' "$key" "$cfg" "$method" "$image" >> "$tmp"
   mv "$tmp" "$_REGISTRY"
 }
 # Remove an alias from the registry. No-op if absent.
@@ -174,17 +216,50 @@ _alias_to_method() {
   _seed_registry_if_missing
   awk -F'\t' -v k="$key" '$1==k { print $3; exit }' "$_REGISTRY"
 }
+# Lookup the image_tag (e.g. ``vecoli:v2-comparison-arm64``) registered
+# for an alias. Returns "" if alias unknown or image column empty (e.g.
+# multiprocessing aliases don't use an image).
+_alias_to_image() {
+  local key="$1"
+  _seed_registry_if_missing
+  awk -F'\t' -v k="$key" '$1==k { print $4; exit }' "$_REGISTRY"
+}
+# Build the full ECR URI for a tag: <account>.dkr.ecr.<region>.amazonaws.com/<tag>
+_ecr_uri_for_tag() {
+  local tag="$1"
+  local acct; acct=$(account_id)
+  echo "${acct}.dkr.ecr.${REGION}.amazonaws.com/${tag}"
+}
 # Normalize a user-supplied method value to one of:
-#   batch | multiprocessing | ray
+#   batch | multiprocessing | ray | comparison
 # Echoes the canonical name on success, "" on unknown input.
 _normalize_method() {
   case "$1" in
     batch|nextflow_batch)              echo "batch" ;;
     mp|multiprocessing|mp_single_node) echo "multiprocessing" ;;
     ray|ray_cluster)                   echo "ray" ;;
+    comparison|compare|comparison_head) echo "comparison" ;;
     *) echo "" ;;
   esac
 }
+# Strip the auto-rotated ``_YYYYMMDD-HHMMSS`` suffix that
+# ``_persist_new_exp_id`` appends, leaving the BASE_EXP_ID (= the
+# config's ``experiment_id`` field). The S3 layout is
+# ``vecoli-output/<base>/<full_exp_id>/...`` — anything that needs
+# to walk into a run's history dir must use the base for the outer
+# segment, not the full timestamped ID.
+#
+# Examples:
+#   comparison_10s_16g_v1_aws_2026_05_20260510-064538
+#     → comparison_10s_16g_v1_aws_2026_05
+#   comparison_10s_16g_v1_aws_2026_05  (no suffix)
+#     → comparison_10s_16g_v1_aws_2026_05  (passthrough)
+_exp_id_base() {
+  local exp="$1"
+  # Match exactly ``_8digits-6digits`` at end. Glob is ASCII-class.
+  echo "${exp%_[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]}"
+}
+
 # Map a canonical method to the deploy_mode string the rest of the code
 # (and the per-variant config) speaks.
 _method_to_deploy_mode() {
@@ -192,6 +267,7 @@ _method_to_deploy_mode() {
     batch)           echo "nextflow_batch" ;;
     multiprocessing) echo "mp_single_node" ;;
     ray)             echo "ray_cluster" ;;
+    comparison)      echo "comparison_head" ;;
     *) echo "" ;;
   esac
 }
@@ -322,9 +398,19 @@ _use_variant() {
       TMUX_SESSION="${TMUX_SESSION_OVERRIDE:-${cfg_tmux:-$default_tmux}}"
       EXTRA_FILES=()
       ;;
+    comparison_head)
+      # Dedicated head for v1 ↔ v2 comparison work (parity scans, report).
+      # No docker / nextflow / ECR — just uv + Python over in-region S3.
+      # Needs more disk than the workflow heads to hold synced parquet.
+      HEAD_NAME="${HEAD_NAME_OVERRIDE:-${cfg_head:-$default_head}}"
+      HEAD_INSTANCE_TYPE="${HEAD_INSTANCE_TYPE_OVERRIDE:-m7g.xlarge}"
+      BOOTSTRAP_SCRIPT="$SCRIPT_DIR/bootstrap_head_compare.sh"
+      TMUX_SESSION="${TMUX_SESSION_OVERRIDE:-${cfg_tmux:-$default_tmux}}"
+      EXTRA_FILES=()
+      ;;
     *)
       echo "Unknown aws.deploy_mode: $DEPLOY_MODE" >&2
-      echo "Expected: nextflow_batch | mp_single_node | ray_cluster" >&2
+      echo "Expected: nextflow_batch | mp_single_node | ray_cluster | comparison_head" >&2
       return 1
       ;;
   esac
@@ -485,8 +571,20 @@ _run_bootstrap_on_head() {
   local session_env="SESSION='$TMUX_SESSION' "
   local sim_data_env=""
   [[ -n "${SIM_DATA_S3_URI:-}" ]] && sim_data_env="SIM_DATA_S3_URI='$SIM_DATA_S3_URI' "
+  # Auto-resolve IMAGE_URI for ray when not set explicitly via env. The
+  # alias's registered image_tag (4th column of aliases.tsv) gets
+  # combined with account_id + region into the full ECR URI that
+  # ec2_cluster_ray.py expects. Ad-hoc env override still wins.
+  local resolved_image_uri="${IMAGE_URI:-}"
+  if [[ -z "$resolved_image_uri" && "$DEPLOY_MODE" == "ray_cluster" ]]; then
+    local _tag; _tag=$(_alias_to_image "$STATE_KEY")
+    if [[ -n "$_tag" ]]; then
+      resolved_image_uri=$(_ecr_uri_for_tag "$_tag")
+      echo "Auto-resolved IMAGE_URI from alias '$STATE_KEY': $resolved_image_uri"
+    fi
+  fi
   local image_env=""
-  [[ -n "${IMAGE_URI:-}" ]] && image_env="IMAGE_URI='$IMAGE_URI' "
+  [[ -n "$resolved_image_uri" ]] && image_env="IMAGE_URI='$resolved_image_uri' "
   # Thread the CLI-resolved EXP_ID so workflow.py / run_composite_lineage_*.py
   # use the unique sidecar-tracked ID rather than the BASE id from config.
   local exp_id_env=""
@@ -507,7 +605,7 @@ ns_head_setup() {
   if [[ -n "$requested_method" ]]; then
     local canon; canon=$(_normalize_method "$requested_method")
     if [[ -z "$canon" ]]; then
-      echo "Unknown method '$requested_method' — expected: batch | multiprocessing | ray" >&2
+      echo "Unknown method '$requested_method' — expected: batch | multiprocessing | ray | comparison" >&2
       return 1
     fi
     local current; current=$(_alias_to_method "$STATE_KEY")
@@ -562,9 +660,13 @@ ns_head_setup() {
     esac
   fi
   echo "Provisioning new head ($HEAD_NAME, $HEAD_INSTANCE_TYPE) for method '$(_alias_to_method "$STATE_KEY")'..."
+  # Disk default scales with method: comparison heads sync ~tens-of-GB
+  # of parquet from S3, workflow heads only need room for nextflow logs.
+  local default_root_gib=30
+  [[ "${DEPLOY_MODE:-}" == "comparison_head" ]] && default_root_gib=200
   HEAD_INSTANCE_TYPE="$HEAD_INSTANCE_TYPE" \
     HEAD_NAME="$HEAD_NAME" \
-    ROOT_VOL_GIB="${ROOT_VOL_GIB:-30}" \
+    ROOT_VOL_GIB="${ROOT_VOL_GIB:-$default_root_gib}" \
     bash "$SCRIPT_DIR/setup_head_node.sh"
 }
 ns_head_terminate() {
@@ -847,11 +949,13 @@ ns_experiment_new() {
       *) break ;;
     esac
   done
-  local alias_name="${1:-}" cfg="${2:-}" method_in="${3:-}"
+  local alias_name="${1:-}" cfg="${2:-}" method_in="${3:-}" image_in="${4:-}"
   if [[ -z "$alias_name" || -z "$cfg" ]]; then
-    echo "usage: experiment new [-f] <alias> <config_path> [<method>]" >&2
-    echo "  method: batch | multiprocessing | ray (optional; can also be set" >&2
-    echo "          at ``head setup <alias> <method>`` time)" >&2
+    echo "usage: experiment new [-f] <alias> <config_path> [<method>] [<image_tag>]" >&2
+    echo "  method:    batch | multiprocessing | ray | comparison (optional; settable" >&2
+    echo "             at ``head setup <alias> <method>`` time)" >&2
+    echo "  image_tag: e.g. vecoli:my-tag-arm64 (optional; settable later" >&2
+    echo "             via ``experiment new -f <alias> <cfg> <method> <tag>``)" >&2
     return 1
   fi
   if [[ ! "$alias_name" =~ ^[a-zA-Z][a-zA-Z0-9_-]*$ ]]; then
@@ -873,7 +977,7 @@ ns_experiment_new() {
   if [[ -n "$method_in" ]]; then
     method=$(_normalize_method "$method_in")
     if [[ -z "$method" ]]; then
-      echo "Unknown method '$method_in' — expected: batch | multiprocessing | ray" >&2
+      echo "Unknown method '$method_in' — expected: batch | multiprocessing | ray | comparison" >&2
       return 1
     fi
   fi
@@ -883,22 +987,41 @@ ns_experiment_new() {
     echo "alias '$alias_name' already maps to $existing — pass -f to overwrite" >&2
     return 1
   fi
-  _registry_set "$alias_name" "$cfg" "$method"
-  if [[ -n "$method" ]]; then
-    echo "Registered: $alias_name → $cfg  (method=$method)"
-  else
-    echo "Registered: $alias_name → $cfg  (no method yet)"
+  _registry_set "$alias_name" "$cfg" "$method" "$image_in"
+  local summary="Registered: $alias_name → $cfg"
+  [[ -n "$method" ]] && summary+="  method=$method"
+  [[ -n "$image_in" ]] && summary+="  image=$image_in"
+  echo "$summary"
+  if [[ -z "$method" ]]; then
     echo "  Set method: $(basename "$0") head setup $alias_name <batch|multiprocessing|ray>"
+  fi
+  if [[ -z "$image_in" && "$method" != "multiprocessing" ]]; then
+    echo "  Set image:  $(basename "$0") experiment new -f $alias_name $cfg ${method:-<method>} <image:tag>"
   fi
 }
 
 ns_experiment_list() {
   _seed_registry_if_missing
-  printf "%-15s  %-50s  %s\n" "ALIAS" "CONFIG" "METHOD"
-  printf "%-15s  %-50s  %s\n" "---------------" "--------------------------------------------------" "------"
-  while IFS=$'\t' read -r alias_name cfg method; do
+  printf "%-12s  %-16s  %-30s  %s\n" \
+    "ALIAS" "METHOD" "IMAGE_TAG" "EXPERIMENT_ID (active)"
+  printf "%-12s  %-16s  %-30s  %s\n" \
+    "------------" "----------------" "------------------------------" \
+    "----------------------"
+  while IFS=$'\t' read -r alias_name cfg method image; do
     [[ -z "$alias_name" ]] && continue
-    printf "%-15s  %-50s  %s\n" "$alias_name" "$cfg" "${method:-(unset)}"
+    # Active experiment_id = sidecar contents (set by ``run launch
+    # <alias>``); falls back to "(no run yet)" when no sidecar exists.
+    local exp_file="$STATE_DIR/${alias_name}.experiment-id"
+    local exp_id="(no run yet)"
+    if [[ -f "$exp_file" ]]; then
+      exp_id=$(<"$exp_file")
+      exp_id="${exp_id//$'\n'/}"
+    fi
+    printf "%-12s  %-16s  %-30s  %s\n" \
+      "$alias_name" "${method:-(unset)}" "${image:-(none)}" "$exp_id"
+    # Indented continuation: full config path + sidecar path so the user
+    # can quickly find/edit either without a separate command.
+    printf "%-12s  config: %s\n" "" "$cfg"
   done < "$_REGISTRY"
 }
 
@@ -970,30 +1093,45 @@ ns_experiment_rm() {
 # Wraps runscripts/container/build-image.sh + the ECR docker tag/push
 # pipeline that was previously documented in copy-pasted markdown.
 IMAGE_TAG_DEFAULT="vecoli:v2-comparison-arm64"
+# Resolve the tag for an alias, with optional ``-t TAG`` override that
+# does NOT update the registry. Errors when the alias has no registered
+# image_tag and no -t was passed.
+_image_tag_for_alias() {
+  local override="$1"
+  if [[ -n "$override" ]]; then echo "$override"; return 0; fi
+  local tag; tag=$(_alias_to_image "$STATE_KEY")
+  if [[ -z "$tag" ]]; then
+    echo "Alias '$STATE_KEY' has no image_tag in registry." >&2
+    echo "  Set one: $(basename "$0") experiment new -f $STATE_KEY $CONFIG_REL ${DEPLOY_MODE:-} <image:tag>" >&2
+    echo "  Or override for this call only: --tag <image:tag>" >&2
+    return 1
+  fi
+  echo "$tag"
+}
+
 ns_image_build() {
-  # Default to local Docker build (suitable for the AWS workflow,
-  # which then ECR-pushes via ``image push``). The underlying
-  # build-image.sh script defaults to Google Cloud Build, which only
-  # makes sense for the GCP path. Pass ``--cloud`` to override.
+  # ``image build <alias> [--tag TAG] [--platform PLATFORM] [--cloud]``
+  # Reads the alias's registered image_tag from .vecoli-aws-state/aliases.tsv;
+  # ``--tag`` overrides for this build only (registry untouched).
   #
-  # Arch guard: detect host arch + target arch (inferred from tag),
-  # auto-cross-build via buildx + QEMU when they don't match. Stops
-  # x86_64 laptops from producing amd64 layers tagged ``...-arm64`` and
-  # silently corrupting the ECR image. Target arch can be forced with
-  # ``--platform linux/arm64`` if the tag doesn't hint it.
-  local tag="$IMAGE_TAG_DEFAULT" local_build=1 platform=""
+  # Arch guard: infers target platform from the tag name (``-arm64`` →
+  # linux/arm64, ``-amd64`` → linux/amd64), detects host/target
+  # mismatch, and auto-cross-builds via ``docker buildx`` when needed.
+  # x86_64 laptops can no longer silently produce amd64 layers tagged
+  # ``...-arm64`` (which is what corrupted batch's ECR image earlier).
+  local override_tag="" local_build=1 platform=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      -t|--tag)   tag="$2"; shift 2 ;;
+      -t|--tag)   override_tag="$2"; shift 2 ;;
       --platform) platform="$2"; shift 2 ;;
       -l|--local) local_build=1; shift ;;
       --cloud)    local_build=0; shift ;;
       *) echo "image build: unknown arg $1" >&2; return 1 ;;
     esac
   done
+  local tag; tag=$(_image_tag_for_alias "$override_tag") || return 1
 
   # Infer target platform from tag if the user didn't pass --platform.
-  # Tag substrings like "arm64", "aarch64", "amd64", "x86_64" are common.
   if [[ -z "$platform" ]]; then
     case "$tag" in
       *arm64*|*aarch64*) platform="linux/arm64" ;;
@@ -1001,7 +1139,6 @@ ns_image_build() {
     esac
   fi
 
-  # Detect host vs target mismatch to decide whether to cross-build.
   local host_arch; host_arch=$(uname -m)
   local needs_cross=0
   if [[ -n "$platform" ]]; then
@@ -1010,7 +1147,6 @@ ns_image_build() {
       aarch64:linux/amd64|arm64:linux/amd64)           needs_cross=1 ;;
     esac
   fi
-
   if (( needs_cross == 1 )); then
     echo "WARNING: cross-building $tag — host=${host_arch} target=${platform}." >&2
     echo "  This is slow (5–15 min via QEMU). For native ARM64 batch builds," >&2
@@ -1018,24 +1154,28 @@ ns_image_build() {
     echo "  (t4g.large = ARM64) — or run head ssh + build-and-push-ecr.sh there." >&2
   fi
 
-  echo "Building Docker image: $tag (local=$local_build, platform=${platform:-host})..."
+  echo "Building Docker image for alias '$STATE_KEY': $tag (local=$local_build, platform=${platform:-host})..."
   cd "$REPO_ROOT"
   local args=(-i "$tag")
   [[ $local_build -eq 1 ]] && args+=(-l)
   [[ -n "$platform" ]] && args+=(-p "$platform")
   bash runscripts/container/build-image.sh "${args[@]}"
 }
+
 ns_image_push() {
-  local tag="$IMAGE_TAG_DEFAULT"
+  # ``image push <alias> [--tag TAG]`` — ECR login + tag + push for the
+  # alias's image. Prints the full ECR URI on success (also useful when
+  # ``run launch <ray_alias>`` auto-resolves IMAGE_URI).
+  local override_tag=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      -t|--tag) tag="$2"; shift 2 ;;
+      -t|--tag) override_tag="$2"; shift 2 ;;
       *) echo "image push: unknown arg $1" >&2; return 1 ;;
     esac
   done
-  local acct; acct=$(account_id)
-  local ecr_host="${acct}.dkr.ecr.${REGION}.amazonaws.com"
-  local remote="${ecr_host}/${tag}"
+  local tag; tag=$(_image_tag_for_alias "$override_tag") || return 1
+  local remote; remote=$(_ecr_uri_for_tag "$tag")
+  local ecr_host="${remote%/*}"
   echo "Logging in to ECR ($ecr_host)..."
   aws_cli ecr get-login-password \
     | docker login --username AWS --password-stdin "$ecr_host" >/dev/null
@@ -1043,31 +1183,36 @@ ns_image_push() {
   docker tag "$tag" "$remote"
   echo "Pushing $remote..."
   docker push "$remote"
-  echo "Done. Image URI for downstream use:"
+  echo "Done. ECR URI for alias '$STATE_KEY':"
   echo "  $remote"
 }
+
+ns_image_pull() {
+  # ``image pull <alias> [--tag TAG]`` — pull from ECR, retag locally.
+  local override_tag=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -t|--tag) override_tag="$2"; shift 2 ;;
+      *) echo "image pull: unknown arg $1" >&2; return 1 ;;
+    esac
+  done
+  local tag; tag=$(_image_tag_for_alias "$override_tag") || return 1
+  local remote; remote=$(_ecr_uri_for_tag "$tag")
+  local ecr_host="${remote%/*}"
+  aws_cli ecr get-login-password \
+    | docker login --username AWS --password-stdin "$ecr_host" >/dev/null
+  docker pull "$remote"
+  docker tag "$remote" "$tag"
+  echo "Pulled $remote -> local $tag"
+}
+
 ns_image_list() {
+  # Variant-independent — just lists ECR repository contents.
   local repo="${1:-vecoli}"
   echo "ECR repository: $repo"
   aws_cli ecr describe-images --repository-name "$repo" \
     --query 'sort_by(imageDetails,&imagePushedAt)[*].[imageTags[0],imagePushedAt,imageSizeInBytes]' \
     --output table 2>/dev/null
-}
-ns_image_pull() {
-  local tag="$IMAGE_TAG_DEFAULT"
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      -t|--tag) tag="$2"; shift 2 ;;
-      *) echo "image pull: unknown arg $1" >&2; return 1 ;;
-    esac
-  done
-  local acct; acct=$(account_id)
-  local remote="${acct}.dkr.ecr.${REGION}.amazonaws.com/${tag}"
-  aws_cli ecr get-login-password \
-    | docker login --username AWS --password-stdin "${acct}.dkr.ecr.${REGION}.amazonaws.com" >/dev/null
-  docker pull "$remote"
-  docker tag "$remote" "$tag"
-  echo "Pulled $remote -> local $tag"
 }
 
 # --- 7. ``run`` namespace ---------------------------------------------------
@@ -1578,6 +1723,34 @@ _compare_default_v2_id() {
   else echo "$EXP_ID"; fi
 }
 
+# Read sidecar for an arbitrary alias (mp, ray, ...). Returns empty if
+# alias has never been launched (no sidecar).
+_compare_default_id_for() {
+  local alias_name="$1"
+  local f="$STATE_DIR/${alias_name}.experiment-id"
+  [[ -f "$f" ]] || { echo ""; return; }
+  local v; v=$(<"$f"); echo "${v//$'\n'/}"
+}
+
+# Build the ``extra_ids`` env value the report consumes from any
+# alias sidecar we find that isn't v1/v2/compare. By convention
+# mp/ray sidecars hold full experiment_ids; we emit them as
+# ``label=full_id`` pairs, comma-separated. User-supplied
+# VECOLI_EXTRA_IDS still wins (set non-empty to override).
+_compare_auto_extra_ids() {
+  local out=""
+  while IFS=$'\t' read -r alias_name _cfg _method _img; do
+    [[ -z "$alias_name" ]] && continue
+    case "$alias_name" in
+      v1|v2|compare) continue ;;  # primary roles + compare alias itself
+    esac
+    local id; id=$(_compare_default_id_for "$alias_name")
+    [[ -z "$id" ]] && continue  # no sidecar yet → skip
+    out+="${out:+,}${alias_name}=${id}"
+  done < "$_REGISTRY"
+  echo "$out"
+}
+
 ns_compare_parity() {
   local seed="${1:-0}" gen="${2:-3}"
   uv run --no-sync python "$SCRIPT_DIR/compare_v1_v2_at_gen.py" \
@@ -1595,11 +1768,14 @@ ns_compare_gens() {
 
   _ns_max_gens_for() {
     # S3 history layout:
-    #   vecoli-output/<exp>/<exp>/history/experiment_id=<exp>/
+    #   vecoli-output/<base>/<full_exp_id>/history/experiment_id=<full_exp_id>/
     #     variant=0/lineage_seed=<N>/generation=<M>/agent_id=*/...
+    # ``base`` = config's ``experiment_id`` (no timestamp);
+    # ``full_exp_id`` = base + ``_YYYYMMDD-HHMMSS`` after run launch.
     # We list once and pull the max gen seen per seed.
     local exp="$1"
-    aws_cli s3 ls "s3://$BUCKET/vecoli-output/$exp/$exp/history/" \
+    local base; base=$(_exp_id_base "$exp")
+    aws_cli s3 ls "s3://$BUCKET/vecoli-output/$base/$exp/history/" \
       --recursive 2>/dev/null \
       | grep -oE 'lineage_seed=[0-9]+/generation=[0-9]+' \
       | awk -F'[=/]' '
@@ -1690,20 +1866,62 @@ ns_compare_full_parity() {
   echo "Per-col: $REPO_ROOT/${out_summary}.cols"
 }
 ns_compare_report() {
-  local v1_id="${VECOLI_V1_ID:-$(_compare_default_v1_id)}"
-  local v2_id="${VECOLI_V2_ID:-$(_compare_default_v2_id)}"
-  local seeds="${VECOLI_REPORT_SEEDS:-0,1,2,3,4,5,6,7,8,9}"
-  local gens="${VECOLI_REPORT_GENS:-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16}"
-  local include_history="${VECOLI_INCLUDE_HISTORY:-1}"
-  # VECOLI_EXTRA_IDS — comma-separated additional engine experiment
-  # IDs (composite_lineage MP, Ray, etc.) for the N-way wall-clock
-  # table. Each entry can be ``label=experiment_id`` so the report
-  # labels them clearly. Example:
-  #   VECOLI_EXTRA_IDS="mp=comparison_10s_16g_v2_mp_aws,ray=comparison_10s_16g_v2_ray_aws"
+  # CLI flags + env-var fallbacks (CLI wins). Defaults: v1/v2/extras
+  # come from sidecars, seeds = 0..9, gens = 1..16.
+  local v1_id="${VECOLI_V1_ID:-}"
+  local v2_id="${VECOLI_V2_ID:-}"
+  local seeds="${VECOLI_REPORT_SEEDS:-}"
+  local gens="${VECOLI_REPORT_GENS:-}"
   local extra_ids="${VECOLI_EXTRA_IDS:-}"
-  # VECOLI_ENGINE_COST — per-engine cost spec for engines without
-  # trace CSVs. See v1_v2_report.py --engine-cost docs.
   local engine_cost="${VECOLI_ENGINE_COST:-}"
+  local include_history="${VECOLI_INCLUDE_HISTORY:-1}"
+  local out_path="${VECOLI_REPORT_OUT:-}"
+  local no_fetch=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --gens)        gens="$2"; shift 2 ;;
+      --seeds)       seeds="$2"; shift 2 ;;
+      --v1-id)       v1_id="$2"; shift 2 ;;
+      --v2-id)       v2_id="$2"; shift 2 ;;
+      --extra-ids)   extra_ids="$2"; shift 2 ;;
+      --engine-cost) engine_cost="$2"; shift 2 ;;
+      --out)         out_path="$2"; shift 2 ;;
+      --no-history)  include_history=0; shift ;;
+      --no-fetch|--cached) no_fetch=1; shift ;;
+      -h|--help)
+        cat >&2 <<USAGE
+usage: $(basename "$0") compare report [--gens 1,2] [--seeds 0,1,...]
+                                       [--v1-id ID] [--v2-id ID]
+                                       [--extra-ids label=ID,...]
+                                       [--out doc/v1_v2_report_4way.md]
+                                       [--no-history] [--no-fetch]
+
+Defaults pull v1/v2/mp/ray IDs from .vecoli-aws-state/<alias>.experiment-id
+sidecars. ``--extra-ids`` (or VECOLI_EXTRA_IDS) overrides the auto-discovered
+non-v1/non-v2 alias sidecars (e.g. mp, ray) and turns the table into N-way.
+``--out`` (or VECOLI_REPORT_OUT) controls the output path; default is
+``doc/v1_v2_report.md``. Assets land under ``_static/<stem>_assets/``.
+``--no-fetch`` (or ``--cached``) skips ALL S3 sync steps and runs the
+report against whatever is already in ``out/<exp>/`` on the head — much
+faster for iterating on report formatting after the first sync.
+USAGE
+        return 0 ;;
+      *) echo "compare report: unknown arg '$1'" >&2; return 1 ;;
+    esac
+  done
+  [[ -z "$out_path" ]] && out_path="doc/v1_v2_report.md"
+  # Apply defaults for unset values
+  [[ -z "$v1_id"     ]] && v1_id=$(_compare_default_v1_id)
+  [[ -z "$v2_id"     ]] && v2_id=$(_compare_default_v2_id)
+  [[ -z "$seeds"     ]] && seeds="0,1,2,3,4,5,6,7,8,9"
+  [[ -z "$gens"      ]] && gens="1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16"
+  # Auto-discover mp/ray sidecars when --extra-ids / VECOLI_EXTRA_IDS
+  # not explicitly set. User passing ``--extra-ids ""`` is treated as
+  # explicit "no extras" (won't trigger auto-discovery).
+  if [[ -z "${VECOLI_EXTRA_IDS+x}" && -z "$extra_ids" ]]; then
+    extra_ids=$(_compare_auto_extra_ids)
+    [[ -n "$extra_ids" ]] && echo "Auto-discovered extras: $extra_ids"
+  fi
   local dns; dns=$(require_running_dns)
   echo "Pushing latest scripts to head..."
   ssh -i "$KEY_FILE" "ec2-user@$dns" 'mkdir -p ~/vEcoli/runscripts/aws'
@@ -1717,48 +1935,64 @@ ns_compare_report() {
       "$REPO_ROOT/runscripts/cost.py" \
       "$REPO_ROOT/runscripts/synthetic_trace.py" \
       "ec2-user@$dns:~/vEcoli/runscripts/"
-  echo "Running fetch + report on head ($v1_id vs $v2_id${extra_ids:+ + extras: $extra_ids})..."
+  echo "Running fetch + report on head ($v1_id vs $v2_id${extra_ids:+ + extras: $extra_ids}) -> $out_path"
   ssh -i "$KEY_FILE" "ec2-user@$dns" "set -e; cd ~/vEcoli && \
     V1_ID='$v1_id' V2_ID='$v2_id' SEEDS='$seeds' GENS='$gens' \
     EXTRA_IDS='$extra_ids' ENGINE_COST='$engine_cost' \
     INCLUDE_HISTORY='$include_history' \
+    REPORT_OUT='$out_path' \
+    NO_FETCH='$no_fetch' \
     BUCKET='$BUCKET' PREFIX='${PREFIX%%/*}' \
     bash runscripts/aws/fetch_and_compare.sh"
-  echo "Pulling rendered report to local doc/..."
-  scp -i "$KEY_FILE" "ec2-user@$dns:~/vEcoli/doc/v1_v2_report.md" "$REPO_ROOT/doc/" || true
+  # Pull back the named report + its asset dir (named ``<stem>_assets``)
+  local out_stem; out_stem="$(basename "$out_path" .md)"
+  local out_dir; out_dir="$(dirname "$out_path")"
+  echo "Pulling rendered report to local $out_dir/..."
+  mkdir -p "$REPO_ROOT/$out_dir" "$REPO_ROOT/$out_dir/_static"
+  scp -i "$KEY_FILE" "ec2-user@$dns:~/vEcoli/$out_path" \
+      "$REPO_ROOT/$out_dir/" || true
   rsync -a -e "ssh -i $KEY_FILE" \
-    "ec2-user@$dns:~/vEcoli/doc/_static/v1_v2_report_assets/" \
-    "$REPO_ROOT/doc/_static/v1_v2_report_assets/" 2>/dev/null \
-    || scp -ri "$KEY_FILE" "ec2-user@$dns:~/vEcoli/doc/_static/v1_v2_report_assets" "$REPO_ROOT/doc/_static/"
-  echo "Report:  $REPO_ROOT/doc/v1_v2_report.md"
+    "ec2-user@$dns:~/vEcoli/$out_dir/_static/${out_stem}_assets/" \
+    "$REPO_ROOT/$out_dir/_static/${out_stem}_assets/" 2>/dev/null \
+    || scp -ri "$KEY_FILE" \
+        "ec2-user@$dns:~/vEcoli/$out_dir/_static/${out_stem}_assets" \
+        "$REPO_ROOT/$out_dir/_static/"
+  echo "Report:  $REPO_ROOT/$out_path"
 }
 ns_compare_export() {
+  # Args: [html|pdf] [path/to/report.md]
+  # If only fmt provided, defaults to doc/v1_v2_report.md.
   local fmt="${1:-html}"
-  local src="$REPO_ROOT/doc/v1_v2_report.md"
-  [[ -f "$src" ]] || { echo "no $src yet — run 'compare report' first" >&2; return 1; }
+  local src="${2:-$REPO_ROOT/doc/v1_v2_report.md}"
+  # Allow relative paths (resolve against REPO_ROOT for convenience).
+  [[ "$src" = /* ]] || src="$REPO_ROOT/$src"
+  [[ -f "$src" ]] || { echo "no $src — run 'compare report --out <path>' first" >&2; return 1; }
   command -v pandoc >/dev/null \
     || { echo "pandoc not installed: sudo apt install pandoc" >&2; return 1; }
+  local src_dir; src_dir="$(dirname "$src")"
+  local src_stem; src_stem="$(basename "$src" .md)"
+  local assets_dir="$src_dir/_static/${src_stem}_assets"
   case "$fmt" in
     html)
-      local out="$REPO_ROOT/doc/v1_v2_report.html"
+      local out="$src_dir/${src_stem}.html"
       local embed_flag="--embed-resources"
       pandoc --help 2>&1 | grep -q -- '--embed-resources' || embed_flag="--self-contained"
       pandoc -s "$embed_flag" \
-        --metadata title="vEcoli v1 vs v2" \
-        --resource-path="$REPO_ROOT/doc:$REPO_ROOT/doc/_static" \
+        --metadata title="vEcoli ${src_stem}" \
+        --resource-path="$src_dir:$src_dir/_static:$assets_dir" \
         -o "$out" "$src"
       echo "Wrote $out ($(du -h "$out" | cut -f1))"
       ;;
     pdf)
       command -v weasyprint >/dev/null \
         || { echo "weasyprint not installed: uv pip install weasyprint" >&2; return 1; }
-      local out="$REPO_ROOT/doc/v1_v2_report.pdf"
+      local out="$src_dir/${src_stem}.pdf"
       pandoc --pdf-engine=weasyprint \
-        --resource-path="$REPO_ROOT/doc:$REPO_ROOT/doc/_static" \
+        --resource-path="$src_dir:$src_dir/_static:$assets_dir" \
         -o "$out" "$src"
       echo "Wrote $out ($(du -h "$out" | cut -f1))"
       ;;
-    *) echo "usage: $(basename "$0") compare export [html|pdf]" >&2; return 1 ;;
+    *) echo "usage: $(basename "$0") compare export [html|pdf] [path/to/report.md]" >&2; return 1 ;;
   esac
 }
 
@@ -1769,10 +2003,11 @@ Usage: $(basename "$0") <namespace> <subcmd> <alias> [args]
        $(basename "$0") help
 
 Aliases are dynamic. Built-in defaults (auto-seeded on first use):
-  v1   configs/comparison_10s_16g_v1_aws.json     nextflow_batch
-  v2   configs/comparison_10s_16g_v2_aws.json     nextflow_batch
-  mp   configs/comparison_10s_16g_v2_mp_aws.json  mp_single_node
-  ray  configs/comparison_10s_16g_v2_ray_aws.json ray_cluster
+  v1       configs/comparison_10s_16g_v1_aws.json     nextflow_batch
+  v2       configs/comparison_10s_16g_v2_aws.json     nextflow_batch
+  mp       configs/comparison_10s_16g_v2_mp_aws.json  mp_single_node
+  ray      configs/comparison_10s_16g_v2_ray_aws.json ray_cluster
+  compare  configs/compare_head.json                  comparison_head
 
 Add more with ``experiment new <alias> <config>``. The registry lives at
 .vecoli-aws-state/aliases.tsv (gitignored). ``experiment list`` prints
@@ -1823,13 +2058,16 @@ Namespaces:
     refresh-sg       re-add current public IP to SSH SG
     dns | ssh [cmd] | attach
 
-  image <subcmd>              Docker image lifecycle (shared, no variant)
-    build [-t TAG] [--cloud]
-                          build image (default: local Docker; tag: $IMAGE_TAG_DEFAULT)
-                          --cloud uses Google Cloud Build (only relevant for GCP path)
-    push  [-t TAG]        ECR login + tag + push
-    pull  [-t TAG]        pull from ECR + retag locally
-    list  [REPO]          list ECR images (default repo: vecoli)
+  image <subcmd> <alias>      Docker image lifecycle (image_tag is per-alias)
+    build [--tag TAG] [--platform PLATFORM] [--cloud]
+                          build image for <alias> using its registered
+                          image_tag (4th col of aliases.tsv). --tag
+                          overrides for this build only. Auto-infers
+                          platform from tag (-arm64 / -amd64) and
+                          cross-builds via buildx if host arch differs.
+    push  [--tag TAG]     ECR login + tag + push for <alias>'s image
+    pull  [--tag TAG]     pull <alias>'s image from ECR + retag locally
+    list  [REPO]          list all ECR repository images (no alias)
 
   run <subcmd> <alias>        workflow execution
     launch [--resume] [--build] [--from-origin]
@@ -1861,7 +2099,11 @@ Namespaces:
 
   cache <subcmd> <alias>      Nextflow .nextflow/ S3 cache (push|pull|ls|rm)
 
-  compare <subcmd>            pairwise output analysis (no variant arg)
+  compare <subcmd>            pairwise output analysis (defaults to ``compare``
+                              alias's head; override with VECOLI_AWS_CONFIG_VARIANT)
+    bootstrap             one-time setup on the comparison head: scp +
+                          run bootstrap_head_compare.sh (clone vEcoli,
+                          uv sync). Run AFTER ``head setup compare``.
     parity [SEED] [GEN]   diff v1 vs v2 bulk at SEED/GEN (default 0/3)
     full-parity           run compute_full_parity.py on head — every
                           parquet column at every common timestep
@@ -1871,20 +2113,25 @@ Namespaces:
                           --v1-id ID --v2-id ID
     gens                  max gen reached per seed in v1 vs v2 sidecar
                           (override with VECOLI_V1_ID / VECOLI_V2_ID env)
-    report                fetch+render v1 vs v2 markdown report
+    report [--gens 1,2] [--seeds 0,1] [--v1-id ID] [--v2-id ID]
+           [--extra-ids label=ID,...] [--no-history]
+                          fetch+render N-way markdown report. v1/v2/mp/
+                          ray IDs default to .vecoli-aws-state/<alias>.experiment-id
+                          sidecars (extras auto-discovered for any
+                          non-v1/v2/compare alias with a sidecar).
     export [html|pdf]     convert report to single-file artifact
 
 Examples:
-  $(basename "$0") experiment new myrun configs/my_config.json
-  $(basename "$0") experiment list                          # show all aliases + methods
+  $(basename "$0") experiment new myrun configs/foo.json batch vecoli:my-tag-arm64
+  $(basename "$0") experiment list                          # show all aliases + methods + images
   $(basename "$0") head setup myrun batch                   # first time: pin method
+  $(basename "$0") image build myrun                        # build image registered for myrun
+  $(basename "$0") image push  myrun                        # push to ECR
   $(basename "$0") run launch myrun                         # rsync local, fresh exp_id
   $(basename "$0") run tail myrun                           # follow myrun's log
   $(basename "$0") run id myrun                             # active experiment_id
   $(basename "$0") run launch myrun --from-origin           # pull origin instead of rsync
   $(basename "$0") run launch myrun --build                 # rebuild image (on the head)
-  $(basename "$0") image build -t mytag --platform linux/arm64
-                                                            # cross-build for ARM64
   $(basename "$0") experiment end myrun --terminate-head --rm   # tear down + remove
   $(basename "$0") head terminate-all --cancel-jobs         # full cleanup
                                                             #   (jobs + heads;
@@ -1957,12 +2204,13 @@ case "$cmd" in
     esac
     ;;
   image)
-    # No variant — image is shared across variants.
+    # build/push/pull each take an alias (image_tag is per-alias in
+    # the registry). list is variant-independent (lists ECR repo).
     sub="${1:-help}"; shift || true
     case "$sub" in
-      build) ns_image_build "$@" ;;
-      push)  ns_image_push "$@" ;;
-      pull)  ns_image_pull "$@" ;;
+      build) _dispatch_variant ns_image_build "$@" ;;
+      push)  _dispatch_variant ns_image_push  "$@" ;;
+      pull)  _dispatch_variant ns_image_pull  "$@" ;;
       list)  ns_image_list "$@" ;;
       help|*) cmd_help ;;
     esac
@@ -1996,9 +2244,13 @@ case "$cmd" in
     esac
     ;;
   compare)
-    # compare uses both v1 and v2 sidecars internally; default to v2's
-    # config for BUCKET/PREFIX/region (they're shared across variants).
-    _use_variant "${VECOLI_AWS_CONFIG_VARIANT:-v2}" || exit 1
+    # compare uses v1/v2 sidecars internally for the ID defaults, but the
+    # SSH target (HEAD_NAME) needs to be the comparison head — not v2's
+    # workflow head. Default to the ``compare`` alias so the dedicated
+    # compare head is used; override with VECOLI_AWS_CONFIG_VARIANT to
+    # run on a workflow head instead. The compare config still points at
+    # the same shared bucket so BUCKET/PREFIX resolve identically.
+    _use_variant "${VECOLI_AWS_CONFIG_VARIANT:-compare}" || exit 1
     sub="${1:-help}"; shift || true
     case "$sub" in
       parity) ns_compare_parity "$@" ;;
@@ -2006,6 +2258,12 @@ case "$cmd" in
       gens)   ns_compare_gens "$@" ;;
       report) ns_compare_report "$@" ;;
       export) ns_compare_export "$@" ;;
+      bootstrap)
+        # One-shot: scp + run bootstrap_head_compare.sh on the
+        # comparison head. ``head setup`` only provisions the EC2;
+        # this installs uv + clones vEcoli + uv sync. After this
+        # the report / parity subcmds can run.
+        _run_bootstrap_on_head ;;
       help|*) cmd_help ;;
     esac
     ;;
@@ -2028,10 +2286,10 @@ case "$cmd" in
   jobs)          _dispatch_variant ns_run_jobs "$@" ;;
   tail)          _dispatch_variant ns_run_tail "$@" ;;
   report)
-    _use_variant "${VECOLI_AWS_CONFIG_VARIANT:-v2}" || exit 1
+    _use_variant "${VECOLI_AWS_CONFIG_VARIANT:-compare}" || exit 1
     ns_compare_report "$@" ;;
   export)
-    _use_variant "${VECOLI_AWS_CONFIG_VARIANT:-v2}" || exit 1
+    _use_variant "${VECOLI_AWS_CONFIG_VARIANT:-compare}" || exit 1
     ns_compare_export "$@" ;;
   # Variant-suffixed legacies (setup-mp / launch-ray / etc.) are removed —
   # use the new positional form instead (``head setup mp``, ``run launch ray``).

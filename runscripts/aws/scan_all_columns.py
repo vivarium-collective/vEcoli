@@ -18,11 +18,20 @@ Designed for the head node where in-region S3 sync is fast.
 import argparse
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 from collections import defaultdict
+
+
+_TS_SUFFIX = re.compile(r'_\d{8}-\d{6}$')
+
+
+def _exp_base(exp):
+    """Strip ``_YYYYMMDD-HHMMSS`` auto-rotation suffix."""
+    return _TS_SUFFIX.sub('', exp)
 
 import numpy as np
 import polars as pl
@@ -238,7 +247,8 @@ def main():
         os.makedirs(args.scratch, exist_ok=True)
         tmp = tempfile.mkdtemp(prefix=f's{args.seed}g{args.gen}_', dir=args.scratch)
         for tag, exp in [('v1', args.v1_id), ('v2', args.v2_id)]:
-            uri = (f's3://{args.bucket}/{args.prefix}/{exp}/{exp}/history/'
+            base = _exp_base(exp)
+            uri = (f's3://{args.bucket}/{args.prefix}/{base}/{exp}/history/'
                    f'experiment_id={exp}/variant=0/lineage_seed={args.seed}/'
                    f'generation={args.gen}/agent_id={agent_id}/')
             print(f'syncing {tag} ...', flush=True)

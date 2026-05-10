@@ -194,35 +194,70 @@ def tsv_preview(path, n=10):
     return tbl
 
 
-def plot_row(label, v1_rel, v2_rel, v1_abs, v2_abs):
+def plot_row(label, engines):
+    """Render one analysis as N side-by-side cells, one per engine.
+
+    ``engines`` is a list of ``(engine_label, rel_path, abs_path)``
+    tuples. ``rel_path`` is None when the analysis is missing for
+    that engine (still gets a column showing _(missing)_ — keeps
+    column count consistent across engines).
+    """
     def cell(rel, abs_path):
         if rel is None:
             return '_(missing)_'
         if rel.endswith('.png'):
             return f'![{label}]({rel})'
-        if rel.endswith('.tsv'):
-            return f'[{os.path.basename(rel)}]({rel})'
         return f'[{os.path.basename(rel)}]({rel})'
     header = f'### {label}\n'
-    # Tabular analyses — render previews stacked, not side-by-side, so
-    # the rows stay readable.
-    if (v1_rel and v1_rel.endswith('.tsv')) or \
-       (v2_rel and v2_rel.endswith('.tsv')):
-        return (f'{header}\n'
-                f'**V1** ([full file]({v1_rel}))\n\n'
-                f'{tsv_preview(v1_abs)}\n\n'
-                f'**V2** ([full file]({v2_rel}))\n\n'
-                f'{tsv_preview(v2_abs)}\n')
-    # Plot images — side-by-side so V1/V2 are easy to compare.
-    return (f'{header}\n'
-            f'| V1 | V2 |\n|---|---|\n'
-            f'| {cell(v1_rel, v1_abs)} | {cell(v2_rel, v2_abs)} |\n')
+    # Tabular analyses — render previews stacked rather than side-by-
+    # side, so the rows stay readable on narrow viewers.
+    is_tabular = any(
+        rel and rel.endswith('.tsv') for _, rel, _ in engines)
+    if is_tabular:
+        parts = [header]
+        for eng_label, rel, abs_path in engines:
+            parts.append(
+                f'**{eng_label}** '
+                + (f'([full file]({rel}))\n\n' if rel else '_(missing)_\n\n')
+                + (f'{tsv_preview(abs_path)}\n' if rel else ''))
+        return '\n'.join(parts)
+    # Plot images — one column per engine.
+    head_row = '| ' + ' | '.join(eng_label for eng_label, _, _ in engines) + ' |'
+    sep_row = '|' + '|'.join(['---'] * len(engines)) + '|'
+    cell_row = '| ' + ' | '.join(
+        cell(rel, abs_path) for _, rel, abs_path in engines) + ' |'
+    return f'{header}\n{head_row}\n{sep_row}\n{cell_row}\n'
 
 
-def parity_matrix_section(matrix_path):
-    """Render parity_matrix.tsv as a per-(seed, gen) markdown matrix."""
+def parity_matrix_section(matrix_paths):
+    """Render one parity matrix per (v1, other) pair.
+
+    ``matrix_paths`` is a comma-separated list of TSV file paths. Each
+    file is named ``parity_matrix__v1__<label>.tsv`` so the section
+    title can pull the engine label from the filename.
+    """
+    if not matrix_paths:
+        return ''
+    paths = [p for p in matrix_paths.split(',') if p]
+    sections = []
+    for matrix_path in paths:
+        section = _parity_matrix_one(matrix_path)
+        if section:
+            sections.append(section)
+    if not sections:
+        return ''
+    return '## Bulk parity matrices\n\n' + '\n\n'.join(sections)
+
+
+def _parity_matrix_one(matrix_path):
     if not os.path.exists(matrix_path):
         return ''
+    # Derive engine label from filename: parity_matrix__v1__<label>.tsv
+    fname = os.path.basename(matrix_path)
+    label = 'v2'
+    m = re.match(r'parity_matrix__v1__([^.]+)\.tsv$', fname)
+    if m:
+        label = m.group(1)
     rows = []
     with open(matrix_path) as f:
         header = f.readline().strip().split('\t')
@@ -275,7 +310,7 @@ def parity_matrix_section(matrix_path):
         )
     else:
         summary = f'\n**All {len(rows)} cells bit-identical.**\n'
-    return ('## Bulk parity matrix\n\n' + legend + table + summary
+    return (f'### Bulk parity: v1 vs {label}\n\n' + legend + table + summary
             + f'\n_Source: `{matrix_path}`._\n')
 
 
@@ -328,37 +363,6 @@ def main():
 
     v1_trace = load_trace(args.v1_id)
     v2_trace = load_trace(args.v2_id)
-
-    v1_dt = division_times(args.v1_id)
-    v2_dt = division_times(args.v2_id)
-
-    # Division times table
-    div_rows = []
-    for seed in sorted(set(v1_dt) | set(v2_dt)):
-        prev_v1, prev_v2 = 0.0, 0.0
-        for gen in sorted(set(v1_dt.get(seed, {})) | set(v2_dt.get(seed, {}))):
-            v1d = v1_dt.get(seed, {}).get(gen)
-            v2d = v2_dt.get(seed, {}).get(gen)
-            v1_cycle = (v1d - prev_v1) if v1d else None
-            v2_cycle = (v2d - prev_v2) if v2d else None
-            delta_pct = ((v2_cycle - v1_cycle) / v1_cycle * 100) \
-                if v1_cycle and v2_cycle else None
-            div_rows.append([
-                seed, gen,
-                f'{v1d:.0f}' if v1d else '-',
-                f'{v2d:.0f}' if v2d else '-',
-                f'{v1_cycle:.0f}' if v1_cycle else '-',
-                f'{v2_cycle:.0f}' if v2_cycle else '-',
-                f'{delta_pct:+.1f}%' if delta_pct is not None else '-',
-            ])
-            if v1d:
-                prev_v1 = v1d
-            if v2d:
-                prev_v2 = v2d
-    div_table = md_table(
-        ['Seed', 'Gen', 'V1 div_time', 'V2 div_time',
-         'V1 cycle', 'V2 cycle', 'Δ%'],
-        div_rows)
 
     # Per-sim runtime table
     def per_sim_dict(trace):
@@ -453,6 +457,63 @@ def main():
             label, exp_id = raw, raw
         extra_engines.append((label, exp_id, workflow_stats(load_trace(exp_id))))
 
+    # ----- Division-times table (N-way) ----------------------------
+    # Columns adapt to the engine set: v1, v2, + each --extra-ids
+    # engine. Each engine gets a ``<eng> div_time`` and ``<eng> cycle``
+    # column. ``Δ%`` compares each non-v1 engine's cycle to v1's.
+    # MP/Ray will mostly show ``-`` until division-time extraction is
+    # wired for non-nextflow runs (currently division_times() pulls
+    # from daughter_states JSONs / nextflow workdirs).
+    engines_for_div = (
+        [('v1', args.v1_id), ('v2', args.v2_id)]
+        + [(label, exp_id) for (label, exp_id, _) in extra_engines])
+    eng_dt = {label: division_times(exp_id) for (label, exp_id) in engines_for_div}
+    div_seeds = sorted({s for dt in eng_dt.values() for s in dt})
+    div_gens = sorted({g for dt in eng_dt.values()
+                       for s in dt for g in dt[s]})
+    div_headers = ['Seed', 'Gen']
+    for label, _ in engines_for_div:
+        div_headers.append(f'{label} div_time')
+    for label, _ in engines_for_div:
+        div_headers.append(f'{label} cycle')
+    for label, _ in engines_for_div:
+        if label == 'v1':
+            continue
+        div_headers.append(f'Δ% ({label}/v1)')
+
+    div_rows = []
+    prev_dt = {label: 0.0 for label, _ in engines_for_div}
+    for seed in div_seeds:
+        # Reset prev cycles per seed
+        for label, _ in engines_for_div:
+            prev_dt[label] = 0.0
+        for gen in div_gens:
+            row = [seed, gen]
+            d_per_engine = {}
+            for label, _ in engines_for_div:
+                d = eng_dt[label].get(seed, {}).get(gen)
+                d_per_engine[label] = d
+                row.append(f'{d:.0f}' if d else '-')
+            cycle_per_engine = {}
+            for label, _ in engines_for_div:
+                d = d_per_engine[label]
+                cyc = (d - prev_dt[label]) if d else None
+                cycle_per_engine[label] = cyc
+                row.append(f'{cyc:.0f}' if cyc else '-')
+                if d:
+                    prev_dt[label] = d
+            v1_cyc = cycle_per_engine.get('v1')
+            for label, _ in engines_for_div:
+                if label == 'v1':
+                    continue
+                cyc = cycle_per_engine[label]
+                if v1_cyc and cyc:
+                    row.append(f'{(cyc - v1_cyc) / v1_cyc * 100:+.1f}%')
+                else:
+                    row.append('-')
+            div_rows.append(row)
+    div_table = md_table(div_headers, div_rows)
+
     # Parse --engine-cost spec for engines without trace CSVs.
     # Map: label → (cost_kind, ...spec...).
     cost_specs: dict[str, tuple] = {}
@@ -479,92 +540,116 @@ def main():
         except (ValueError, IndexError) as e:
             print(f'warn: bad --engine-cost spec {raw!r}: {e}')
 
-    runtime_rows = []
-    v1_sim_total = 0.0
-    v2_sim_total = 0.0
-    for seed in sorted(set(s for s, _ in v1_sim) | set(s for s, _ in v2_sim)):
-        prev_v1, prev_v2 = 0.0, 0.0
-        for gen in sorted(set(g for s, g in v1_sim if s == seed) |
-                          set(g for s, g in v2_sim if s == seed)):
-            v1_wall = v1_sim.get((seed, gen))
-            v2_wall = v2_sim.get((seed, gen))
-            v1_div = v1_dt.get(seed, {}).get(gen)
-            v2_div = v2_dt.get(seed, {}).get(gen)
-            v1_ticks = (v1_div - prev_v1) if v1_div else None
-            v2_ticks = (v2_div - prev_v2) if v2_div else None
-            v1_per = (v1_wall / v1_ticks) if v1_wall and v1_ticks else None
-            v2_per = (v2_wall / v2_ticks) if v2_wall and v2_ticks else None
-            delta = ((v2_wall - v1_wall) / v1_wall * 100) \
-                if v1_wall and v2_wall else None
-            runtime_rows.append([
-                f'seed {seed} gen {gen}',
-                f'{v1_wall:.0f}' if v1_wall else '-',
-                f'{v2_wall:.0f}' if v2_wall else '-',
-                f'{v1_per:.3f}' if v1_per else '-',
-                f'{v2_per:.3f}' if v2_per else '-',
-                f'{delta:+.1f}%' if delta is not None else '-',
-            ])
-            if v1_wall:
-                v1_sim_total += v1_wall
-                prev_v1 = v1_div or prev_v1
-            if v2_wall:
-                v2_sim_total += v2_wall
-                prev_v2 = v2_div or prev_v2
-    if v1_sim_total and v2_sim_total:
-        total_delta = (v2_sim_total - v1_sim_total) / v1_sim_total * 100
-        runtime_rows.append([
-            '**SIM TOTAL**',
-            f'**{v1_sim_total:.0f}**',
-            f'**{v2_sim_total:.0f}**',
-            '-', '-',
-            f'**{total_delta:+.1f}%**',
-        ])
-    if not v1_sim and v2_sim:
-        runtime_table = (
-            '_V1 trace CSV not available — atlantis-driven runs don\'t '
-            'preserve `trace--<exp>--*.csv` in S3, so V1 task durations '
-            'cannot be recovered post-hoc. Showing V2 only._\n\n'
-            + md_table(
-                ['Sim', 'V2 wall (s)', 'V2 s/tick'],
-                [[r[0], r[2], r[4]] for r in runtime_rows]))
-    elif not v2_sim and v1_sim:
-        runtime_table = (
-            '_V2 trace CSV not available._\n\n'
-            + md_table(
-                ['Sim', 'V1 wall (s)', 'V1 s/tick'],
-                [[r[0], r[1], r[3]] for r in runtime_rows]))
-    elif not v1_sim and not v2_sim:
-        runtime_table = '_No trace CSVs available for either run._\n'
+    # ----- Per-sim runtime table (N-way) ---------------------------
+    # One column per engine: wall (s), s/tick, and a Δ% vs v1.
+    # Engines with no trace CSV show ``-`` rather than being dropped.
+    eng_sim = {label: per_sim_dict(load_trace(exp_id))
+               for (label, exp_id) in engines_for_div}
+    eng_sim['v1'] = v1_sim
+    eng_sim['v2'] = v2_sim
+    has_any_sim = any(s for s in eng_sim.values())
+    if not has_any_sim:
+        runtime_table = '_No trace CSVs available for any engine yet._\n'
     else:
-        runtime_table = md_table(
-            ['Sim', 'V1 wall (s)', 'V2 wall (s)',
-             'V1 s/tick', 'V2 s/tick', 'Δ wall %'],
-            runtime_rows)
+        rt_headers = ['Sim']
+        for label, _ in engines_for_div:
+            rt_headers.append(f'{label} wall (s)')
+        for label, _ in engines_for_div:
+            rt_headers.append(f'{label} s/tick')
+        for label, _ in engines_for_div:
+            if label == 'v1':
+                continue
+            rt_headers.append(f'Δ% ({label}/v1)')
 
-    # Analysis plots
+        # Aggregate seeds × gens that any engine has data for.
+        all_seeds = sorted({s for sim in eng_sim.values() for s, _ in sim})
+        runtime_rows = []
+        eng_total = {label: 0.0 for label, _ in engines_for_div}
+        for seed in all_seeds:
+            prev_dt_local = {label: 0.0 for label, _ in engines_for_div}
+            all_gens_for_seed = sorted(
+                {g for sim in eng_sim.values()
+                 for s, g in sim if s == seed})
+            for gen in all_gens_for_seed:
+                walls = {}
+                ticks = {}
+                for label, _ in engines_for_div:
+                    walls[label] = eng_sim[label].get((seed, gen))
+                    d = eng_dt[label].get(seed, {}).get(gen)
+                    ticks[label] = (d - prev_dt_local[label]) if d else None
+                    if d:
+                        prev_dt_local[label] = d
+                row = [f'seed {seed} gen {gen}']
+                for label, _ in engines_for_div:
+                    w = walls[label]
+                    row.append(f'{w:.0f}' if w else '-')
+                for label, _ in engines_for_div:
+                    w, t = walls[label], ticks[label]
+                    per = (w / t) if (w and t) else None
+                    row.append(f'{per:.3f}' if per else '-')
+                v1_w = walls.get('v1')
+                for label, _ in engines_for_div:
+                    if label == 'v1':
+                        continue
+                    w = walls[label]
+                    if v1_w and w:
+                        row.append(f'{(w - v1_w) / v1_w * 100:+.1f}%')
+                    else:
+                        row.append('-')
+                runtime_rows.append(row)
+                for label, _ in engines_for_div:
+                    if walls[label]:
+                        eng_total[label] += walls[label]
+        # Total row
+        if any(eng_total.values()):
+            row = ['**SIM TOTAL**']
+            for label, _ in engines_for_div:
+                t = eng_total[label]
+                row.append(f'**{t:.0f}**' if t else '-')
+            for _ in engines_for_div:
+                row.append('-')  # s/tick aggregate not meaningful
+            v1_total = eng_total.get('v1', 0.0)
+            for label, _ in engines_for_div:
+                if label == 'v1':
+                    continue
+                t = eng_total[label]
+                if v1_total and t:
+                    row.append(f'**{(t - v1_total) / v1_total * 100:+.1f}%**')
+                else:
+                    row.append('-')
+            runtime_rows.append(row)
+        runtime_table = md_table(rt_headers, runtime_rows)
+
+    # Analysis plots — N-way: v1 + v2 + each --extra-ids entry. Engine
+    # column count adapts to whatever is being compared. Engines whose
+    # workflow hasn't emitted analyses yet (e.g. MP/Ray during a still-
+    # running run) get a ``_(missing)_`` cell so the column lineup
+    # remains stable across rows.
+    engine_specs = (
+        [('v1', args.v1_id), ('v2', args.v2_id)]
+        + [(label, exp_id) for (label, exp_id, _wf) in extra_engines])
     plot_blocks = []
     for seed in seeds:
         for gen in gens:
-            v1_p = find_plot(
-                args.v1_id, 'mass_fraction_summary', seed, gen)
-            v2_p = find_plot(
-                args.v2_id, 'mass_fraction_summary', seed, gen)
-            v1_r = stage_asset(v1_p, assets_dir, assets_rel,
-                               f'mass_fraction_summary__seed{seed}_gen{gen}_v1')
-            v2_r = stage_asset(v2_p, assets_dir, assets_rel,
-                               f'mass_fraction_summary__seed{seed}_gen{gen}_v2')
+            cells = []
+            for eng_label, exp_id in engine_specs:
+                p = find_plot(
+                    exp_id, 'mass_fraction_summary', seed, gen)
+                r = stage_asset(
+                    p, assets_dir, assets_rel,
+                    f'mass_fraction_summary__seed{seed}_gen{gen}_{eng_label}')
+                cells.append((eng_label, r, p))
             plot_blocks.append(plot_row(
-                f'mass_fraction_summary — seed {seed}, gen {gen}',
-                v1_r, v2_r, v1_p, v2_p))
+                f'mass_fraction_summary — seed {seed}, gen {gen}', cells))
     for kind in ['protein_counts_validation',
                  'subgenerational_expression_table',
                  'ecocyc_table']:
-        v1_p = find_plot(args.v1_id, kind)
-        v2_p = find_plot(args.v2_id, kind)
-        v1_r = stage_asset(v1_p, assets_dir, assets_rel, f'{kind}_v1')
-        v2_r = stage_asset(v2_p, assets_dir, assets_rel, f'{kind}_v2')
-        plot_blocks.append(plot_row(
-            f'{kind} (multiseed)', v1_r, v2_r, v1_p, v2_p))
+        cells = []
+        for eng_label, exp_id in engine_specs:
+            p = find_plot(exp_id, kind)
+            r = stage_asset(p, assets_dir, assets_rel, f'{kind}_{eng_label}')
+            cells.append((eng_label, r, p))
+        plot_blocks.append(plot_row(f'{kind} (multiseed)', cells))
 
     parity_md = parity_matrix_section(args.parity_matrix)
 

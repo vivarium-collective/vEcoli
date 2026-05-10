@@ -20,6 +20,7 @@ slow (~2 min/cell) but fine for one-off divergence hunting.
 from __future__ import annotations
 import argparse
 import os
+import re
 import sys
 
 import numpy as np
@@ -27,9 +28,18 @@ import polars as pl
 import pyarrow.dataset as pa_ds
 
 
+_TS_SUFFIX = re.compile(r'_\d{8}-\d{6}$')
+
+
+def _exp_base(exp):
+    """Strip ``_YYYYMMDD-HHMMSS`` auto-rotation suffix."""
+    return _TS_SUFFIX.sub('', exp)
+
+
 def _hist_uri(bucket, prefix, exp, seed, gen):
     agent_id = '0' * gen
-    return (f's3://{bucket}/{prefix}/{exp}/{exp}/history/'
+    base = _exp_base(exp)
+    return (f's3://{bucket}/{prefix}/{base}/{exp}/history/'
             f'experiment_id={exp}/variant=0/lineage_seed={seed}/'
             f'generation={gen}/agent_id={agent_id}/')
 

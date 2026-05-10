@@ -25,9 +25,25 @@ Bit parity with v1 / v2-pergen / single-process composite_lineage by
 construction — every worker uses the same code path as
 ``EcoliSim._run_composite_lineage`` for its assigned seed.
 """
+import os
+
+# Pin numerics to single-threaded BEFORE any numpy/scipy/numba/BLAS
+# import. Threading config is read at IMPORT time; setting these
+# inside workers after fork is too late because numpy has already
+# bound to the threadpool. With N MP workers each spawning N threads,
+# total threads = N×M oversubscribes M-core boxes; empirically N=8
+# went 104s → 59s (-43%) when we set these (2026-05-10 scaling test).
+# ``setdefault`` so user can override on the command line.
+os.environ.setdefault('POLARS_MAX_THREADS', '1')
+os.environ.setdefault('OMP_NUM_THREADS', '1')
+os.environ.setdefault('MKL_NUM_THREADS', '1')
+os.environ.setdefault('OPENBLAS_NUM_THREADS', '1')
+os.environ.setdefault('NUMBA_NUM_THREADS', '1')
+os.environ.setdefault('NUMEXPR_NUM_THREADS', '1')
+os.environ.setdefault('VECLIB_MAXIMUM_THREADS', '1')
+
 import argparse
 import multiprocessing
-import os
 import sys
 import time
 
@@ -96,15 +112,11 @@ def _run_one_lineage(seed):
     """Worker entry: run a full lineage for one ``lineage_seed``.
 
     Reads the parent-loaded sim_data from the module-level
-    ``_PRELOADED_SIM_DATA`` global (inherited via fork). Pinning
-    POLARS_MAX_THREADS=1 keeps polars from oversubscribing on
-    multi-worker boxes.
+    ``_PRELOADED_SIM_DATA`` global (inherited via fork).
 
-    Returns ``(seed, t_seed_start_epoch, t_seed_end_epoch)`` so the
-    parent can write a Nextflow-shaped synthetic trace CSV at
-    workflow end.
+    Threading is pinned at module-import time at the top of this file
+    (must be set before numpy/BLAS/numba load). See comment there.
     """
-    os.environ.setdefault('POLARS_MAX_THREADS', '1')
     from ecoli.experiments.ecoli_master_sim import EcoliSim
 
     sim = EcoliSim.from_file(_WORKER_CONFIG_PATH)

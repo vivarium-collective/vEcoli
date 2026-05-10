@@ -17,6 +17,7 @@ Output schema (TSV):
 """
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -27,11 +28,21 @@ import polars as pl
 import pyarrow.dataset as pa_ds
 
 
+_TS_SUFFIX = re.compile(r'_\d{8}-\d{6}$')
+
+
+def _exp_base(exp):
+    """Strip ``_YYYYMMDD-HHMMSS`` auto-rotation suffix to get the
+    config's ``experiment_id`` (the outer S3 dir name)."""
+    return _TS_SUFFIX.sub('', exp)
+
+
 def sync_cell(bucket, prefix, exp, seed, gen, dest):
     # agent_id encodes the binary lineage path: gen zeros wide for the
     # always-take-daughter-0 lineage we run with single_daughters=True.
     agent_id = '0' * gen
-    s3 = (f's3://{bucket}/{prefix}/{exp}/{exp}/history/'
+    base = _exp_base(exp)
+    s3 = (f's3://{bucket}/{prefix}/{base}/{exp}/history/'
           f'experiment_id={exp}/variant=0/lineage_seed={seed}/'
           f'generation={gen}/agent_id={agent_id}/')
     os.makedirs(dest, exist_ok=True)

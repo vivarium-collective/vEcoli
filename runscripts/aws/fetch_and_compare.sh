@@ -62,10 +62,23 @@ fi
 
 for exp in "${V1_ID}" "${V2_ID}" ${extra_ids_bare}; do
   [[ -z "${exp}" ]] && continue
-  echo "=== Fetching ${exp} ==="
-  base_remote="s3://${BUCKET}/${PREFIX}/${exp}/${exp}"
+  # S3 layout is ``<prefix>/<base>/<full_exp_id>/...`` where base is the
+  # config's ``experiment_id`` field (no timestamp) and full_exp_id is
+  # base + ``_YYYYMMDD-HHMMSS`` after run launch. Strip the suffix to
+  # get the base; legacy IDs without a suffix pass through unchanged.
+  base="${exp%_[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]}"
+  base_remote="s3://${BUCKET}/${PREFIX}/${base}/${exp}"
   base_local="out/${exp}"
   mkdir -p "${base_local}"
+
+  if [[ "${NO_FETCH:-0}" == "1" ]]; then
+    echo "=== Skipping fetch for ${exp} (NO_FETCH=1) ==="
+    if [[ ! -d "${base_local}/analyses" ]]; then
+      echo "  WARNING: ${base_local}/analyses missing — report will show (missing) plots." >&2
+    fi
+    continue
+  fi
+  echo "=== Fetching ${exp} ==="
 
   # 1. Analyses: small HTML/TSV plots, the report renders these to PNG
   aws_sync "${base_remote}/analyses/" "${base_local}/analyses/"
@@ -93,17 +106,44 @@ done
 # 4. Optional: compute the all-timestep bulk parity matrix. INCLUDE_HISTORY=1
 # triggers per-cell s3 sync + diff (~30-60 min on the head, in-region S3).
 # The matrix file is incremental — re-running adds missing cells only.
+# N-way: one matrix per (v1, other_engine) pair. ``--parity-matrix``
+# accepts comma-separated paths so the report renders each side-by-side.
 if [[ "${INCLUDE_HISTORY:-0}" == "1" ]]; then
   echo
-  echo "=== Computing bulk parity matrix ==="
-  PARITY_TSV="out/parity_matrix__${V1_ID}__${V2_ID}.tsv"
   if command -v uv >/dev/null; then PY="uv run --no-sync python"; else PY="python"; fi
-  $PY runscripts/aws/compute_parity_matrix.py \
-    --v1-id "${V1_ID}" --v2-id "${V2_ID}" \
-    --bucket "${BUCKET}" --prefix "${PREFIX}" \
-    --seeds "${SEEDS}" --gens "${GENS}" \
-    --output "${PARITY_TSV}"
-  PARITY_FLAG=( --parity-matrix "${PARITY_TSV}" )
+  PARITY_PATHS=()
+  # Pair v1 against v2 + each extra engine
+  PAIRS=("v2:${V2_ID}")
+  for raw in $(echo "${EXTRA_IDS}" | tr ',' '\n'); do
+    [[ -z "$raw" ]] && continue
+    label="${raw%%=*}"
+    eid="${raw#*=}"
+    [[ -z "$eid" ]] && eid="$label"
+    PAIRS+=("${label}:${eid}")
+  done
+  for pair in "${PAIRS[@]}"; do
+    label="${pair%%:*}"
+    other_id="${pair#*:}"
+    echo "=== Computing parity matrix v1 vs ${label} (${other_id}) ==="
+    OUT_TSV="out/parity_matrix__v1__${label}.tsv"
+    $PY runscripts/aws/compute_parity_matrix.py \
+      --v1-id "${V1_ID}" --v2-id "${other_id}" \
+      --bucket "${BUCKET}" --prefix "${PREFIX}" \
+      --seeds "${SEEDS}" --gens "${GENS}" \
+      --output "${OUT_TSV}" || {
+        echo "  parity for ${label} failed (likely missing parquet) — skipping" >&2
+        continue
+      }
+    PARITY_PATHS+=("${OUT_TSV}")
+  done
+  if (( ${#PARITY_PATHS[@]} > 0 )); then
+    # IFS-join into the single comma-separated string the report expects
+    saved_IFS=$IFS; IFS=,
+    PARITY_FLAG=( --parity-matrix "${PARITY_PATHS[*]}" )
+    IFS=$saved_IFS
+  else
+    PARITY_FLAG=()
+  fi
 else
   PARITY_FLAG=()
 fi
@@ -115,12 +155,19 @@ EXTRA_FLAG=()
 [[ -n "${EXTRA_IDS}" ]] && EXTRA_FLAG=(--extra-ids "${EXTRA_IDS}")
 COST_FLAG=()
 [[ -n "${ENGINE_COST}" ]] && COST_FLAG=(--engine-cost "${ENGINE_COST}")
+# REPORT_OUT controls the output path (default doc/v1_v2_report.md);
+# v1_v2_report.py derives the assets dir from the file stem.
+REPORT_OUT="${REPORT_OUT:-doc/v1_v2_report.md}"
+OUT_FLAG=( --out "${REPORT_OUT}" )
 $PY runscripts/v1_v2_report.py \
   --v1-id "${V1_ID}" --v2-id "${V2_ID}" \
   --seeds "${SEEDS}" --gens "${GENS}" \
+  "${OUT_FLAG[@]}" \
   "${EXTRA_FLAG[@]}" "${COST_FLAG[@]}" \
   "${PARITY_FLAG[@]}"
 
+REPORT_STEM="$(basename "${REPORT_OUT}" .md)"
+REPORT_DIR="$(dirname "${REPORT_OUT}")"
 echo
-echo "Report:  doc/v1_v2_report.md"
-echo "Assets:  doc/_static/v1_v2_report_assets/"
+echo "Report:  ${REPORT_OUT}"
+echo "Assets:  ${REPORT_DIR}/_static/${REPORT_STEM}_assets/"

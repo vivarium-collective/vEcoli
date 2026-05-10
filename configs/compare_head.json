@@ -1,0 +1,10 @@
+{
+    "_comment": "Minimal config for the comparison-head alias. The compare head doesn't run a workflow, but vecoli_aws.sh's _use_variant reads experiment_id and emitter_arg.out_uri from the registered config to derive BUCKET/PREFIX. Bucket here just identifies WHERE to read v1/v2/mp/ray parquet from — same bucket the workflow runs use. All compare subcommands take --v1-id / --v2-id (or VECOLI_V1_ID / VECOLI_V2_ID env) for the experiment IDs to compare.",
+    "experiment_id": "compare_head",
+    "emitter_arg": {
+        "out_uri": "s3://smsvpctest-shared-sharedbucket60d199d6-abfvwv0day91/vecoli-output/compare_head"
+    },
+    "aws": {
+        "deploy_mode": "comparison_head"
+    }
+}

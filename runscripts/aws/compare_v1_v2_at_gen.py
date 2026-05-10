@@ -11,6 +11,7 @@ Defaults compare the AWS v1 atlantis run vs the v2 head-node run.
 """
 import argparse
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -19,10 +20,19 @@ import polars as pl
 import pyarrow.dataset as pa_ds
 
 
+_TS_SUFFIX = re.compile(r'_\d{8}-\d{6}$')
+
+
+def _exp_base(exp):
+    """Strip ``_YYYYMMDD-HHMMSS`` auto-rotation suffix."""
+    return _TS_SUFFIX.sub('', exp)
+
+
 def load_bulk(bucket, prefix, exp, seed, gen, agent_id=None, tmpdir=None):
     if agent_id is None:
         agent_id = '0' * gen
-    s3_uri = (f's3://{bucket}/{prefix}/{exp}/{exp}/history/'
+    base = _exp_base(exp)
+    s3_uri = (f's3://{bucket}/{prefix}/{base}/{exp}/history/'
               f'experiment_id={exp}/variant=0/lineage_seed={seed}/'
               f'generation={gen}/agent_id={agent_id}/')
     local = os.path.join(tmpdir, exp, f'seed{seed}_gen{gen}')
