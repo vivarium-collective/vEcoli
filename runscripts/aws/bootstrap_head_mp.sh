@@ -20,10 +20,10 @@ CONFIG_RELPATH="${CONFIG_RELPATH:-configs/comparison_10s_16g_v2_mp_aws.json}"
 SESSION="${SESSION:-vecoli-v2-mp}"
 REGION="us-gov-west-1"
 
-# Override via env if you want to vary scale without editing the config.
-N_SEEDS="${N_SEEDS:-10}"
-GENERATIONS="${GENERATIONS:-16}"
-MAX_DURATION="${MAX_DURATION:-3000.0}"
+# All per-run knobs (n_init_sims, generations, max_duration,
+# sim_data_path, emitter_arg.out_uri) live in the config — see
+# configs/comparison_10s_16g_v2_mp_aws.json. The runner reads them
+# directly so we don't shadow config values with stale shell defaults.
 
 # --- 1. system packages -----------------------------------------------------
 sudo dnf -y update
@@ -67,20 +67,60 @@ if ! grep -qF "vEcoli/.venv/bin/activate" "$HOME/.bashrc"; then
   echo "source $VECOLI_DIR/.venv/bin/activate" >> "$HOME/.bashrc"
 fi
 
-# --- 6. resolve sim_data via parca (or skip if S3 path provided) -----------
-# The MP runner expects a local simData.cPickle (LoadSimData reads
-# from sim_data_path). If $SIM_DATA_S3_URI is set, download once;
-# otherwise run parca on this node so the pickle ends up at
-# $VECOLI_DIR/out/$EXP_ID/parca/kb/simData.cPickle.
+# --- 6. resolve sim_data via config, env override, or parca fallback -------
+# Read sim_data_path from the merged config (inherit chain + default.json
+# as implicit base). MP runs locally so the runner needs a local pickle —
+# if the config points at s3://, we download once; if it points at a
+# local file, use as-is. If neither, fall back to running parca on this
+# node so the pickle ends up at $VECOLI_DIR/out/$EXP_ID/parca/kb/simData.cPickle.
 test -f "$CONFIG_RELPATH" || { echo "Missing $CONFIG_RELPATH"; exit 1; }
-EXP_ID=$(python -c "import json; print(json.load(open('$CONFIG_RELPATH'))['experiment_id'])")
-OUT_URI=$(python -c "import json; print(json.load(open('$CONFIG_RELPATH'))['emitter_arg']['out_uri'])")
+RESOLVER='
+import json, os, sys
+def resolve(path, seen=None):
+    seen = seen or set()
+    path = os.path.abspath(path)
+    if path in seen: return {}
+    seen.add(path)
+    cfg = json.load(open(path))
+    merged = {}
+    cfg_dir = os.path.dirname(path)
+    if os.path.basename(path) != "default.json":
+        for cand in (os.path.join(cfg_dir, "default.json"),
+                     os.path.join(cfg_dir, "..", "configs", "default.json")):
+            if os.path.isfile(cand):
+                merged.update(resolve(cand, seen)); break
+    for parent_rel in cfg.get("inherit_from") or []:
+        for cand in (os.path.join(cfg_dir, parent_rel),
+                     os.path.join(cfg_dir, "..", "configs", parent_rel),
+                     os.path.join(cfg_dir, parent_rel + ".json")):
+            if os.path.isfile(cand):
+                merged.update(resolve(cand, seen)); break
+    merged.update(cfg)
+    return merged
+m = resolve(sys.argv[1])
+key = sys.argv[2]
+if "." in key:
+    parts = key.split(".")
+    v = m
+    for p in parts:
+        v = (v or {}).get(p) if isinstance(v, dict) else None
+    print(v or "")
+else:
+    print(m.get(key) or "")
+'
+EXP_ID=$(python -c "$RESOLVER" "$CONFIG_RELPATH" experiment_id)
+OUT_URI=$(python -c "$RESOLVER" "$CONFIG_RELPATH" emitter_arg.out_uri)
+SIM_DATA_PATH_CFG=$(python -c "$RESOLVER" "$CONFIG_RELPATH" sim_data_path)
+# Env override still wins for ad-hoc swaps
+SIM_DATA_S3_URI="${SIM_DATA_S3_URI:-$SIM_DATA_PATH_CFG}"
 
 SIM_DATA_LOCAL="$VECOLI_DIR/out/$EXP_ID/parca/kb/simData.cPickle"
-if [[ -n "${SIM_DATA_S3_URI:-}" ]]; then
+if [[ "$SIM_DATA_S3_URI" == s3://* ]]; then
   mkdir -p "$(dirname "$SIM_DATA_LOCAL")"
   echo "Downloading sim_data from $SIM_DATA_S3_URI ..."
   aws s3 cp "$SIM_DATA_S3_URI" "$SIM_DATA_LOCAL" --no-progress
+elif [[ -n "$SIM_DATA_S3_URI" && -f "$SIM_DATA_S3_URI" ]]; then
+  SIM_DATA_LOCAL="$SIM_DATA_S3_URI"
 elif [[ ! -f "$SIM_DATA_LOCAL" ]]; then
   echo "Running parca to produce $SIM_DATA_LOCAL (one-time)..."
   python runscripts/parca.py --config "$CONFIG_RELPATH" --outdir "$VECOLI_DIR/out/$EXP_ID/parca"
@@ -98,11 +138,6 @@ tmux new-session -d -s "$SESSION" \
    POLARS_MAX_THREADS=1 \
    python runscripts/run_composite_lineage_mp.py \
      --config $CONFIG_RELPATH \
-     --sim_data_path $SIM_DATA_LOCAL \
-     --out_uri $OUT_URI \
-     --n_seeds $N_SEEDS \
-     --generations $GENERATIONS \
-     --max_duration $MAX_DURATION \
      2>&1 | tee ${LOG_FILE}"
 
 cat <<EOF

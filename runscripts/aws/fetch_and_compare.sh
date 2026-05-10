@@ -13,9 +13,14 @@
 # Usage:
 #   runscripts/aws/fetch_and_compare.sh                    # use defaults
 #   V2_ID=other_exp runscripts/aws/fetch_and_compare.sh    # override v2 id
+#   EXTRA_IDS="mp=cmp_v2_mp,ray=cmp_v2_ray" \              # 4-way: pull MP/Ray
+#     runscripts/aws/fetch_and_compare.sh                  #   traces too
 #
 # Variables (override via env):
 #   V1_ID, V2_ID      experiment ids (S3 prefix names)
+#   EXTRA_IDS         comma-separated additional experiment ids for
+#                     N-way wall-clock comparison (composite_lineage MP,
+#                     Ray, etc.). Each can be ``label=experiment_id``.
 #   BUCKET, PREFIX    S3 location
 #   SEEDS, GENS       comma-lists for per-cell mass_fraction plots in report
 
@@ -27,6 +32,12 @@ BUCKET="${BUCKET:-smsvpctest-shared-sharedbucket60d199d6-abfvwv0day91}"
 PREFIX="${PREFIX:-vecoli-output}"
 SEEDS="${SEEDS:-0,1}"
 GENS="${GENS:-1,2}"
+EXTRA_IDS="${EXTRA_IDS:-}"
+# ENGINE_COST: per-engine cost spec for engines without trace CSVs
+# (mp/ray). See runscripts/v1_v2_report.py --engine-cost docs.
+# Example:
+# ENGINE_COST="mp=single:c7g.metal:1200,ray=cluster:t4g.large:c7g.metal:4:800"
+ENGINE_COST="${ENGINE_COST:-}"
 
 # Resolve repo root from this script's location (works whether invoked from
 # repo root or via absolute path).
@@ -39,7 +50,18 @@ aws_sync() {
   aws s3 sync "$1" "$2" "${@:3}" --no-progress --only-show-errors
 }
 
-for exp in "${V1_ID}" "${V2_ID}"; do
+# Extract bare experiment_ids from EXTRA_IDS (which may use
+# ``label=exp_id`` format) for the fetch loop.
+extra_ids_bare=""
+if [[ -n "${EXTRA_IDS}" ]]; then
+  extra_ids_bare=$(echo "${EXTRA_IDS}" \
+    | tr ',' '\n' \
+    | sed -E 's/^[^=]*=//' \
+    | tr '\n' ' ')
+fi
+
+for exp in "${V1_ID}" "${V2_ID}" ${extra_ids_bare}; do
+  [[ -z "${exp}" ]] && continue
   echo "=== Fetching ${exp} ==="
   base_remote="s3://${BUCKET}/${PREFIX}/${exp}/${exp}"
   base_local="out/${exp}"
@@ -55,11 +77,14 @@ for exp in "${V1_ID}" "${V2_ID}"; do
            --include "*.command.sh" \
            --include "*division_time.sh"
 
-  # 3. Top-level trace CSV (best-effort — atlantis-driven runs may not have one)
+  # 3. Top-level trace CSV (best-effort — atlantis-driven runs may not
+  #    have one; composite_lineage MP/Ray runners emit a synthetic
+  #    trace + cost_meta sidecar via runscripts/synthetic_trace.py).
   aws s3 cp "${base_remote}/nextflow/" "${REPO_ROOT}/" \
     --recursive \
     --exclude "*" \
     --include "trace--${exp}--*.csv" \
+    --include "cost_meta--${exp}.json" \
     --no-progress --only-show-errors 2>/dev/null || true
 
   echo "  Local: ${base_local}/"
@@ -86,9 +111,14 @@ fi
 echo
 echo "=== Generating report ==="
 if command -v uv >/dev/null; then PY="uv run --no-sync python"; else PY="python"; fi
+EXTRA_FLAG=()
+[[ -n "${EXTRA_IDS}" ]] && EXTRA_FLAG=(--extra-ids "${EXTRA_IDS}")
+COST_FLAG=()
+[[ -n "${ENGINE_COST}" ]] && COST_FLAG=(--engine-cost "${ENGINE_COST}")
 $PY runscripts/v1_v2_report.py \
   --v1-id "${V1_ID}" --v2-id "${V2_ID}" \
   --seeds "${SEEDS}" --gens "${GENS}" \
+  "${EXTRA_FLAG[@]}" "${COST_FLAG[@]}" \
   "${PARITY_FLAG[@]}"
 
 echo

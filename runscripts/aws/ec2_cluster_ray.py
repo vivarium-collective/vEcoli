@@ -65,6 +65,54 @@ except ImportError as e:
     )
 
 
+def _read_sim_knobs_from_config(config_relpath):
+    """Walk the inherited-config chain and extract (n_seeds,
+    generations, max_duration) from the merged config.
+
+    Mirrors EcoliSim.from_file's load semantics: ``default.json`` is
+    the implicit base, then each ``inherit_from`` parent is layered,
+    then the child config wins. Standalone (no vEcoli import) since
+    this script runs on the head node's driver venv.
+    """
+    import json
+    seen = set()
+
+    def _resolve(path):
+        path = os.path.abspath(path)
+        if path in seen:
+            return {}
+        seen.add(path)
+        with open(path) as f:
+            cfg = json.load(f)
+        merged = {}
+        cfg_dir = os.path.dirname(path)
+        # Implicit default.json base
+        if os.path.basename(path) != 'default.json':
+            for cand in (
+                    os.path.join(cfg_dir, 'default.json'),
+                    os.path.join(cfg_dir, '..', 'configs', 'default.json')):
+                if os.path.isfile(cand):
+                    merged.update(_resolve(cand))
+                    break
+        # Explicit inherit_from
+        for parent_rel in cfg.get('inherit_from') or []:
+            for cand in (
+                    os.path.join(cfg_dir, parent_rel),
+                    os.path.join(cfg_dir, '..', 'configs', parent_rel),
+                    os.path.join(cfg_dir, parent_rel + '.json')):
+                if os.path.isfile(cand):
+                    merged.update(_resolve(cand))
+                    break
+        merged.update(cfg)
+        return merged
+
+    cfg = _resolve(config_relpath)
+    n_seeds = int(cfg.get('n_init_sims') or 1)
+    generations = int(cfg.get('generations') or 1)
+    max_duration = float(cfg.get('max_duration') or 10800.0)
+    return n_seeds, generations, max_duration
+
+
 def main() -> int:
     image_uri = os.environ["IMAGE_URI"]
     out_uri = os.environ["OUT_URI"]
@@ -72,10 +120,14 @@ def main() -> int:
     config_relpath = os.environ.get(
         "CONFIG_RELPATH", "configs/comparison_10s_16g_v2_ray_aws.json")
 
-    n_workers = int(os.environ.get("N_WORKERS") or "5")
-    n_seeds = int(os.environ.get("N_SEEDS") or "10")
-    generations = int(os.environ.get("GENERATIONS") or "16")
-    max_duration = float(os.environ.get("MAX_DURATION") or "3000.0")
+    # Cluster sizing comes from env (it's an infra knob, not a sim
+    # knob). Per-run sim settings (n_seeds, generations, max_duration)
+    # are read from the config by run_composite_lineage_ray.py — we
+    # only need n_seeds locally to size the worker pool. Walk the
+    # inherited-config chain so values can live in any parent.
+    n_seeds, generations, max_duration = _read_sim_knobs_from_config(
+        config_relpath)
+    n_workers = int(os.environ.get("N_WORKERS") or str(n_seeds))
 
     head_type = os.environ.get("HEAD_INSTANCE_TYPE") or "m5.2xlarge"
     worker_type = os.environ.get("WORKER_INSTANCE_TYPE") or "m5.4xlarge"
@@ -167,11 +219,6 @@ def main() -> int:
                 f"POLARS_MAX_THREADS=1 "
                 f"python -u runscripts/run_composite_lineage_ray.py "
                 f"  --config {config_relpath} "
-                f"  --sim_data_path {sim_data_uri} "
-                f"  --out_uri {out_uri} "
-                f"  --n_seeds {n_seeds} "
-                f"  --generations {generations} "
-                f"  --max_duration {max_duration} "
                 f"  --ray_address auto "
                 f"  > {log_path} 2>&1; "
                 f"rc=$?; "

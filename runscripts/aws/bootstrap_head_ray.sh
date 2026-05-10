@@ -22,9 +22,11 @@ CONFIG_RELPATH="${CONFIG_RELPATH:-configs/comparison_10s_16g_v2_ray_aws.json}"
 SESSION="${SESSION:-vecoli-v2-ray}"
 REGION="us-gov-west-1"
 
-N_SEEDS="${N_SEEDS:-10}"
-GENERATIONS="${GENERATIONS:-16}"
-MAX_DURATION="${MAX_DURATION:-3000.0}"
+# All per-run knobs (n_init_sims, generations, max_duration) live in
+# the config — see configs/comparison_10s_16g_v2_ray_aws.json.
+# ec2_cluster_ray.py walks the inherited chain and reads them from
+# there, then forwards CONFIG_RELPATH to run_composite_lineage_ray.py
+# which reads the same keys.
 
 # --- 1. system packages -----------------------------------------------------
 sudo dnf -y update
@@ -76,12 +78,50 @@ fi
 
 # --- 6. config + sim_data + image_uri resolution ---------------------------
 test -f "$CONFIG_RELPATH" || { echo "Missing $CONFIG_RELPATH"; exit 1; }
-EXP_ID=$(python -c "import json; print(json.load(open('$CONFIG_RELPATH'))['experiment_id'])")
-OUT_URI=$(python -c "import json; print(json.load(open('$CONFIG_RELPATH'))['emitter_arg']['out_uri'])")
 
-# IMAGE_URI must be the ECR image with ray installed — see Dockerfile
-# `pip install ray` line. If unset, fall back to the standard v2-aws
-# image (assumes it was rebuilt with the updated Dockerfile).
+# Read every per-run knob from the config, walking inherit_from chains
+# (and default.json as the implicit base) the same way EcoliSim does.
+# This avoids env-var defaults silently shadowing config values — see
+# the May 2026 max_duration regression.
+RESOLVER='
+import json, os, sys
+def resolve(path, seen=None):
+    seen = seen or set()
+    path = os.path.abspath(path)
+    if path in seen: return {}
+    seen.add(path)
+    cfg = json.load(open(path))
+    merged = {}
+    cfg_dir = os.path.dirname(path)
+    if os.path.basename(path) != "default.json":
+        for cand in (os.path.join(cfg_dir, "default.json"),
+                     os.path.join(cfg_dir, "..", "configs", "default.json")):
+            if os.path.isfile(cand):
+                merged.update(resolve(cand, seen)); break
+    for parent_rel in cfg.get("inherit_from") or []:
+        for cand in (os.path.join(cfg_dir, parent_rel),
+                     os.path.join(cfg_dir, "..", "configs", parent_rel),
+                     os.path.join(cfg_dir, parent_rel + ".json")):
+            if os.path.isfile(cand):
+                merged.update(resolve(cand, seen)); break
+    merged.update(cfg)
+    return merged
+m = resolve(sys.argv[1])
+key = sys.argv[2]
+v = m
+for p in key.split("."):
+    v = (v or {}).get(p) if isinstance(v, dict) else None
+print(v or "")
+'
+EXP_ID=$(python -c "$RESOLVER" "$CONFIG_RELPATH" experiment_id)
+OUT_URI=$(python -c "$RESOLVER" "$CONFIG_RELPATH" emitter_arg.out_uri)
+SIM_DATA_S3_URI_CFG=$(python -c "$RESOLVER" "$CONFIG_RELPATH" sim_data_path)
+
+# Env var still works as override (e.g. for ad-hoc swaps in a re-run).
+SIM_DATA_S3_URI="${SIM_DATA_S3_URI:-$SIM_DATA_S3_URI_CFG}"
+
+# IMAGE_URI: ECR image (the Dockerfile installs ray). If unset, fall
+# back to the standard v2-aws image.
 IMAGE_URI="${IMAGE_URI:-}"
 if [[ -z "$IMAGE_URI" ]]; then
   ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
@@ -89,10 +129,15 @@ if [[ -z "$IMAGE_URI" ]]; then
   echo "IMAGE_URI not set; defaulting to ${IMAGE_URI}"
 fi
 
-# sim_data_path: must be S3 for the cluster — workers fetch via fsspec.
-if [[ -z "${SIM_DATA_S3_URI:-}" ]]; then
-  echo "ERROR: SIM_DATA_S3_URI must be set (cluster workers can't reach local files)" >&2
-  echo "Example: SIM_DATA_S3_URI=s3://bucket/.../parca/kb/simData.cPickle" >&2
+# sim_data_path: must be S3 for the cluster (workers fetch via fsspec)
+if [[ -z "${SIM_DATA_S3_URI}" ]]; then
+  echo "ERROR: sim_data_path missing." >&2
+  echo "  Set 'sim_data_path' in $CONFIG_RELPATH (or any inherit-from parent)" >&2
+  echo "  to an s3:// URI. Env-var override SIM_DATA_S3_URI also works." >&2
+  exit 1
+fi
+if [[ "$SIM_DATA_S3_URI" != s3://* ]]; then
+  echo "ERROR: sim_data_path must be s3:// for the cluster: $SIM_DATA_S3_URI" >&2
   exit 1
 fi
 
@@ -112,9 +157,6 @@ tmux new-session -d -s "$SESSION" \
    OUT_URI='$OUT_URI' \
    SIM_DATA_URI='$SIM_DATA_S3_URI' \
    CONFIG_RELPATH='$CONFIG_RELPATH' \
-   N_SEEDS=$N_SEEDS \
-   GENERATIONS=$GENERATIONS \
-   MAX_DURATION=$MAX_DURATION \
    python runscripts/aws/ec2_cluster_ray.py \
      2>&1 | tee ${LOG_FILE}"
 

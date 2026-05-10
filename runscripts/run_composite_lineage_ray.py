@@ -38,6 +38,10 @@ import time
 
 import ray
 
+# Re-use the inherit-walking helper from the MP runner so config-driven
+# behavior matches between the two engines.
+from runscripts.run_composite_lineage_mp import _resolve_inherited_config
+
 
 def _patch_s3fs_skip_create_bucket() -> None:
     """Monkey-patch ``s3fs.S3FileSystem._mkdir`` to never call
@@ -167,38 +171,49 @@ class LineageActor:
 
 
 def main():
+    """Drive a composite_lineage Ray run from a config file alone.
+
+    Every per-run setting (sim_data_path, out_uri, n_seeds, generations,
+    max_duration, base_seed) lives in the config — the only optional
+    flag is ``--ray_address`` to attach to an existing cluster.
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', required=True)
-    parser.add_argument('--sim_data_path', required=True)
-    parser.add_argument('--out_dir', default=None,
-                        help='local output directory')
-    parser.add_argument('--out_uri', default=None,
-                        help='cloud URI (s3://, gs://) for parquet output')
-    parser.add_argument('--n_seeds', type=int, default=10)
-    parser.add_argument('--base_seed', type=int, default=0)
-    parser.add_argument('--generations', type=int, default=16)
-    parser.add_argument('--max_duration', type=float, default=3000.0)
     parser.add_argument('--ray_address', default=None,
                         help='Existing Ray cluster address (default: '
                              'spawn local). E.g. ray://head:10001 or "auto"')
     args = parser.parse_args()
-    if not args.out_dir and not args.out_uri:
-        parser.error("must give one of --out_dir or --out_uri")
 
-    if not args.sim_data_path.startswith(
-            ('s3://', 'gs://')) and not os.path.isfile(args.sim_data_path):
-        raise SystemExit(f"sim_data_path missing: {args.sim_data_path}")
+    # Read every other knob from the config (with inherited parents
+    # walked manually so we don't import EcoliSim here).
+    import json
+    with open(args.config) as f:
+        cfg = json.load(f)
+    cfg = _resolve_inherited_config(args.config, cfg)
 
-    # Driver-side: load sim_data once, ray.put into the object
-    # store. All actors pull from the store; on a multi-node
-    # cluster, this gives one copy per node in shared memory
-    # (no network re-transfer per actor).
-    print(f"[ray] Loading sim_data once in driver "
-          f"({args.sim_data_path})...", flush=True)
+    sim_data_path = cfg.get('sim_data_path')
+    if not sim_data_path:
+        parser.error("config must set 'sim_data_path'")
+    emitter_arg = cfg.get('emitter_arg', {}) or {}
+    out_uri = emitter_arg.get('out_uri')
+    out_dir = emitter_arg.get('out_dir')
+    if not out_uri and not out_dir:
+        parser.error("config emitter_arg must set 'out_uri' or 'out_dir'")
+    n_seeds = int(cfg.get('n_init_sims') or 1)
+    base_seed = int(cfg.get('lineage_seed') or 0)
+    generations = int(cfg.get('generations') or 1)
+    max_duration = float(cfg.get('max_duration') or 10800.0)
+
+    if not sim_data_path.startswith(('s3://', 'gs://')) \
+            and not os.path.isfile(sim_data_path):
+        raise SystemExit(f"sim_data_path missing: {sim_data_path}")
+
+    # Driver-side: load sim_data once, ray.put into the object store.
+    print(f"[ray] Loading sim_data once in driver ({sim_data_path})...",
+          flush=True)
     t0 = time.time()
     from ecoli.library.sim_data import LoadSimData
-    base = LoadSimData(
-        sim_data_path=args.sim_data_path, seed=args.base_seed)
+    base = LoadSimData(sim_data_path=sim_data_path, seed=base_seed)
     print(f"[ray]   Loaded in {time.time()-t0:.2f}s. "
           f"Initializing Ray...", flush=True)
 
@@ -209,37 +224,64 @@ def main():
 
     sd_ref = ray.put(base.sim_data)
     print(f"[ray]   sim_data placed in object store. "
-          f"Spawning {args.n_seeds} lineage actors...", flush=True)
+          f"Spawning {n_seeds} lineage actors "
+          f"(generations={generations}, max_duration={max_duration})...",
+          flush=True)
 
-    sd_path = (args.sim_data_path
-               if args.sim_data_path.startswith(('s3://', 'gs://'))
-               else os.path.abspath(args.sim_data_path))
-    actors = [
-        LineageActor.remote(sd_ref, sd_path)
-        for _ in range(args.n_seeds)
-    ]
+    sd_path = (sim_data_path
+               if sim_data_path.startswith(('s3://', 'gs://'))
+               else os.path.abspath(sim_data_path))
+    actors = [LineageActor.remote(sd_ref, sd_path) for _ in range(n_seeds)]
 
-    seeds = list(range(args.base_seed,
-                       args.base_seed + args.n_seeds))
+    seeds = list(range(base_seed, base_seed + n_seeds))
     config_abs = os.path.abspath(args.config)
-    out_dir_abs = (os.path.abspath(args.out_dir)
-                   if args.out_dir else None)
+    out_dir_abs = (os.path.abspath(out_dir) if out_dir else None)
     futures = [
         actor.run_lineage.remote(
-            config_abs, out_dir_abs, args.out_uri, seed,
-            args.generations, args.max_duration)
+            config_abs, out_dir_abs, out_uri, seed,
+            generations, max_duration)
         for actor, seed in zip(actors, seeds)
     ]
 
     t_start = time.time()
     results = ray.get(futures)
-    elapsed = time.time() - t_start
-    print(f"\n[ray] All {args.n_seeds} lineages done in "
+    t_end = time.time()
+    elapsed = t_end - t_start
+    print(f"\n[ray] All {n_seeds} lineages done in "
           f"{elapsed:.1f}s wall.", flush=True)
+
+    per_seed_norm = []
     for seed, dt in results:
+        per_seed_norm.append((seed, t_start, t_start + dt))
         print(f"  seed={seed}: {dt:.1f}s", flush=True)
 
+    try:
+        nodes = ray.nodes()
+        n_workers = max(1, len(nodes) - 1)
+    except Exception:
+        n_workers = n_seeds
+
     ray.shutdown()
+
+    if out_uri:
+        exp_id = cfg.get('experiment_id', 'ray_run')
+        from runscripts.synthetic_trace import emit_synthetic_trace
+        emit_synthetic_trace(
+            out_uri=out_uri,
+            exp_id=exp_id,
+            workflow_t_start=t_start,
+            workflow_t_end=t_end,
+            per_seed=per_seed_norm,
+            deploy_meta={
+                'deploy_mode': 'ray_cluster',
+                'head_instance': os.environ.get(
+                    'VECOLI_HEAD_INSTANCE', 't4g.large'),
+                'worker_instance': os.environ.get(
+                    'VECOLI_WORKER_INSTANCE', 'c7g.metal'),
+                'n_workers': n_workers,
+                'head_on_demand': True,
+                'worker_on_demand': True,
+            })
 
 
 if __name__ == '__main__':

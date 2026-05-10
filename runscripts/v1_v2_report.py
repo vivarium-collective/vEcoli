@@ -30,6 +30,21 @@ def load_trace(experiment_id):
     return pl.read_csv(files[-1])
 
 
+def load_cost_meta(experiment_id):
+    """Read the cost_meta JSON sidecar that MP/Ray runners drop next
+    to their synthetic trace CSV. Returns ``None`` if absent (i.e. a
+    Nextflow run, which doesn't need the sidecar)."""
+    candidates = [
+        f'{REPO_ROOT}/cost_meta--{experiment_id}.json',
+        f'{REPO_ROOT}/out/{experiment_id}/cost_meta--{experiment_id}.json',
+    ]
+    for path in candidates:
+        if os.path.isfile(path):
+            with open(path) as f:
+                return json.load(f)
+    return None
+
+
 def division_times(experiment_id):
     """{seed: {gen: division_time_seconds}}
 
@@ -277,6 +292,24 @@ def main():
                    help='comma-separated generation ints for per-cell plots')
     p.add_argument('--parity-matrix', default='out/parity_matrix.tsv',
                    help='path to parity_matrix.tsv (rendered if present)')
+    p.add_argument(
+        '--extra-ids', default='',
+        help='Comma-separated additional engine experiment IDs (e.g. '
+        'a v2-MP run and a v2-Ray run) to include in the workflow '
+        'wall-clock table. Each can be optionally labelled as '
+        '``label=experiment_id`` (e.g. '
+        '``mp=comparison_10s_16g_v2_mp_aws,ray=comparison_10s_16g_v2_ray_aws``); '
+        'an unlabelled id uses the experiment_id itself as the label.')
+    p.add_argument(
+        '--engine-cost', default='',
+        help='Per-engine cost spec for engines that DON\'T emit a '
+        'Nextflow trace CSV (mp/ray). Comma-separated entries of the '
+        'form ``label=spec`` where spec is one of:'
+        '\n  ``single:<instance>:<wall_s>`` — mp_single_node deploy'
+        '\n  ``cluster:<head_instance>:<worker_instance>:<n_workers>:<wall_s>``'
+        ' — ray_cluster deploy'
+        '\nE.g. '
+        '``mp=single:c7g.metal:1200,ray=cluster:t4g.large:c7g.metal:4:800``')
     args = p.parse_args()
 
     seeds = [s.strip() for s in args.seeds.split(',') if s.strip()]
@@ -342,8 +375,109 @@ def main():
             out[(m.group(1), int(m.group(2)))] = r['duration'] / 1000.0
         return out
 
+    def workflow_stats(trace):
+        """Compute workflow-level timing stats from the nextflow trace.
+
+        Returns ``{'total_wall_s', 'sim_task_total_s', 'all_task_total_s',
+        'per_seed': {seed: (sim_task_total, seed_wall, gap)}}``.
+
+        - ``total_wall_s``: workflow wall-clock end-to-end
+          (max(complete) − min(submit)). Includes scheduler overhead
+          and inter-task gaps.
+        - ``sim_task_total_s``: sum of `sim_*` task durations.
+        - ``all_task_total_s``: sum of every task's duration (including
+          parca, analysis, etc.).
+        - ``per_seed``: for each seed, sum of sim_* durations,
+          per-seed wall (latest sim_* complete − earliest sim_*
+          submit), and the gap (per-seed wall − sum of sim_*
+          durations). Per-seed gen tasks run sequentially, so gap
+          ≥ 0 and reflects scheduler/container/queue overhead.
+        """
+        out = {'total_wall_s': None, 'sim_task_total_s': 0.0,
+               'all_task_total_s': 0.0, 'per_seed': {}}
+        if trace is None:
+            return out
+        all_submit, all_complete = None, None
+        per_seed_submit, per_seed_complete = {}, {}
+        per_seed_sum = {}
+        for r in trace.iter_rows(named=True):
+            sub = r.get('submit')
+            comp = r.get('complete')
+            dur = (r.get('duration') or 0) / 1000.0
+            if sub is not None:
+                all_submit = sub if all_submit is None else min(all_submit, sub)
+            if comp is not None:
+                all_complete = comp if all_complete is None else max(all_complete, comp)
+            out['all_task_total_s'] += dur
+            name = r.get('name', '')
+            if name.startswith('sim_'):
+                out['sim_task_total_s'] += dur
+                m = re.search(r'seed=(\d+)/generation=', name)
+                if m:
+                    seed = m.group(1)
+                    per_seed_sum[seed] = per_seed_sum.get(seed, 0.0) + dur
+                    if sub is not None:
+                        per_seed_submit[seed] = (
+                            sub if seed not in per_seed_submit
+                            else min(per_seed_submit[seed], sub))
+                    if comp is not None:
+                        per_seed_complete[seed] = (
+                            comp if seed not in per_seed_complete
+                            else max(per_seed_complete[seed], comp))
+        if all_submit is not None and all_complete is not None:
+            out['total_wall_s'] = (all_complete - all_submit) / 1000.0
+        for seed, ssum in per_seed_sum.items():
+            sub = per_seed_submit.get(seed)
+            comp = per_seed_complete.get(seed)
+            seed_wall = ((comp - sub) / 1000.0) if (sub and comp) else None
+            gap = (seed_wall - ssum) if seed_wall is not None else None
+            out['per_seed'][seed] = (ssum, seed_wall, gap)
+        return out
+
     v1_sim = per_sim_dict(v1_trace)
     v2_sim = per_sim_dict(v2_trace)
+    v1_wf = workflow_stats(v1_trace)
+    v2_wf = workflow_stats(v2_trace)
+
+    # Extra engines (composite_lineage MP, Ray, etc.) that we want
+    # included in the workflow-wall-clock table for a 4-way comparison.
+    # ``--extra-ids`` is comma-separated, each entry optionally
+    # ``label=experiment_id``.
+    extra_engines = []
+    for raw in args.extra_ids.split(','):
+        raw = raw.strip()
+        if not raw:
+            continue
+        label, _, exp_id = raw.partition('=')
+        if not exp_id:  # unlabelled — use exp_id as the label
+            label, exp_id = raw, raw
+        extra_engines.append((label, exp_id, workflow_stats(load_trace(exp_id))))
+
+    # Parse --engine-cost spec for engines without trace CSVs.
+    # Map: label → (cost_kind, ...spec...).
+    cost_specs: dict[str, tuple] = {}
+    for raw in args.engine_cost.split(','):
+        raw = raw.strip()
+        if not raw:
+            continue
+        label, _, spec = raw.partition('=')
+        parts = spec.split(':')
+        if not parts:
+            continue
+        kind = parts[0]
+        try:
+            if kind == 'single' and len(parts) == 3:
+                # single:<instance>:<wall_s>
+                cost_specs[label] = (kind, parts[1], float(parts[2]))
+            elif kind == 'cluster' and len(parts) == 5:
+                # cluster:<head>:<worker>:<n_workers>:<wall_s>
+                cost_specs[label] = (
+                    kind, parts[1], parts[2], int(parts[3]), float(parts[4]))
+            else:
+                print(f'warn: unrecognized --engine-cost spec '
+                      f'{raw!r}; skipping')
+        except (ValueError, IndexError) as e:
+            print(f'warn: bad --engine-cost spec {raw!r}: {e}')
 
     runtime_rows = []
     v1_sim_total = 0.0
@@ -434,13 +568,173 @@ def main():
 
     parity_md = parity_matrix_section(args.parity_matrix)
 
+    # ---- Workflow-total / scheduler-gap section -----------------
+    def fmt_s(x):
+        return f'{x:.0f}' if x is not None else '-'
+
+    def fmt_pct(num, den):
+        if num is None or den in (None, 0):
+            return '-'
+        return f'{num / den * 100:+.1f}%'
+
+    wf_section_lines = []
+    has_any_wall = (v1_wf['total_wall_s'] or v2_wf['total_wall_s']
+                    or any(e[2]['total_wall_s'] for e in extra_engines))
+    if has_any_wall:
+        # Engine-comparison table: one row per engine (v1, v2, +extras)
+        # with workflow wall-clock, sum-of-sim-tasks, and the implied
+        # parallel-fanout factor. Shape works for 2-way (v1 vs v2) and
+        # N-way (add MP, Ray as extras).
+        all_engines = (
+            [('v1 nextflow', args.v1_id, v1_wf),
+             ('v2 nextflow', args.v2_id, v2_wf)]
+            + [(label, exp_id, wf) for (label, exp_id, wf) in extra_engines])
+
+        # Find the slowest workflow wall as the baseline for "%" deltas
+        baseline = next(
+            (e[2]['total_wall_s'] for e in all_engines if e[2]['total_wall_s']),
+            None)
+
+        # Cost lookup priority:
+        #   1. CLI --engine-cost spec (manual override)
+        #   2. cost_meta--<exp_id>.json sidecar (emitted by MP/Ray
+        #      runners alongside their synthetic trace)
+        #   3. Default: nextflow per-task billing from trace CSV
+        from runscripts import cost as cost_mod
+
+        def engine_cost(label, exp_id, wf, trace):
+            spec = cost_specs.get(label)
+            wall_s = wf.get('total_wall_s') or 0.0
+            if spec is not None:
+                kind = spec[0]
+                if kind == 'single':
+                    _, instance, override_wall = spec
+                    return cost_mod.single_node_cost(
+                        override_wall, instance=instance, on_demand=True)
+                if kind == 'cluster':
+                    _, head, worker, nw, override_wall = spec
+                    return cost_mod.cluster_cost(
+                        override_wall, head_instance=head,
+                        worker_instance=worker, n_workers=nw,
+                        head_on_demand=True, worker_on_demand=True)
+            meta = load_cost_meta(exp_id)
+            if meta is not None:
+                # Prefer the wall written by the runner (start→end of
+                # parent process); fall back to trace-derived wall.
+                meta_wall = meta.get('workflow_wall_s', wall_s) or wall_s
+                mode = meta.get('deploy_mode')
+                if mode == 'mp_single_node':
+                    return cost_mod.single_node_cost(
+                        meta_wall,
+                        instance=meta.get('instance', 'c7g.metal'),
+                        on_demand=meta.get('on_demand', True))
+                if mode == 'ray_cluster':
+                    return cost_mod.cluster_cost(
+                        meta_wall,
+                        head_instance=meta.get('head_instance', 't4g.large'),
+                        worker_instance=meta.get('worker_instance', 'c7g.metal'),
+                        n_workers=meta.get('n_workers', 1),
+                        head_on_demand=meta.get('head_on_demand', True),
+                        worker_on_demand=meta.get('worker_on_demand', True))
+            # Default: nextflow per-task billing
+            return cost_mod.nextflow_cost(trace, head_wall_s=wall_s)
+
+        eng_rows = []
+        for (label, exp_id, wf) in all_engines:
+            wall = wf['total_wall_s']
+            sim_sum = wf['sim_task_total_s']
+            # Sum / wall — > 1 means tasks ran concurrently; 1 means
+            # one sequential process; only meaningful for nextflow.
+            fanout = (sim_sum / wall) if (sim_sum and wall) else None
+            delta = (
+                (wall - baseline) / baseline * 100
+                if (wall is not None and baseline) else None)
+            # Resolve trace for this engine (v1, v2, or extra)
+            if exp_id == args.v1_id:
+                t = v1_trace
+            elif exp_id == args.v2_id:
+                t = v2_trace
+            else:
+                t = load_trace(exp_id)
+            usd, breakdown = engine_cost(label, exp_id, wf, t)
+            eng_rows.append([
+                f'{label}<br>`{exp_id}`',
+                fmt_s(wall),
+                fmt_s(sim_sum),
+                fmt_s(wf['all_task_total_s']),
+                f'{fanout:.1f}×' if fanout else '-',
+                f'{delta:+.1f}%' if delta is not None else '-',
+                f'${usd:.2f}' if usd > 0 else '-',
+                breakdown,
+            ])
+        wf_section_lines.append(md_table(
+            ['Engine', 'Wall-clock (s)', 'Σ sim_* tasks (s)',
+             'Σ all tasks (s)', 'Sim parallelism', 'Δ wall %',
+             'Cost (USD)', 'Cost breakdown'],
+            eng_rows))
+        wf_section_lines.append('')
+        wf_section_lines.append(
+            '_`Wall-clock` is end-to-end workflow time (max(complete) − '
+            'min(submit) across all tasks); includes scheduler/container '
+            'overhead. `Σ sim_* tasks` is the in-process compute consumed '
+            'across all per-gen sim tasks (cost proxy). `Sim parallelism` '
+            '= Σ tasks / wall — >1× means seeds ran concurrently. For '
+            'composite_lineage / MP / Ray paths the whole lineage runs in '
+            'one task, so wall ≈ Σ tasks (parallelism=1×) but the wall is '
+            'dramatically lower because there is no per-gen process '
+            'restart. `Δ wall %` is vs the first engine listed. `Cost` '
+            'estimates: nextflow uses per-task billing (sum of '
+            'duration × rate(cpu_model) at GovCloud Spot, plus head node '
+            'On-Demand for full wall); MP / Ray use a single-spec model '
+            'fed via `--engine-cost`. Rates from `runscripts/cost.py` — '
+            'GovCloud us-gov-west-1, May 2026 snapshot._')
+        wf_section_lines.append('')
+
+        # Per-seed gap table — sequential gens within a lineage,
+        # so wall ≥ sum and the difference is scheduler overhead.
+        # Show all engines side-by-side (v1, v2, + extras).
+        all_engines_for_seed = (
+            [('v1', v1_wf), ('v2', v2_wf)]
+            + [(label, wf) for (label, _, wf) in extra_engines])
+        all_seeds = sorted(set().union(*(set(wf['per_seed'])
+                                          for _, wf in all_engines_for_seed)))
+        seed_rows = []
+        for seed in all_seeds:
+            row = [seed]
+            for _, wf in all_engines_for_seed:
+                ssum, swall, sgap = wf['per_seed'].get(seed, (None, None, None))
+                row.extend([fmt_s(ssum), fmt_s(swall), fmt_s(sgap)])
+            seed_rows.append(row)
+        if seed_rows:
+            wf_section_lines.append(
+                '### Per-seed wall-clock vs task-time')
+            wf_section_lines.append('')
+            headers = ['Seed']
+            for (label, _) in all_engines_for_seed:
+                headers.extend([f'{label} Σtasks',
+                                f'{label} wall',
+                                f'{label} gap'])
+            wf_section_lines.append(md_table(headers, seed_rows))
+            wf_section_lines.append('')
+            wf_section_lines.append(
+                '_`gap = wall − sum of sim_* task durations`. '
+                'Within a seed, gens run sequentially, so the gap is '
+                'inter-task scheduler/container time (Nextflow overhead). '
+                'composite_lineage runs the whole lineage in one '
+                'process: gap should be ~0._')
+    workflow_section = (
+        ('## Workflow wall-clock vs task-time\n\n'
+         + '\n'.join(wf_section_lines) + '\n\n')
+        if wf_section_lines else '')
+
     md = (
         f'# vEcoli v1 vs v2 — {args.v1_id} vs {args.v2_id}\n\n'
         '_Generated from latest workflow runs by `runscripts/v1_v2_report.py`._\n\n'
         + (parity_md + '\n' if parity_md else '')
         + '## Cell cycle / division times\n\n'
         f'{div_table}\n\n'
-        '## Runtime per task (sum across instances)\n\n'
+        + workflow_section
+        + '## Runtime per task (sum across instances)\n\n'
         f'{runtime_table}\n\n'
         '## Analysis plots\n\n'
         + '\n'.join(plot_blocks) + '\n'

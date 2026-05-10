@@ -2,7 +2,7 @@
     "inherit_from": ["comparison_10s_16g.json"],
     "experiment_id": "comparison_10s_16g_v2_ray_aws",
     "engine": "composite_lineage",
-    "sim_data_path": null,
+    "sim_data_path": "s3://smsvpctest-shared-sharedbucket60d199d6-abfvwv0day91/vecoli-output/comparison_10s_16g_v2_aws_listener_fix/comparison_10s_16g_v2_aws_listener_fix/parca/kb/simData.cPickle",
     "emitter_arg": {
         "out_uri": "s3://smsvpctest-shared-sharedbucket60d199d6-abfvwv0day91/vecoli-output/comparison_10s_16g_v2_ray_aws",
         "threaded": false

@@ -168,6 +168,38 @@ _run_bootstrap_on_head() {
 
 # --- 5. ``head`` namespace --------------------------------------------------
 ns_head_setup() {
+  # Idempotent: if a head with this tag already exists, reuse it
+  # (start it if stopped). Only provision a new instance when none
+  # exists — without this guard, ``head setup`` called twice creates
+  # duplicate EC2 instances tagged with the same Name, leaving an
+  # orphan and confusing every subsequent CLI command.
+  local id state
+  id=$(get_instance_id)
+  if [[ -n "$id" && "$id" != "None" ]]; then
+    state=$(aws_cli ec2 describe-instances --instance-ids "$id" \
+      --query 'Reservations[0].Instances[0].State.Name' --output text)
+    case "$state" in
+      running)
+        echo "Head $HEAD_NAME already running ($id). " \
+             "Use 'head terminate' first to provision fresh."
+        return 0 ;;
+      stopped)
+        echo "Head $HEAD_NAME exists but stopped ($id) — starting..."
+        aws_cli ec2 start-instances --instance-ids "$id" >/dev/null
+        aws_cli ec2 wait instance-running --instance-ids "$id"
+        return 0 ;;
+      pending|stopping)
+        echo "Head $HEAD_NAME is $state ($id) — waiting..."
+        if [[ "$state" == "pending" ]]; then
+          aws_cli ec2 wait instance-running --instance-ids "$id"
+        else
+          aws_cli ec2 wait instance-stopped --instance-ids "$id"
+          aws_cli ec2 start-instances --instance-ids "$id" >/dev/null
+          aws_cli ec2 wait instance-running --instance-ids "$id"
+        fi
+        return 0 ;;
+    esac
+  fi
   echo "Provisioning new head ($HEAD_NAME, $HEAD_INSTANCE_TYPE) for variant '${DEPLOY_MODE:-nextflow_batch}'..."
   HEAD_INSTANCE_TYPE="$HEAD_INSTANCE_TYPE" \
     HEAD_NAME="$HEAD_NAME" \
@@ -183,6 +215,52 @@ ns_head_terminate() {
   echo "Waiting for terminated state..."
   aws_cli ec2 wait instance-terminated --instance-ids "$id"
   echo "Terminated."
+}
+ns_head_list() {
+  # List ALL non-terminated instances tagged with this head's Name —
+  # surfaces duplicates created by the pre-idempotent ``head setup``.
+  echo "Heads tagged Name=${HEAD_NAME}:"
+  aws_cli ec2 describe-instances \
+    --filters "Name=tag:Name,Values=${HEAD_NAME}" \
+              "Name=instance-state-name,Values=running,pending,stopping,stopped" \
+    --query 'Reservations[].Instances[].[InstanceId,State.Name,LaunchTime,PublicDnsName,InstanceType]' \
+    --output table
+}
+ns_head_dedupe() {
+  # Terminate every running/pending instance tagged with HEAD_NAME
+  # EXCEPT the one with the earliest LaunchTime (the original — it's
+  # the one any in-flight ``run launch`` is targeting). Stopped
+  # instances are left alone (might be the user's saved snapshot).
+  local rows; rows=$(aws_cli ec2 describe-instances \
+    --filters "Name=tag:Name,Values=${HEAD_NAME}" \
+              "Name=instance-state-name,Values=running,pending" \
+    --query 'sort_by(Reservations[].Instances[], &LaunchTime)[].[InstanceId,LaunchTime]' \
+    --output text)
+  if [[ -z "$rows" ]]; then
+    echo "No running heads tagged ${HEAD_NAME}; nothing to dedupe."
+    return 0
+  fi
+  local n; n=$(echo "$rows" | wc -l | tr -d ' ')
+  if [[ "$n" -le 1 ]]; then
+    echo "Only one running head tagged ${HEAD_NAME}; nothing to dedupe."
+    echo "$rows"
+    return 0
+  fi
+  local keep; keep=$(echo "$rows" | head -n 1 | awk '{print $1}')
+  local kill_ids; kill_ids=$(echo "$rows" | tail -n +2 | awk '{print $1}')
+  echo "Heads tagged ${HEAD_NAME} (oldest first):"
+  echo "$rows"
+  echo
+  echo "Will keep oldest:    $keep"
+  echo "Will terminate:      $(echo "$kill_ids" | tr '\n' ' ')"
+  read -r -p "Proceed? [y/N] " ans
+  [[ "$ans" == "y" || "$ans" == "Y" ]] || { echo "aborted"; return 1; }
+  # shellcheck disable=SC2086
+  aws_cli ec2 terminate-instances --instance-ids $kill_ids >/dev/null
+  echo "Waiting for terminated state..."
+  # shellcheck disable=SC2086
+  aws_cli ec2 wait instance-terminated --instance-ids $kill_ids
+  echo "Terminated. Remaining: $keep"
 }
 ns_head_rebuild() { ns_head_terminate; ns_head_setup; }
 ns_head_setup_ray_iam() {
@@ -498,6 +576,15 @@ ns_compare_report() {
   local seeds="${VECOLI_REPORT_SEEDS:-0,1,2,3,4,5,6,7,8,9}"
   local gens="${VECOLI_REPORT_GENS:-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16}"
   local include_history="${VECOLI_INCLUDE_HISTORY:-1}"
+  # VECOLI_EXTRA_IDS — comma-separated additional engine experiment
+  # IDs (composite_lineage MP, Ray, etc.) for the N-way wall-clock
+  # table. Each entry can be ``label=experiment_id`` so the report
+  # labels them clearly. Example:
+  #   VECOLI_EXTRA_IDS="mp=comparison_10s_16g_v2_mp_aws,ray=comparison_10s_16g_v2_ray_aws"
+  local extra_ids="${VECOLI_EXTRA_IDS:-}"
+  # VECOLI_ENGINE_COST — per-engine cost spec for engines without
+  # trace CSVs. See v1_v2_report.py --engine-cost docs.
+  local engine_cost="${VECOLI_ENGINE_COST:-}"
   local dns; dns=$(require_running_dns)
   echo "Pushing latest scripts to head..."
   ssh -i "$KEY_FILE" "ec2-user@$dns" 'mkdir -p ~/vEcoli/runscripts/aws'
@@ -506,10 +593,15 @@ ns_compare_report() {
       "$SCRIPT_DIR/compare_v1_v2_at_gen.py" \
       "$SCRIPT_DIR/compute_parity_matrix.py" \
       "ec2-user@$dns:~/vEcoli/runscripts/aws/"
-  scp -i "$KEY_FILE" "$REPO_ROOT/runscripts/v1_v2_report.py" "ec2-user@$dns:~/vEcoli/runscripts/"
-  echo "Running fetch + report on head ($v1_id vs $v2_id)..."
+  scp -i "$KEY_FILE" \
+      "$REPO_ROOT/runscripts/v1_v2_report.py" \
+      "$REPO_ROOT/runscripts/cost.py" \
+      "$REPO_ROOT/runscripts/synthetic_trace.py" \
+      "ec2-user@$dns:~/vEcoli/runscripts/"
+  echo "Running fetch + report on head ($v1_id vs $v2_id${extra_ids:+ + extras: $extra_ids})..."
   ssh -i "$KEY_FILE" "ec2-user@$dns" "set -e; cd ~/vEcoli && \
     V1_ID='$v1_id' V2_ID='$v2_id' SEEDS='$seeds' GENS='$gens' \
+    EXTRA_IDS='$extra_ids' ENGINE_COST='$engine_cost' \
     INCLUDE_HISTORY='$include_history' \
     BUCKET='$BUCKET' PREFIX='${PREFIX%%/*}' \
     bash runscripts/aws/fetch_and_compare.sh"
@@ -565,9 +657,13 @@ Bootstrap:      $(basename "$BOOTSTRAP_SCRIPT")
 
 Namespaces (recommended):
   head <subcmd>     EC2 head-node lifecycle
-    setup           provision new head ($HEAD_INSTANCE_TYPE)
+    setup           provision new head ($HEAD_INSTANCE_TYPE), or
+                    reuse if a head with this Name tag already exists
     setup-ray-iam   one-time IAM grant for Ray cluster mode (run from
                     laptop with admin perms; idempotent)
+    list            show every non-terminated EC2 tagged HEAD_NAME
+                    (surfaces duplicates from pre-idempotent setup)
+    dedupe          keep the oldest running head, terminate the rest
     rebuild         terminate + setup
     reboot | stop | start | terminate
     refresh-sg      re-add current public IP to SSH SG
@@ -634,6 +730,8 @@ case "$cmd" in
       setup)         ns_head_setup "$@" ;;
       setup-ray-iam) ns_head_setup_ray_iam "$@" ;;
       terminate)     ns_head_terminate "$@" ;;
+      list)          ns_head_list "$@" ;;
+      dedupe)        ns_head_dedupe "$@" ;;
       rebuild)       ns_head_rebuild "$@" ;;
       reboot)        ns_head_reboot "$@" ;;
       stop)          ns_head_stop "$@" ;;

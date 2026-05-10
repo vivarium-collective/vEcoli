@@ -33,6 +33,55 @@ import time
 
 # These are set in the parent before fork so workers inherit them
 # via copy-on-write. Workers read these as module-level globals.
+def _resolve_inherited_config(config_path, cfg):
+    """Walk ``inherit_from`` chain and merge configs, child wins.
+
+    Mirrors ``EcoliSim.from_file``'s loading semantics:
+      1. ``configs/default.json`` is the implicit ultimate base (auto-
+         loaded for every config; defaults like ``max_duration``,
+         ``time_step`` live here).
+      2. Configs in ``inherit_from`` are merged on top (parent →
+         child order); each parent is itself recursively resolved.
+      3. The child config's own keys override.
+
+    No EcoliSim import — keeps this driver-side helper light.
+    """
+    import json as _json
+    cfg_dir = os.path.dirname(os.path.abspath(config_path))
+    merged = {}
+
+    # 1. default.json — the implicit base every vEcoli config sits on.
+    # Skip if config_path IS default.json (avoid infinite recursion).
+    cfg_basename = os.path.basename(os.path.abspath(config_path))
+    if cfg_basename != 'default.json':
+        default_candidates = [
+            os.path.join(cfg_dir, 'default.json'),
+            os.path.join(cfg_dir, '..', 'configs', 'default.json'),
+        ]
+        for cand in default_candidates:
+            if os.path.isfile(cand):
+                with open(cand) as f:
+                    merged.update(_json.load(f))
+                break
+
+    # 2. Explicit inherit_from chain
+    for parent_rel in cfg.get('inherit_from') or []:
+        candidates = [
+            os.path.join(cfg_dir, parent_rel),
+            os.path.join(cfg_dir, '..', 'configs', parent_rel),
+            os.path.join(cfg_dir, parent_rel + '.json'),
+        ]
+        for cand in candidates:
+            if os.path.isfile(cand):
+                with open(cand) as f:
+                    parent_cfg = _json.load(f)
+                merged.update(_resolve_inherited_config(cand, parent_cfg))
+                break
+
+    # 3. Child wins
+    merged.update(cfg)
+    return merged
+
 _PRELOADED_SIM_DATA = None
 _WORKER_CONFIG_PATH = None
 _WORKER_OUT_DIR = None
@@ -49,6 +98,10 @@ def _run_one_lineage(seed):
     ``_PRELOADED_SIM_DATA`` global (inherited via fork). Pinning
     POLARS_MAX_THREADS=1 keeps polars from oversubscribing on
     multi-worker boxes.
+
+    Returns ``(seed, t_seed_start_epoch, t_seed_end_epoch)`` so the
+    parent can write a Nextflow-shaped synthetic trace CSV at
+    workflow end.
     """
     os.environ.setdefault('POLARS_MAX_THREADS', '1')
     from ecoli.experiments.ecoli_master_sim import EcoliSim
@@ -74,63 +127,78 @@ def _run_one_lineage(seed):
     sim._preloaded_sim_data = _PRELOADED_SIM_DATA
     t0 = time.time()
     sim.run()
-    return seed, time.time() - t0
+    return seed, t0, time.time()
 
 
 def main():
+    """Drive a composite_lineage MP run from a config file alone.
+
+    Every per-run setting (sim_data_path, out_uri, n_seeds, generations,
+    max_duration, base_seed) lives in the config — the only optional
+    flag is ``--n_workers`` to override pool size when you want fewer
+    workers than seeds (otherwise defaults to one worker per seed).
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', required=True)
-    parser.add_argument('--sim_data_path', required=True)
-    # Output destination — give exactly one. ``--out_uri`` for cloud
-    # (s3:// or gs://); ``--out_dir`` for local. ParquetEmitter
-    # routes through fsspec when out_uri is set.
-    parser.add_argument('--out_dir', default=None,
-                        help='local output directory')
-    parser.add_argument('--out_uri', default=None,
-                        help='cloud URI (s3:// / gs://) for parquet output')
-    parser.add_argument('--n_seeds', type=int, default=10)
-    parser.add_argument('--base_seed', type=int, default=0)
-    parser.add_argument('--generations', type=int, default=16)
-    parser.add_argument('--max_duration', type=float, default=3000.0)
     parser.add_argument('--n_workers', type=int, default=None,
-                        help='Default: --n_seeds')
+                        help='Pool size; defaults to n_init_sims from config')
     args = parser.parse_args()
-    if not args.out_dir and not args.out_uri:
-        parser.error("must give one of --out_dir or --out_uri")
 
-    if not args.sim_data_path.startswith(
-            ('s3://', 'gs://')) and not os.path.isfile(args.sim_data_path):
-        print(f"sim_data_path not found: {args.sim_data_path}",
-              file=sys.stderr)
+    # Read every other knob from the config.
+    import json
+    with open(args.config) as f:
+        cfg = json.load(f)
+    # Inherit-from is a vEcoli convention; the in-memory EcoliSim handles
+    # it, but here we just need a few top-level values. Walk inherits
+    # manually so the runner doesn't depend on importing EcoliSim.
+    cfg = _resolve_inherited_config(args.config, cfg)
+
+    sim_data_path = cfg.get('sim_data_path')
+    if not sim_data_path:
+        parser.error("config must set 'sim_data_path' "
+                     "(local file or s3://… / gs://…)")
+    emitter_arg = cfg.get('emitter_arg', {}) or {}
+    out_uri = emitter_arg.get('out_uri')
+    out_dir = emitter_arg.get('out_dir')
+    if not out_uri and not out_dir:
+        parser.error("config emitter_arg must set 'out_uri' or 'out_dir'")
+    n_seeds = int(cfg.get('n_init_sims') or 1)
+    base_seed = int(cfg.get('lineage_seed') or 0)
+    generations = int(cfg.get('generations') or 1)
+    max_duration = float(cfg.get('max_duration') or 10800.0)
+
+    if not sim_data_path.startswith(('s3://', 'gs://')) \
+            and not os.path.isfile(sim_data_path):
+        print(f"sim_data_path not found: {sim_data_path}", file=sys.stderr)
         sys.exit(1)
 
-    n_workers = args.n_workers or args.n_seeds
+    n_workers = args.n_workers or n_seeds
 
     # Pre-load sim_data in parent — workers inherit via fork (COW).
-    print(f"[mp] Loading sim_data once in parent "
-          f"({args.sim_data_path})...", flush=True)
+    print(f"[mp] Loading sim_data once in parent ({sim_data_path})...",
+          flush=True)
     t0 = time.time()
     from ecoli.library.sim_data import LoadSimData
-    base = LoadSimData(sim_data_path=args.sim_data_path, seed=args.base_seed)
+    base = LoadSimData(sim_data_path=sim_data_path, seed=base_seed)
     global _PRELOADED_SIM_DATA, _WORKER_CONFIG_PATH, _WORKER_OUT_DIR
     global _WORKER_OUT_URI, _WORKER_GENERATIONS, _WORKER_MAX_DURATION
     global _WORKER_SIM_DATA_PATH
     _PRELOADED_SIM_DATA = base.sim_data
     _WORKER_CONFIG_PATH = os.path.abspath(args.config)
-    _WORKER_OUT_DIR = os.path.abspath(args.out_dir) if args.out_dir else None
-    _WORKER_OUT_URI = args.out_uri  # cloud URI as-is, no abspath
-    _WORKER_GENERATIONS = args.generations
-    _WORKER_MAX_DURATION = args.max_duration
+    _WORKER_OUT_DIR = os.path.abspath(out_dir) if out_dir else None
+    _WORKER_OUT_URI = out_uri
+    _WORKER_GENERATIONS = generations
+    _WORKER_MAX_DURATION = max_duration
     _WORKER_SIM_DATA_PATH = (
-        args.sim_data_path
-        if args.sim_data_path.startswith(('s3://', 'gs://'))
-        else os.path.abspath(args.sim_data_path))
+        sim_data_path
+        if sim_data_path.startswith(('s3://', 'gs://'))
+        else os.path.abspath(sim_data_path))
     print(f"[mp]   Loaded in {time.time()-t0:.2f}s. "
-          f"Spawning {n_workers} workers for "
-          f"{args.n_seeds} seeds...", flush=True)
+          f"Spawning {n_workers} workers for {n_seeds} seeds "
+          f"(generations={generations}, max_duration={max_duration})...",
+          flush=True)
 
-    seeds = list(range(args.base_seed,
-                       args.base_seed + args.n_seeds))
+    seeds = list(range(base_seed, base_seed + n_seeds))
 
     # Use 'fork' explicitly — Linux default; required for the
     # _PRELOADED_SIM_DATA copy-on-write inheritance to work. 'spawn'
@@ -139,11 +207,31 @@ def main():
     t_start = time.time()
     with ctx.Pool(processes=n_workers) as pool:
         results = pool.map(_run_one_lineage, seeds)
-    elapsed = time.time() - t_start
-    print(f"\n[mp] All {args.n_seeds} lineages done in "
+    t_end = time.time()
+    elapsed = t_end - t_start
+    print(f"\n[mp] All {n_seeds} lineages done in "
           f"{elapsed:.1f}s wall.", flush=True)
-    for seed, dt in results:
-        print(f"  seed={seed}: {dt:.1f}s", flush=True)
+    for seed, t0_s, t1_s in results:
+        print(f"  seed={seed}: {t1_s-t0_s:.1f}s", flush=True)
+
+    # Emit a Nextflow-shaped synthetic trace + cost_meta sidecar so
+    # runscripts/v1_v2_report.py can include this run in the
+    # workflow-wall-clock + cost tables.
+    if out_uri:
+        exp_id = cfg.get('experiment_id', 'mp_run')
+        from runscripts.synthetic_trace import emit_synthetic_trace
+        emit_synthetic_trace(
+            out_uri=out_uri,
+            exp_id=exp_id,
+            workflow_t_start=t_start,
+            workflow_t_end=t_end,
+            per_seed=results,
+            deploy_meta={
+                'deploy_mode': 'mp_single_node',
+                'instance': os.environ.get('VECOLI_INSTANCE', 'c7g.metal'),
+                'n_instances': 1,
+                'on_demand': True,
+            })
 
 
 if __name__ == '__main__':
