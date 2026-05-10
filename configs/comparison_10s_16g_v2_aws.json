@@ -1,10 +1,10 @@
 {
     "inherit_from": ["comparison_10s_16g.json"],
-    "experiment_id": "comparison_10s_16g_v2_aws_listener_fix",
+    "experiment_id": "comparison_10s_16g_v2_aws_2026_05",
     "engine": "composite",
     "sim_data_path": null,
     "emitter_arg": {
-        "out_uri": "s3://smsvpctest-shared-sharedbucket60d199d6-abfvwv0day91/vecoli-output/comparison_10s_16g_v2_aws_listener_fix",
+        "out_uri": "s3://smsvpctest-shared-sharedbucket60d199d6-abfvwv0day91/vecoli-output/comparison_10s_16g_v2_aws_2026_05",
         "threaded": false
     },
     "aws": {

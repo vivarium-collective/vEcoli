@@ -263,6 +263,86 @@ ns_head_dedupe() {
   echo "Terminated. Remaining: $keep"
 }
 ns_head_rebuild() { ns_head_terminate; ns_head_setup; }
+ns_head_sync() {
+  # Rsync the local vEcoli repo onto the head, optionally also pushing
+  # the current local code INTO the head's running Docker container
+  # (vecoli_ray) via ``docker cp``. This is the fast iteration path:
+  # no git push, no image rebuild — just sync what changed.
+  #
+  # Workflow:
+  #   1. Edit code locally.
+  #   2. ``head sync``     →  ~/vEcoli on head matches local.
+  #   3. ``head sync -c``  →  /vEcoli inside the head's vecoli_ray
+  #                            container ALSO matches local. Needed
+  #                            for changes the cluster driver runs in
+  #                            the container (run_composite_lineage_ray.py,
+  #                            ec2_cluster_ray.py-side configs, etc.).
+  #   4. ``run launch``    →  bootstrap as usual.
+  #
+  # Caveat: only the head's container is updated. Worker containers
+  # still run whatever's in the image. For changes to actor / sim
+  # code (ecoli/, wholecell/, reconstruction/), an image rebuild +
+  # push is still required so workers get the new code.
+  #
+  # Args (optional):
+  #   -c, --container   also docker-cp host code into vecoli_ray
+  local include_container=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -c|--container) include_container=1; shift ;;
+      *) echo "usage: head sync [-c|--container]" >&2; return 1 ;;
+    esac
+  done
+  local dns; dns=$(require_running_dns)
+  # Ensure rsync exists on the head — Amazon Linux 2023 doesn't ship
+  # it by default. Idempotent: dnf install is a no-op when present.
+  if ! ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no \
+       "ec2-user@${dns}" "command -v rsync >/dev/null 2>&1"; then
+    echo "Installing rsync on head (one-time) ..."
+    ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no \
+      "ec2-user@${dns}" "sudo dnf -y install rsync >/dev/null"
+  fi
+  echo "Rsyncing local repo → ec2-user@${dns}:~/vEcoli/ ..."
+  # Excludes: .venv (host arch may differ on first sync; venv is
+  # rebuilt on head anyway), .git (head bootstrap manages it), out/
+  # (sim outputs — don't ship), __pycache__ (regenerated on import),
+  # .ruff_cache / .pytest_cache (dev caches), nextflow_temp.
+  rsync -avzP \
+    --exclude='.venv' \
+    --exclude='.git' \
+    --exclude='out' \
+    --exclude='__pycache__' \
+    --exclude='*.pyc' \
+    --exclude='.ruff_cache' \
+    --exclude='.pytest_cache' \
+    --exclude='.nextflow' \
+    --exclude='nextflow_temp' \
+    --exclude='trace--*.csv' \
+    -e "ssh -i $KEY_FILE -o StrictHostKeyChecking=no" \
+    "${REPO_ROOT}/" "ec2-user@${dns}:~/vEcoli/"
+  echo "  Host repo synced."
+
+  if (( include_container )); then
+    # Docker cp the same subdirs into the running vecoli_ray
+    # container (the cluster's head container). Skip .venv (the
+    # image's venv is at /vEcoli/.venv and may not match host arch).
+    # Only push the volatile dirs the driver actually reads at
+    # runtime — keeps the cp small and fast.
+    local container="${VECOLI_CONTAINER:-vecoli_ray}"
+    echo "Pushing local subdirs → docker container '${container}' on head ..."
+    ssh -i "$KEY_FILE" "ec2-user@${dns}" \
+      "if ! docker ps --format '{{.Names}}' | grep -qx '${container}'; then
+         echo 'Container ${container} not running on head — skip cp.'; exit 0
+       fi
+       for d in runscripts configs ecoli wholecell reconstruction; do
+         if [[ -d ~/vEcoli/\$d ]]; then
+           echo \"  docker cp ~/vEcoli/\$d ${container}:/vEcoli/\"
+           docker cp ~/vEcoli/\$d ${container}:/vEcoli/
+         fi
+       done
+       echo '  Container code synced.'"
+  fi
+}
 ns_head_setup_ray_iam() {
   # One-time grant of Ray cluster-management perms to the head's
   # instance profile, plus creation of the worker instance profile
@@ -466,6 +546,88 @@ ns_run_tail() {
      [[ -f \$F ]] || F=\$HOME/v2_workflow.log; \
      tail -f \$F | sed -u 's/\\x1b\\[[0-9;]*[a-zA-Z]//g; s/\\x1b\\][0-9];[^\\x07]*\\x07//g'"
 }
+ns_run_log() {
+  # Pull both the cluster's experiment log (uploaded to S3 at
+  # workflow end) and the head node's driver log (still on the
+  # local instance disk). Useful after a failed/finished run when
+  # you want to see WHY it ended without attaching to tmux.
+  #
+  # Args (optional):
+  #   -n N    show last N lines instead of full log (default: full)
+  local n=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -n) n="$2"; shift 2 ;;
+      *)  echo "usage: run log [-n N]" >&2; return 1 ;;
+    esac
+  done
+
+  echo "=== Driver log (head node ~/${TMUX_SESSION}_workflow.log) ==="
+  local dns; dns=$(get_running_dns)
+  if [[ -n "$dns" && "$dns" != "None" ]]; then
+    local cmd="F=\$HOME/${TMUX_SESSION}_workflow.log; \
+      [[ -f \$F ]] || F=\$HOME/v2_workflow.log; \
+      [[ -f \$F ]] || { echo 'no driver log on head'; exit 0; }; \
+      ${n:+tail -n $n }cat \$F | \
+      sed -u 's/\\x1b\\[[0-9;]*[a-zA-Z]//g; s/\\x1b\\][0-9];[^\\x07]*\\x07//g'"
+    [[ -n "$n" ]] && cmd="F=\$HOME/${TMUX_SESSION}_workflow.log; \
+      [[ -f \$F ]] || F=\$HOME/v2_workflow.log; \
+      [[ -f \$F ]] || { echo 'no driver log on head'; exit 0; }; \
+      tail -n $n \$F | \
+      sed -u 's/\\x1b\\[[0-9;]*[a-zA-Z]//g; s/\\x1b\\][0-9];[^\\x07]*\\x07//g'"
+    ssh -i "$KEY_FILE" "ec2-user@$dns" "$cmd" || true
+  else
+    echo "(head $HEAD_NAME not running — skipping driver log)"
+  fi
+
+  # Variant-specific cluster log:
+  #   ray_cluster      → s3://.../lineage_ray.log (uploaded by
+  #                      ec2_cluster_ray.py at workflow end)
+  #   mp_single_node   → driver log only (the MP runner stdouts to
+  #                      tmux, no S3 upload)
+  #   nextflow_batch   → per-task .command.{out,err} on each Batch
+  #                      task; we surface ``trace--<exp>--*.csv`` /
+  #                      analyses dir but task stderr lives in CW
+  echo
+  case "${DEPLOY_MODE:-nextflow_batch}" in
+    ray_cluster)
+      local exp_log="s3://${BUCKET}/${PREFIX}/${EXP_ID}/lineage_ray.log"
+      echo "=== Cluster experiment log (${exp_log}) ==="
+      if aws_cli s3 ls "$exp_log" >/dev/null 2>&1; then
+        if [[ -n "$n" ]]; then
+          aws_cli s3 cp "$exp_log" - 2>/dev/null \
+            | tail -n "$n" \
+            | sed -u 's/\x1b\[[0-9;]*[a-zA-Z]//g'
+        else
+          aws_cli s3 cp "$exp_log" - 2>/dev/null \
+            | sed -u 's/\x1b\[[0-9;]*[a-zA-Z]//g'
+        fi
+      else
+        echo "(no cluster log at $exp_log — workflow either still running"
+        echo " or didn't reach the upload step)"
+      fi
+      ;;
+    mp_single_node)
+      echo "(MP variant: experiment log == driver log above; the MP"
+      echo " runner streams to tmux and isn't uploaded separately)"
+      ;;
+    nextflow_batch|"")
+      local trace; trace=$(ls -t "$REPO_ROOT"/trace--"$EXP_ID"--*.csv 2>/dev/null | head -1)
+      if [[ -n "$trace" ]]; then
+        echo "=== Nextflow trace (${trace##*/}) ==="
+        echo "Sample (first 5 task rows):"
+        head -1 "$trace"
+        head -6 "$trace" | tail -5
+        echo
+        echo "(For per-task stderr, check CloudWatch Logs group"
+        echo " /aws/batch/job for jobName matching '${EXP_ID}_*'.)"
+      else
+        echo "(No local trace--${EXP_ID}--*.csv yet — run"
+        echo " 'compare report' to fetch it from S3 first.)"
+      fi
+      ;;
+  esac
+}
 
 # --- 8. ``cache`` namespace -------------------------------------------------
 ns_cache() {
@@ -664,6 +826,10 @@ Namespaces (recommended):
     list            show every non-terminated EC2 tagged HEAD_NAME
                     (surfaces duplicates from pre-idempotent setup)
     dedupe          keep the oldest running head, terminate the rest
+    sync [-c]       rsync local vEcoli repo → head; -c also docker-cp's
+                    runscripts/configs/ecoli into the running
+                    vecoli_ray container (skip image rebuild for
+                    head-side code changes)
     rebuild         terminate + setup
     reboot | stop | start | terminate
     refresh-sg      re-add current public IP to SSH SG
@@ -683,7 +849,12 @@ Namespaces (recommended):
     cancel                kill tmux + terminate Batch jobs (if any)
     status                head + tmux + Batch (if any) + last S3 writes
     jobs [STATUS]         list Batch jobs (Nextflow only)
-    tail                  tail tmux log on head
+    tail                  tail tmux log on head (live, follows)
+    log [-n N]            print driver log + variant-specific
+                          experiment log (S3 lineage_ray.log for
+                          Ray, trace CSV for nextflow). Use after a
+                          run finishes/fails to diagnose without
+                          attaching to tmux.
 
   cache <subcmd>    Nextflow .nextflow/ S3 cache (push|pull|ls|rm)
 
@@ -732,6 +903,7 @@ case "$cmd" in
       terminate)     ns_head_terminate "$@" ;;
       list)          ns_head_list "$@" ;;
       dedupe)        ns_head_dedupe "$@" ;;
+      sync)          ns_head_sync "$@" ;;
       rebuild)       ns_head_rebuild "$@" ;;
       reboot)        ns_head_reboot "$@" ;;
       stop)          ns_head_stop "$@" ;;
@@ -762,6 +934,7 @@ case "$cmd" in
       status) ns_run_status "$@" ;;
       jobs)   ns_run_jobs "$@" ;;
       tail)   ns_run_tail "$@" ;;
+      log)    ns_run_log "$@" ;;
       help|*) cmd_help ;;
     esac
     ;;

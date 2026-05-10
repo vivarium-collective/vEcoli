@@ -113,6 +113,49 @@ def _read_sim_knobs_from_config(config_relpath):
     return n_seeds, generations, max_duration
 
 
+def _read_aws_ray_int(config_relpath, key):
+    """Read ``aws.ray.<key>`` from the merged config. Returns the
+    string value (so it can feed ``int()`` directly), or ``None``
+    when absent. Used for cluster-topology knobs like ``max_workers``,
+    ``head_instance_type``, etc. — config is authoritative; env vars
+    only override when set."""
+    import json
+    seen = set()
+
+    def _resolve(path):
+        path = os.path.abspath(path)
+        if path in seen:
+            return {}
+        seen.add(path)
+        with open(path) as f:
+            cfg = json.load(f)
+        merged = {}
+        cfg_dir = os.path.dirname(path)
+        if os.path.basename(path) != 'default.json':
+            for cand in (
+                    os.path.join(cfg_dir, 'default.json'),
+                    os.path.join(cfg_dir, '..', 'configs', 'default.json')):
+                if os.path.isfile(cand):
+                    merged.update(_resolve(cand))
+                    break
+        for parent_rel in cfg.get('inherit_from') or []:
+            for cand in (
+                    os.path.join(cfg_dir, parent_rel),
+                    os.path.join(cfg_dir, '..', 'configs', parent_rel),
+                    os.path.join(cfg_dir, parent_rel + '.json')):
+                if os.path.isfile(cand):
+                    merged.update(_resolve(cand))
+                    break
+        merged.update(cfg)
+        return merged
+
+    cfg = _resolve(config_relpath)
+    aws = cfg.get('aws') or {}
+    ray_cfg = aws.get('ray') or {}
+    val = ray_cfg.get(key)
+    return None if val is None else str(val)
+
+
 def main() -> int:
     image_uri = os.environ["IMAGE_URI"]
     out_uri = os.environ["OUT_URI"]
@@ -120,17 +163,27 @@ def main() -> int:
     config_relpath = os.environ.get(
         "CONFIG_RELPATH", "configs/comparison_10s_16g_v2_ray_aws.json")
 
-    # Cluster sizing comes from env (it's an infra knob, not a sim
-    # knob). Per-run sim settings (n_seeds, generations, max_duration)
-    # are read from the config by run_composite_lineage_ray.py — we
-    # only need n_seeds locally to size the worker pool. Walk the
-    # inherited-config chain so values can live in any parent.
+    # Per-run sim settings (n_seeds, generations, max_duration) come
+    # from the config — we only need them locally for log messages
+    # and (n_seeds) as the n_workers fallback. Walk the inherited-
+    # config chain so values can live in any parent.
     n_seeds, generations, max_duration = _read_sim_knobs_from_config(
         config_relpath)
-    n_workers = int(os.environ.get("N_WORKERS") or str(n_seeds))
+    # Cluster sizing: prefer config's ``aws.ray.max_workers`` (the
+    # config is the source of truth for the cluster topology). Env
+    # ``N_WORKERS`` overrides for ad-hoc swaps. Final fallback is
+    # n_seeds (one worker per lineage actor).
+    n_workers = int(
+        os.environ.get("N_WORKERS")
+        or _read_aws_ray_int(config_relpath, "max_workers")
+        or str(n_seeds))
 
-    head_type = os.environ.get("HEAD_INSTANCE_TYPE") or "m5.2xlarge"
-    worker_type = os.environ.get("WORKER_INSTANCE_TYPE") or "m5.4xlarge"
+    head_type = (os.environ.get("HEAD_INSTANCE_TYPE")
+                 or _read_aws_ray_int(config_relpath, "head_instance_type")
+                 or "m5.2xlarge")
+    worker_type = (os.environ.get("WORKER_INSTANCE_TYPE")
+                   or _read_aws_ray_int(config_relpath, "worker_instance_type")
+                   or "m5.4xlarge")
     iam_profile = os.environ.get("IAM_INSTANCE_PROFILE") or "ECR"
     baked_ami_id = os.environ.get("BAKED_AMI_ID") or None
     keep_cluster = bool(int(os.environ.get("KEEP_CLUSTER") or "0"))
