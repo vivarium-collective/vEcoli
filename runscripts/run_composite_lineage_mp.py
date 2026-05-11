@@ -41,6 +41,13 @@ os.environ.setdefault('OPENBLAS_NUM_THREADS', '1')
 os.environ.setdefault('NUMBA_NUM_THREADS', '1')
 os.environ.setdefault('NUMEXPR_NUM_THREADS', '1')
 os.environ.setdefault('VECLIB_MAXIMUM_THREADS', '1')
+# scipy's bundled openblas loads before env vars are visible; cap
+# all already-loaded threadpools at runtime.
+try:
+    from threadpoolctl import threadpool_limits as _tpl
+    _tpl(limits=1)
+except ImportError:
+    pass
 
 import argparse
 import multiprocessing

@@ -12,6 +12,34 @@ Interface for configuring and running **single-cell** E. coli simulations.
 import argparse
 import copy
 import os
+
+# Pin BLAS/numba/etc to single-threaded BEFORE any numpy/scipy/numba
+# import. Threading config is read at IMPORT time; setting these
+# after numpy loads is a no-op for the per-thread reductions used in
+# the FBA solve. Bit-parity requires matched threading on both sides
+# (v1 vivarium vs v2 composite_lineage / MP / Ray). Empirically
+# (2026-05-10): v1 multi-threaded vs v1 single-threaded diverges at
+# tick 2 in WATER by 2370 atoms — that delta accumulates to billions
+# of atoms over a full cell cycle. ``setdefault`` so a user can
+# override via env on the command line.
+os.environ.setdefault('OMP_NUM_THREADS', '1')
+os.environ.setdefault('MKL_NUM_THREADS', '1')
+os.environ.setdefault('OPENBLAS_NUM_THREADS', '1')
+os.environ.setdefault('NUMBA_NUM_THREADS', '1')
+os.environ.setdefault('NUMEXPR_NUM_THREADS', '1')
+os.environ.setdefault('VECLIB_MAXIMUM_THREADS', '1')
+os.environ.setdefault('POLARS_MAX_THREADS', '1')
+# Env vars cover most native BLAS but scipy ships its own bundled
+# OpenBLAS that's loaded before these env vars are visible (it's
+# imported transitively by fsspec / vivarium below). Pin all loaded
+# threadpools at runtime via threadpoolctl as a second line of
+# defense.
+try:
+    from threadpoolctl import threadpool_limits as _tpl
+    _tpl(limits=1)
+except ImportError:
+    pass
+
 import pstats
 import subprocess
 import sys

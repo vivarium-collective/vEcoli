@@ -33,6 +33,28 @@ Usage:
 """
 import argparse
 import os
+
+# Pin numerics to single-threaded BEFORE any numpy/scipy/numba/ray
+# import. Ray actors fork from this driver and inherit the env via
+# spawn; setting at module-import time guarantees actors see these
+# before they ever load numpy. See ecoli_master_sim.py for the same
+# rationale (2026-05-10 verified: matched threading + matched
+# sim_data → v1 ↔ v2 bit-identical for full mother + daughter).
+os.environ.setdefault('OMP_NUM_THREADS', '1')
+os.environ.setdefault('MKL_NUM_THREADS', '1')
+os.environ.setdefault('OPENBLAS_NUM_THREADS', '1')
+os.environ.setdefault('NUMBA_NUM_THREADS', '1')
+os.environ.setdefault('NUMEXPR_NUM_THREADS', '1')
+os.environ.setdefault('VECLIB_MAXIMUM_THREADS', '1')
+os.environ.setdefault('POLARS_MAX_THREADS', '1')
+# scipy's bundled openblas loads before env vars are visible; cap
+# all already-loaded threadpools at runtime.
+try:
+    from threadpoolctl import threadpool_limits as _tpl
+    _tpl(limits=1)
+except ImportError:
+    pass
+
 import sys
 import time
 
