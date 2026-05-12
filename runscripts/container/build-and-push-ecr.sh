@@ -159,14 +159,24 @@ echo "=== Authenticating with ECR ==="
 aws ecr get-login-password --region "${AWS_REGION}" | \
   docker login --username AWS --password-stdin "${ECR_REGISTRY}"
 
-# Get git metadata
-GIT_HASH=$(git rev-parse HEAD)
-GIT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "detached")
+# Get git metadata. Tolerate a missing ``.git`` directory — vecoli_aws.sh
+# rsyncs the working tree to the head WITHOUT ``.git`` (line ~543 of
+# vecoli_aws.sh excludes it intentionally to avoid head/local divergence).
+# In that case we don't have hash/branch/diff info; record "rsynced" so
+# the image is still tagged identifiably.
+if git rev-parse HEAD >/dev/null 2>&1; then
+  GIT_HASH=$(git rev-parse HEAD)
+  GIT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "detached")
+else
+  GIT_HASH="rsynced-$(date +%s)"
+  GIT_BRANCH="rsynced"
+fi
 TIMESTAMP=$(date '+%Y%m%d.%H%M%S')
 
-# Save git diff for reproducibility
+# Save git diff for reproducibility (skip if no .git).
 mkdir -p source-info
-git diff HEAD > source-info/git_diff.txt
+git diff HEAD > source-info/git_diff.txt 2>/dev/null \
+  || echo "(no .git on this host — diff not captured)" > source-info/git_diff.txt
 
 echo ""
 echo "=== Building Docker Image ==="

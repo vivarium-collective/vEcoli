@@ -15,13 +15,15 @@ import sys
 import time
 
 
-def run_v2(ticks):
+def run_v2(ticks, sim_data_path=None):
     from ecoli.experiments.ecoli_master_sim import EcoliSim
     from ecoli.library.bigraph_types import ECOLI_TYPES
     from ecoli.composites.ecoli_composite import build_composite_native
     from process_bigraph import Composite
     from bigraph_schema import allocate_core
     sim = EcoliSim.from_file(filepath='configs/two_generations_v2.json')
+    if sim_data_path:
+        sim.config['sim_data_path'] = sim_data_path
     sim.config['engine'] = 'composite'
     sim.config['emitter'] = 'null'
     sim.processes = sim._retrieve_processes(
@@ -45,11 +47,12 @@ def run_v2(ticks):
     return elapsed
 
 
-def run_v1(ticks):
+def run_v1(ticks, sim_data_path=None):
     from ecoli.experiments.ecoli_master_sim import EcoliSim
     sim = EcoliSim.from_file(filepath='configs/two_generations_v1.json')
     sim.config['sim_data_path'] = (
-        'out/two_generations_v1/parca/kb/simData.cPickle')
+        sim_data_path
+        or 'out/two_generations_v1/parca/kb/simData.cPickle')
     sim.config['engine'] = 'vivarium'
     sim.config['emitter'] = 'null'
     sim.config['max_duration'] = ticks
@@ -65,10 +68,10 @@ def run_v1(ticks):
     return elapsed
 
 
-def profile(target, ticks, out_path):
+def profile(target, ticks, out_path, sim_data_path=None):
     pr = cProfile.Profile()
     pr.enable()
-    target(ticks)
+    target(ticks, sim_data_path=sim_data_path)
     pr.disable()
     pr.dump_stats(out_path)
     print(f'\n=== TOP 25 by cumulative time ({out_path}) ===')
@@ -82,12 +85,16 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument('--ticks', type=int, default=100)
     p.add_argument('--engine', choices=['v1', 'v2', 'both'], default='both')
+    p.add_argument('--sim-data-path', default=None,
+                   help='Override sim_data pickle path for both engines')
     args = p.parse_args()
 
     if args.engine in ('v1', 'both'):
-        profile(run_v1, args.ticks, '/tmp/profile_v1.prof')
+        profile(run_v1, args.ticks, '/tmp/profile_v1.prof',
+                sim_data_path=args.sim_data_path)
     if args.engine in ('v2', 'both'):
-        profile(run_v2, args.ticks, '/tmp/profile_v2.prof')
+        profile(run_v2, args.ticks, '/tmp/profile_v2.prof',
+                sim_data_path=args.sim_data_path)
 
 
 if __name__ == '__main__':

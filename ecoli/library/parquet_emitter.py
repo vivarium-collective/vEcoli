@@ -918,6 +918,14 @@ class ParquetEmitter(Emitter):
         this is done by :py:class:`~ecoli.experiments.ecoli_master_sim.EcoliSim`
         upon reaching division.
         """
+        # Early-out when finalize is called before any configuration emit
+        # set ``experiment_id`` / ``partitioning_path``. This happens when
+        # an upstream error tears the worker down before its first emit;
+        # without this guard, the AttributeError below masks the real
+        # exception in the worker traceback.
+        if not getattr(self, 'experiment_id', None) \
+                or not getattr(self, 'partitioning_path', None):
+            return
         # Wait for last batch to finish writing
         self.last_batch_future.result()
         # Flush any remaining buffered emits to Parquet

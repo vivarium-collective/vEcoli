@@ -7,6 +7,7 @@
     },
     "sim_data_path": null,
     "fail_at_max_duration": true,
+    "max_duration": 14400,
     "generations": 16,
     "n_init_sims": 10,
     "lineage_seed": 0,

@@ -15,6 +15,13 @@ VECOLI_BRANCH="${VECOLI_BRANCH:-composite}"
 VECOLI_DIR="${HOME}/vEcoli"
 REGION="us-gov-west-1"
 
+# Capture bootstrap output to a log on the head so a crash is still
+# diagnosable post-hoc. ``compare`` has no SESSION env, so use a fixed
+# filename. ``-a`` so a re-bootstrap appends rather than truncates.
+BOOTSTRAP_LOG="${HOME}/bootstrap_compare.log"
+exec > >(tee -a "$BOOTSTRAP_LOG") 2>&1
+echo "=== bootstrap_head_compare.sh start  $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+
 # --- 1. system packages -----------------------------------------------------
 # pandoc is NOT in AL2023's default repos and is only needed for
 # ``compare export`` (markdown → html/pdf). The .md report itself

@@ -20,6 +20,14 @@ CONFIG_RELPATH="${CONFIG_RELPATH:-configs/comparison_10s_16g_v2_aws.json}"
 SESSION="${SESSION:-vecoli-v2}"
 REGION="us-gov-west-1"
 
+# Capture bootstrap output to a log on the head so a crash before line ~173
+# (tmux launch + workflow log) is still diagnosable. Streams to SSH AND
+# this file. ``run log <alias>`` falls back to it when no workflow log
+# exists. ``-a`` so a resume run appends rather than truncates.
+BOOTSTRAP_LOG="${HOME}/bootstrap_${SESSION}.log"
+exec > >(tee -a "$BOOTSTRAP_LOG") 2>&1
+echo "=== bootstrap_head.sh start  $(date -u +%Y-%m-%dT%H:%M:%SZ)  session=$SESSION ==="
+
 # --- 1. system packages -----------------------------------------------------
 sudo dnf -y update
 sudo dnf -y install git java-21-amazon-corretto-headless docker tmux \

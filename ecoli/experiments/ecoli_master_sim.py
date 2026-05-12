@@ -116,10 +116,15 @@ def get_git_revision_hash() -> str:
     If that fails, tries to get the value from IMAGE_GIT_HASH environment variable.
     Raises an error if both methods fail.
     """
-    # Try to run git command
+    # Try to run git command (silence stderr so git's "fatal: not a git
+    # repository" + usage-help dump don't pollute worker logs when .git is
+    # absent — e.g. on rsync-deployed AWS heads).
     try:
         return (
-            subprocess.check_output(["git", "-C", CONFIG_DIR_PATH, "rev-parse", "HEAD"])
+            subprocess.check_output(
+                ["git", "-C", CONFIG_DIR_PATH, "rev-parse", "HEAD"],
+                stderr=subprocess.DEVNULL,
+            )
             .decode("utf-8")
             .strip()
         )
@@ -131,12 +136,12 @@ def get_git_revision_hash() -> str:
     if env_hash:
         return env_hash.strip()
 
-    # Raise error if both methods fail
-    raise RuntimeError(
-        "Could not determine Git hash: git command failed and IMAGE_GIT_HASH "
-        "environment variable is not set. Either install git, set the environment "
-        "variable, or run from a container with this information."
-    )
+    # vecoli_aws.sh rsyncs the working tree to AWS heads without ``.git``
+    # to keep the head/local pairing simple. In that mode neither git nor
+    # IMAGE_GIT_HASH is available; record "rsynced-<epoch>" so metadata
+    # is still tagged identifiably (rather than the run failing outright).
+    import time as _time
+    return f"rsynced-{int(_time.time())}"
 
 
 def get_git_diff() -> str:
@@ -149,7 +154,10 @@ def get_git_diff() -> str:
     """
     try:
         return (
-            subprocess.check_output(["git", "-C", CONFIG_DIR_PATH, "diff", "HEAD"])
+            subprocess.check_output(
+                ["git", "-C", CONFIG_DIR_PATH, "diff", "HEAD"],
+                stderr=subprocess.DEVNULL,
+            )
             .decode("utf-8")
             .strip()
         )
@@ -165,13 +173,8 @@ def get_git_diff() -> str:
         except IOError:
             pass  # Continue to next method if file read fails
 
-    # Raise error if both methods fail
-    raise RuntimeError(
-        "Could not determine Git diff: git command failed and "
-        f"{diff_file_path} does not exist or cannot be read. "
-        "Either install git, create the git-diff.txt file, "
-        "or run from a container with this information."
-    )
+    # Same rsync-deploy graceful-fallback as get_git_revision_hash.
+    return "(no .git on host — diff not captured)"
 
 
 def report_profiling(stats: pstats.Stats) -> None:

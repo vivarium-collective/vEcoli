@@ -25,7 +25,7 @@ from contextlib import chdir
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def build_composite(sim_data_path):
+def build_composite(sim_data_path, config_path=None):
     from ecoli.experiments.ecoli_master_sim import EcoliSim
     from ecoli.library.bigraph_types import ECOLI_TYPES
     from ecoli.composites.ecoli_composite import build_composite_native
@@ -34,7 +34,10 @@ def build_composite(sim_data_path):
         register_types as register_process_bigraph_types)
     from bigraph_schema import Core, BASE_TYPES
 
-    sim = EcoliSim.from_file('out/two_generations_v2/nextflow/workflow_config_stripped.json')
+    # Default to the post-NF stripped config; allow overriding to plain
+    # configs/two_generations_v2.json when running outside of a NF run.
+    cfg = config_path or 'out/two_generations_v2/nextflow/workflow_config_stripped.json'
+    sim = EcoliSim.from_file(cfg)
     sim.config['sim_data_path'] = sim_data_path
     sim.config['variant'] = 0
     sim.config['seed'] = 0
@@ -156,13 +159,18 @@ def main():
     ap.add_argument('--warmup', type=int, default=5)
     ap.add_argument('--sim-data-path',
                     default='out/two_generations_v2/variant_sim_data/0.cPickle')
+    ap.add_argument('--config',
+                    default=None,
+                    help='Override EcoliSim config path; defaults to a '
+                         'post-NF stripped config. Pass '
+                         'configs/two_generations_v2.json for a from-scratch run.')
     ap.add_argument('--profile-out', default='/tmp/profile_v2.prof')
     args = ap.parse_args()
 
     with chdir(ROOT):
         print(f'[profile] building composite...')
         t0 = time.monotonic()
-        ecoli = build_composite(args.sim_data_path)
+        ecoli = build_composite(args.sim_data_path, args.config)
         print(f'  build time: {time.monotonic()-t0:.1f}s')
         print()
 

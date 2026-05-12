@@ -76,7 +76,7 @@ _seed_registry_if_missing() {
 v1	configs/comparison_10s_16g_v1_aws.json	batch	vecoli:v2-comparison-arm64
 v2	configs/comparison_10s_16g_v2_aws.json	batch	vecoli:v2-comparison-arm64
 mp	configs/comparison_10s_16g_v2_mp_aws.json	multiprocessing
-ray	configs/comparison_10s_16g_v2_ray_aws.json	ray	vecoli:v2-ray-amd64
+ray	configs/comparison_10s_16g_v2_ray_aws.json	ray	vecoli:v2-ray-arm64
 compare	configs/compare_head.json	comparison
 EOF
     echo "Seeded $_REGISTRY with default aliases (v1/v2/mp/ray/compare)" >&2
@@ -121,7 +121,7 @@ _migrate_registry_2col_to_3col() {
 
 # Migrate 3-column to 4-column (adding image_tag). Defaults inferred
 # from method: batch → vecoli:v2-comparison-arm64 (matches existing v1/v2
-# configs); ray → vecoli:v2-ray-amd64; multiprocessing → empty (no
+# configs); ray → vecoli:v2-ray-arm64; multiprocessing → empty (no
 # image needed for the local-venv MP runner).
 _migrate_registry_3col_to_4col() {
   [[ -f "$_REGISTRY" ]] || return 0
@@ -136,7 +136,7 @@ _migrate_registry_3col_to_4col() {
     local img=""
     case "$m" in
       batch)           img="vecoli:v2-comparison-arm64" ;;
-      ray)             img="vecoli:v2-ray-amd64" ;;
+      ray)             img="vecoli:v2-ray-arm64" ;;
       multiprocessing) img="" ;;
       *)               img="" ;;
     esac
@@ -479,6 +479,29 @@ _batch_count_since() {
     | awk -v since="$since_ms" 'since==0 || $1+0 >= since+0 {n++} END {print n+0}'
 }
 
+# Server-side AFTER_CREATED_AT filter: one paginated call returns every
+# job in the queue created since this experiment launched, with status
+# included. We group client-side instead of issuing 7 separate per-status
+# calls. Used by ``run status`` to keep the dashboard cheap even when the
+# queue's lifetime SUCCEEDED count is in the thousands.
+#
+# Prints ``status<TAB>count`` lines, ordered by lifecycle phase (SUBMITTED
+# → FAILED), only for statuses with at least one job.
+_batch_counts_since_filtered() {
+  local since_ms="$1"
+  [[ -n "$QUEUE" ]] || return
+  (( since_ms > 0 )) || return
+  aws_cli batch list-jobs --job-queue "$QUEUE" \
+    --filters "name=AFTER_CREATED_AT,values=$since_ms" \
+    --query 'jobSummaryList[*].status' --output text 2>/dev/null \
+    | tr '\t' '\n' \
+    | awk 'NF { c[$1]++ }
+           END {
+             n = split("SUBMITTED PENDING RUNNABLE STARTING RUNNING SUCCEEDED FAILED", ord, " ")
+             for (i=1; i<=n; i++) if (c[ord[i]] > 0) printf "%s\t%d\n", ord[i], c[ord[i]]
+           }'
+}
+
 # EXP_ID layout from ``_persist_new_exp_id`` is ``<base>_YYYYMMDD-HHMMSS``
 # (UTC). Pull the trailing timestamp segment and convert to epoch ms so
 # it can be compared with Batch ``createdAt`` / S3 ``LastModified``.
@@ -789,6 +812,126 @@ ns_head_setup_ray_iam() {
   # machine with IAM admin rights (your laptop, not the head).
   echo "Granting Ray cluster-management IAM policy to head's instance profile..."
   bash "$SCRIPT_DIR/setup_ray_iam.sh"
+}
+
+# Create a Gateway VPC endpoint for S3 in the Ray cluster's VPC so workers
+# in the private subnet write to S3 directly (point-to-point) instead of
+# funneling through the shared NAT gateway. Gateway endpoints are FREE —
+# they're a route-table entry routing s3:* traffic to AWS-internal links.
+#
+# Idempotent: if an S3 Gateway endpoint already exists in this VPC, just
+# reports it and exits. Otherwise discovers the VPC's route tables,
+# prompts before creation, attaches the endpoint to every RT.
+#
+# Subnet defaults to subnet-08621613bcb558caa (the SMS API private
+# subnet used by ec2_cluster_ray.py); override with VECOLI_RAY_SUBNET.
+ns_head_setup_s3_endpoint() {
+  local subnet_id="${VECOLI_RAY_SUBNET:-subnet-08621613bcb558caa}"
+  local region; region=$(aws_cli configure get region 2>/dev/null \
+                          || echo "us-gov-west-1")
+  local service_name="com.amazonaws.${region}.s3"
+
+  echo "Resolving VPC for subnet ${subnet_id}..."
+  local vpc_id
+  vpc_id=$(aws_cli ec2 describe-subnets --subnet-ids "$subnet_id" \
+    --query 'Subnets[0].VpcId' --output text 2>/dev/null)
+  if [[ -z "$vpc_id" || "$vpc_id" == "None" ]]; then
+    echo "Could not resolve VPC for subnet ${subnet_id}" >&2
+    echo "Check VECOLI_RAY_SUBNET env or the default in ec2_cluster_ray.py" >&2
+    return 1
+  fi
+  echo "  VPC: ${vpc_id}"
+
+  # Idempotency check — any existing S3 Gateway endpoint in this VPC.
+  local existing
+  existing=$(aws_cli ec2 describe-vpc-endpoints \
+    --filters "Name=vpc-id,Values=${vpc_id}" \
+              "Name=service-name,Values=${service_name}" \
+              "Name=vpc-endpoint-type,Values=Gateway" \
+    --query 'VpcEndpoints[0].VpcEndpointId' --output text 2>/dev/null)
+  if [[ -n "$existing" && "$existing" != "None" ]]; then
+    echo "S3 Gateway endpoint already exists: ${existing}"
+    # An endpoint that's not attached to the worker subnet's route table
+    # does NOTHING for that subnet — traffic still hits the NAT gateway.
+    # Verify by cross-referencing: subnet → route_table_id → does this
+    # RT appear in the endpoint's RouteTableIds?
+    echo
+    echo "Checking whether subnet ${subnet_id} actually uses this endpoint..."
+    local subnet_rt
+    subnet_rt=$(aws_cli ec2 describe-route-tables \
+      --filters "Name=association.subnet-id,Values=${subnet_id}" \
+      --query 'RouteTables[0].RouteTableId' --output text 2>/dev/null)
+    if [[ -z "$subnet_rt" || "$subnet_rt" == "None" ]]; then
+      # Subnet uses VPC's main RT (no explicit association).
+      subnet_rt=$(aws_cli ec2 describe-route-tables \
+        --filters "Name=vpc-id,Values=${vpc_id}" \
+                  "Name=association.main,Values=true" \
+        --query 'RouteTables[0].RouteTableId' --output text 2>/dev/null)
+      echo "  Subnet uses VPC's main route table: ${subnet_rt}"
+    else
+      echo "  Subnet's route table: ${subnet_rt}"
+    fi
+    local endpoint_rts
+    endpoint_rts=$(aws_cli ec2 describe-vpc-endpoints \
+      --vpc-endpoint-ids "$existing" \
+      --query 'VpcEndpoints[0].RouteTableIds' --output text 2>/dev/null)
+    echo "  Endpoint serves route tables: ${endpoint_rts}"
+    # AWS CLI ``--output text`` separates list items with TABS, not spaces;
+    # tr to newlines + grep -Fx for an exact line match avoids both
+    # the tab/space ambiguity and any partial-string false positives.
+    if printf '%s\n' "$endpoint_rts" | tr '\t' '\n' \
+         | grep -qFx "$subnet_rt"; then
+      echo "  → Worker traffic IS routing through the S3 endpoint (NAT bypassed)."
+    else
+      echo "  → Endpoint exists but does NOT include the subnet's route table."
+      echo "    Worker S3 writes still go through the NAT gateway."
+      read -r -p "Add subnet RT ${subnet_rt} to endpoint ${existing}? [y/N] " ans
+      if [[ "$ans" == "y" || "$ans" == "Y" ]]; then
+        aws_cli ec2 modify-vpc-endpoint \
+          --vpc-endpoint-id "$existing" \
+          --add-route-table-ids "$subnet_rt" >/dev/null \
+          && echo "    Attached ${subnet_rt} to ${existing}." \
+          || echo "    Modify failed." >&2
+      fi
+    fi
+    return 0
+  fi
+
+  # Find ALL route tables in the VPC. Attaching to all of them means any
+  # subnet that routes through any of these RTs gets the S3 shortcut —
+  # no need to enumerate worker-vs-head subnets.
+  local rts
+  rts=$(aws_cli ec2 describe-route-tables \
+    --filters "Name=vpc-id,Values=${vpc_id}" \
+    --query 'RouteTables[].RouteTableId' --output text 2>/dev/null)
+  if [[ -z "$rts" ]]; then
+    echo "No route tables found in VPC ${vpc_id}" >&2
+    return 1
+  fi
+  echo "  Route tables (will attach to all): ${rts}"
+  echo "  Service: ${service_name}"
+  echo
+  read -r -p "Create S3 Gateway endpoint? [y/N] " ans
+  [[ "$ans" == "y" || "$ans" == "Y" ]] || { echo "aborted"; return; }
+
+  local endpoint_id
+  endpoint_id=$(aws_cli ec2 create-vpc-endpoint \
+    --vpc-id "$vpc_id" \
+    --service-name "$service_name" \
+    --vpc-endpoint-type Gateway \
+    --route-table-ids $rts \
+    --query 'VpcEndpoint.VpcEndpointId' --output text)
+  if [[ -n "$endpoint_id" && "$endpoint_id" != "None" ]]; then
+    echo
+    echo "Created S3 Gateway endpoint: ${endpoint_id}"
+    echo "Workers' S3 writes will now bypass the NAT gateway."
+    echo "Restart the Ray cluster (vecoli_aws.sh run launch ray) to pick up"
+    echo "the new routes — existing in-flight workers may already benefit"
+    echo "via route-table refresh."
+  else
+    echo "Endpoint creation failed" >&2
+    return 1
+  fi
 }
 ns_head_reboot() {
   local id; id=$(get_instance_id)
@@ -1216,6 +1359,71 @@ ns_image_list() {
     --output table 2>/dev/null
 }
 
+# Compare the alias's ECR image push time to the most recent git commit
+# touching tracked code (ecoli/ + runscripts/). Flags whether the image
+# Batch tasks will pull is up to date with your working tree.
+#
+# Why this matters: ``run launch`` defaults to ``--no-build-image``, so
+# v1/v2 NF tasks reuse the cached ECR image. If you commit code (e.g. a
+# threading pin) but don't pass ``--build`` on next launch, the AWS
+# container runs PRE-commit code — silently — and your assumptions
+# about what's deployed are wrong. This check makes that explicit.
+ns_image_age() {
+  local img_tag; img_tag=$(_alias_to_image "$STATE_KEY")
+  if [[ -z "$img_tag" ]]; then
+    echo "Alias '$STATE_KEY' has no image registered (method=${DEPLOY_MODE})"
+    echo "  (mp/multiprocessing aliases don't need an image)"
+    return 0
+  fi
+  local repo="${img_tag%%:*}"
+  local tag="${img_tag##*:}"
+  local pushed
+  pushed=$(aws_cli ecr describe-images --repository-name "$repo" \
+    --image-ids "imageTag=$tag" \
+    --query 'imageDetails[0].imagePushedAt' --output text 2>/dev/null)
+  if [[ -z "$pushed" || "$pushed" == "None" ]]; then
+    echo "No image '${img_tag}' in ECR. Build with:"
+    echo "  $(basename "$0") image build $STATE_KEY"
+    return 1
+  fi
+  echo "Alias:         $STATE_KEY"
+  echo "ECR image:     $img_tag"
+  echo "Last pushed:   $pushed"
+
+  # Latest git change to tracked source code that would be baked into
+  # the image. Tracks both runscripts/ (driver) and ecoli/ (engine).
+  local last_commit
+  last_commit=$(cd "$REPO_ROOT" 2>/dev/null && \
+    git log -1 --format='%aI %h %s' -- ecoli runscripts 2>/dev/null)
+  if [[ -z "$last_commit" ]]; then
+    echo "Latest commit: (no git history; can't determine staleness)"
+    return 0
+  fi
+  echo "Latest commit: $last_commit"
+
+  # Convert both to epoch for comparison.
+  local pushed_epoch latest_epoch latest_iso
+  latest_iso=$(echo "$last_commit" | awk '{print $1}')
+  pushed_epoch=$(date -d "$pushed"     +%s 2>/dev/null)
+  latest_epoch=$(date -d "$latest_iso" +%s 2>/dev/null)
+  if [[ -z "$pushed_epoch" || -z "$latest_epoch" ]]; then
+    echo "(could not parse timestamps for comparison)"
+    return 0
+  fi
+  echo
+  if (( pushed_epoch < latest_epoch )); then
+    local hr=$(( (latest_epoch - pushed_epoch) / 3600 ))
+    local mn=$(( ((latest_epoch - pushed_epoch) / 60) % 60 ))
+    echo "→ STALE — image is ${hr}h ${mn}m older than the latest source commit."
+    echo "  Batch tasks for this alias are running pre-commit code."
+    echo "  Rebuild + relaunch with:"
+    echo "    $(basename "$0") run launch $STATE_KEY --build"
+    return 2
+  else
+    echo "→ IN SYNC — image was pushed after the latest source commit."
+  fi
+}
+
 # --- 7. ``run`` namespace ---------------------------------------------------
 ns_run_launch() {
   # Defaults match the fast-iteration loop:
@@ -1377,25 +1585,27 @@ ns_run_status() {
   fi
 
   # 4. Workload --------------------------------------------------------------
+  # One server-side filtered list-jobs call (AFTER_CREATED_AT=exp launch),
+  # grouped by status client-side. Replaces a 14-call per-status loop that
+  # scanned the queue's lifetime SUCCEEDED history on every invocation.
   if [[ -n "$QUEUE" ]]; then
     echo
     if (( since_ms > 0 )); then
-      printf '  Batch %-22s  this run    queue total\n' "$QUEUE"
-    else
-      printf '  Batch %-22s     count\n' "$QUEUE"
-    fi
-    for s in SUBMITTED PENDING RUNNABLE STARTING RUNNING SUCCEEDED FAILED; do
-      local total; total=$(job_count "$s")
-      if (( since_ms > 0 )); then
-        local recent; recent=$(_batch_count_since "$s" "$since_ms")
-        # Skip rows that are zero in both columns to keep the table tight.
-        if [[ "$recent" == "0" && "$total" == "0" ]]; then continue; fi
-        printf '    %-12s %8s    %8s\n' "$s" "$recent" "$total"
+      printf '  Batch %-22s  this run\n' "$QUEUE"
+      local rows
+      rows=$(_batch_counts_since_filtered "$since_ms")
+      if [[ -z "$rows" ]]; then
+        printf '    (no jobs created since launch yet)\n'
       else
-        if [[ "$total" == "0" ]]; then continue; fi
-        printf '    %-12s %12s\n' "$s" "$total"
+        while IFS=$'\t' read -r s c; do
+          printf '    %-12s %8s\n' "$s" "$c"
+        done <<< "$rows"
       fi
-    done
+    else
+      printf '  Batch %-22s  (no exp timestamp — skipping queue scan)\n' "$QUEUE"
+      printf '    Use: %s run jobs %s [STATUS] for a per-status listing.\n' \
+        "$(basename "$0")" "$STATE_KEY"
+    fi
   fi
 
   # 5. Output ----------------------------------------------------------------
@@ -1481,6 +1691,132 @@ ns_run_jobs() {
   aws_cli batch list-jobs --job-queue "$QUEUE" --job-status "$s" \
     --query 'jobSummaryList[*].[jobName,createdAt]' --output table
 }
+
+# Resolve a config key while walking ``inherit_from`` parents (vEcoli
+# configs commonly inherit shape — n_init_sims / generations — from a
+# base file like comparison_10s_16g.json). Returns empty if the key is
+# absent at every level. ``inherit_from`` paths resolve against
+# ``<repo>/configs/`` to match ecoli_master_sim.py's loader behavior.
+# Usage: ``_read_cfg_with_inherit "['n_init_sims']"``.
+_read_cfg_with_inherit() {
+  local key="$1"
+  python3 - "$CONFIG_ABS" "$REPO_ROOT/configs" "$key" <<'PYEOF'
+import json, os, sys
+config_path, config_dir, key = sys.argv[1], sys.argv[2], sys.argv[3]
+def walk(path):
+    if not os.path.exists(path): return {}
+    cfg = json.load(open(path))
+    parents = cfg.get('inherit_from', [])
+    if isinstance(parents, str): parents = [parents]
+    merged = {}
+    for p in parents:
+        parent_path = p if os.path.isabs(p) else os.path.join(config_dir, p)
+        merged.update(walk(parent_path))
+    cfg.pop('inherit_from', None)
+    merged.update(cfg)
+    return merged
+c = walk(config_path)
+try:
+    exec(f"print(c{key})")
+except (KeyError, IndexError, TypeError, NameError):
+    pass
+PYEOF
+}
+
+# Coverage matrix: which (lineage_seed, generation) partitions have any
+# output in S3 under the active EXP_ID? Renders a seeds × gens grid
+# (X = present, . = missing) plus a summary count + miss list. Works
+# across all variants because the hive layout
+# (``history/experiment_id=*/variant=*/lineage_seed=*/generation=*/...``)
+# is the same regardless of engine.
+#
+# Optional overrides for non-standard configs:
+#   --seeds N    expected number of init seeds (default: config)
+#   --gens N     expected number of generations (default: config)
+ns_run_coverage() {
+  local n_seeds="" n_gens=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --seeds) n_seeds="$2"; shift 2 ;;
+      --gens)  n_gens="$2";  shift 2 ;;
+      -h|--help)
+        echo "usage: run coverage <alias> [--seeds N] [--gens N]"
+        echo "Prints a seeds × gens grid showing which (lineage_seed, generation)"
+        echo "partitions have output under the active EXP_ID."
+        return 0 ;;
+      *) echo "run coverage: unknown arg '$1'" >&2; return 1 ;;
+    esac
+  done
+
+  # Auto-detect shape from config (walks inherit_from). Fall through to
+  # legacy defaults if the config is unusual.
+  [[ -z "$n_seeds" ]] && n_seeds=$(_read_cfg_with_inherit "['n_init_sims']")
+  [[ -z "$n_gens"  ]] && n_gens=$(_read_cfg_with_inherit "['generations']")
+  [[ -z "$n_seeds" ]] && n_seeds=10
+  [[ -z "$n_gens"  ]] && n_gens=16
+
+  local hist_root="s3://${BUCKET}/${PREFIX}/${EXP_ID}/history/"
+  printf 'Coverage for %s\n' "$EXP_ID"
+  printf 'Expected: %s seeds × %s gens = %s cell-gens\n' \
+    "$n_seeds" "$n_gens" "$((n_seeds * n_gens))"
+  printf 'Scanning %s ...\n' "$hist_root"
+
+  # One recursive S3 listing, distill to distinct partition keys.
+  local pairs
+  pairs=$(aws_cli s3 ls --recursive "$hist_root" 2>/dev/null \
+    | grep -oE 'lineage_seed=[0-9]+/generation=[0-9]+' \
+    | sort -u)
+
+  if [[ -z "$pairs" ]]; then
+    echo "  (no history/ output found under $hist_root)"
+    return 0
+  fi
+
+  echo
+  PAIRS_DATA="$pairs" N_SEEDS="$n_seeds" N_GENS="$n_gens" python3 <<'PYEOF'
+import os
+n_seeds = int(os.environ['N_SEEDS'])
+n_gens  = int(os.environ['N_GENS'])
+pairs = set()
+for line in os.environ['PAIRS_DATA'].splitlines():
+    line = line.strip()
+    if not line:
+        continue
+    seed_part, gen_part = line.split('/')
+    s = int(seed_part.split('=')[1])
+    g = int(gen_part.split('=')[1])
+    pairs.add((s, g))
+
+# Parquet emitter sets generation = len(agent_id), so partition values
+# run 1..N_GENS (not 0..N_GENS-1). Internal generation index i maps to
+# partition value i+1. We label columns with both for clarity.
+gen_range = range(1, n_gens + 1)
+gen_hdr = ''.join(f'{g:>3}' for g in gen_range)
+print(f"  seed\\gen  {gen_hdr}    (gen = len(agent_id); internal gen = partition - 1)")
+print(f"  {'-' * (10 + 3 * n_gens)}")
+
+missing = []
+for s in range(n_seeds):
+    row = ''.join(('  X' if (s, g) in pairs else '  .')
+                  for g in gen_range)
+    print(f"  {s:>4}     {row}")
+    for g in gen_range:
+        if (s, g) not in pairs:
+            missing.append((s, g))
+
+total = n_seeds * n_gens
+present = total - len(missing)
+print()
+print(f"  Present: {present}/{total}  ({100*present/total:.1f}%)")
+if missing:
+    print(f"  Missing: {len(missing)} cell-gen(s)")
+    head = ", ".join(f"(seed={s},gen={g})" for s, g in missing[:20])
+    if len(missing) <= 20:
+        print(f"    {head}")
+    else:
+        print(f"    (first 20 of {len(missing)}): {head}")
+PYEOF
+}
 ns_run_tail() {
   local log="~/${TMUX_SESSION}_workflow.log"
   exec ssh -i "$KEY_FILE" "ec2-user@$(require_running_dns)" \
@@ -1507,16 +1843,30 @@ ns_run_log() {
   echo "=== Driver log (head node ~/${TMUX_SESSION}_workflow.log) ==="
   local dns; dns=$(get_running_dns)
   if [[ -n "$dns" && "$dns" != "None" ]]; then
-    local cmd="F=\$HOME/${TMUX_SESSION}_workflow.log; \
-      [[ -f \$F ]] || F=\$HOME/v2_workflow.log; \
-      [[ -f \$F ]] || { echo 'no driver log on head'; exit 0; }; \
-      ${n:+tail -n $n }cat \$F | \
-      sed -u 's/\\x1b\\[[0-9;]*[a-zA-Z]//g; s/\\x1b\\][0-9];[^\\x07]*\\x07//g'"
-    [[ -n "$n" ]] && cmd="F=\$HOME/${TMUX_SESSION}_workflow.log; \
-      [[ -f \$F ]] || F=\$HOME/v2_workflow.log; \
-      [[ -f \$F ]] || { echo 'no driver log on head'; exit 0; }; \
-      tail -n $n \$F | \
-      sed -u 's/\\x1b\\[[0-9;]*[a-zA-Z]//g; s/\\x1b\\][0-9];[^\\x07]*\\x07//g'"
+    # Try workflow log first; if it doesn't exist, fall back to the
+    # bootstrap log (bootstrap_<SESSION>.log) which is tee'd by every
+    # bootstrap_head*.sh from the moment it starts — captures crashes
+    # that occur before tmux launch, when no workflow log was ever
+    # opened. ``tail -n N`` if -n was given, full file otherwise.
+    local strip_ansi="sed -u 's/\\x1b\\[[0-9;]*[a-zA-Z]//g; s/\\x1b\\][0-9];[^\\x07]*\\x07//g'"
+    local reader="cat"
+    [[ -n "$n" ]] && reader="tail -n $n"
+    local cmd="WF=\$HOME/${TMUX_SESSION}_workflow.log; \
+      [[ -f \$WF ]] || WF=\$HOME/v2_workflow.log; \
+      if [[ -f \$WF ]]; then \
+        $reader \$WF | $strip_ansi; \
+      else \
+        BL=\$HOME/bootstrap_${TMUX_SESSION}.log; \
+        if [[ -f \$BL ]]; then \
+          echo '(no workflow log — bootstrap never reached tmux launch.'; \
+          echo ' showing bootstrap log instead: ~/bootstrap_${TMUX_SESSION}.log)'; \
+          echo; \
+          $reader \$BL | $strip_ansi; \
+        else \
+          echo 'no driver log on head (and no bootstrap log either —'; \
+          echo 'either head is fresh or bootstrap died before redirect setup)'; \
+        fi; \
+      fi"
     ssh -i "$KEY_FILE" "ec2-user@$dns" "$cmd" || true
   else
     echo "(head $HEAD_NAME not running — skipping driver log)"
@@ -2299,6 +2649,10 @@ Usage: $(basename "$0") head <subcmd> <alias> [args]
   setup-ray-iam <alias>
                        one-time IAM grant for ray cluster mode (run from a
                        box with admin perms; idempotent).
+  setup-s3-endpoint    create a Gateway VPC endpoint for S3 in the Ray
+                       cluster's VPC so workers bypass the NAT gateway
+                       on s3 writes. Free, one-time, idempotent.
+                       VECOLI_RAY_SUBNET env to override default subnet.
   list <alias>         show every non-terminated EC2 with this alias's
                        HEAD_NAME tag (surfaces dupes).
   dedupe <alias>       keep oldest running head, terminate the rest.
@@ -2345,6 +2699,12 @@ Usage: $(basename "$0") image <subcmd> <alias> [args]
                        pull <alias>'s image from ECR + retag locally.
   list [REPO]          list ECR repository contents (no alias arg; default
                        repository is ``vecoli``).
+  age  <alias>         compare the alias's ECR image push time to the latest
+                       git commit under ecoli/+runscripts/. Flags STALE when
+                       the image predates a tracked source change — useful
+                       to confirm whether NF Batch tasks are actually running
+                       your current code (``run launch`` defaults to
+                       --no-build-image, so the image is sticky).
   help                 this screen
 EOF
 }
@@ -2376,6 +2736,10 @@ Usage: $(basename "$0") run <subcmd> <alias> [args]
   jobs   <alias> [STATUS]
                        list Batch jobs in alias's queue (Nextflow only;
                        default STATUS=RUNNING).
+  coverage <alias> [--seeds N] [--gens N]
+                       (seed × gen) matrix showing which cell-gens have
+                       output in S3. Auto-detects shape from config
+                       (walks inherit_from). Variant-agnostic.
   tail   <alias>       live-tail tmux log on head (sed-strips ANSI).
   log    <alias> [-n N]
                        print driver log + variant-specific cluster log
@@ -2494,6 +2858,7 @@ case "$cmd" in
     case "$sub" in
       setup)            _dispatch_variant ns_head_setup         "$@" ;;
       setup-ray-iam)    _dispatch_variant ns_head_setup_ray_iam "$@" ;;
+      setup-s3-endpoint) ns_head_setup_s3_endpoint "$@" ;;
       terminate)        _dispatch_variant ns_head_terminate     "$@" ;;
       terminate-all)    ns_head_terminate_all "$@" ;;
       list)             _dispatch_variant ns_head_list       "$@" ;;
@@ -2518,6 +2883,7 @@ case "$cmd" in
       push)             _dispatch_variant ns_image_push  "$@" ;;
       pull)             _dispatch_variant ns_image_pull  "$@" ;;
       list)             ns_image_list "$@" ;;
+      age)              _dispatch_variant ns_image_age   "$@" ;;
       help|-h|--help)   _help_image ;;
       *) echo "image: unknown subcmd '$sub'" >&2; _help_image >&2; exit 1 ;;
     esac
@@ -2531,6 +2897,7 @@ case "$cmd" in
       cancel)           _dispatch_variant ns_run_cancel "$@" ;;
       status)           _dispatch_variant ns_run_status "$@" ;;
       jobs)             _dispatch_variant ns_run_jobs   "$@" ;;
+      coverage)         _dispatch_variant ns_run_coverage "$@" ;;
       tail)             _dispatch_variant ns_run_tail   "$@" ;;
       log)              _dispatch_variant ns_run_log    "$@" ;;
       help|-h|--help)   _help_run ;;
