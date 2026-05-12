@@ -98,6 +98,33 @@ if ! grep -qF "vEcoli/.venv/bin/activate" "$HOME/.bashrc"; then
   echo "source $VECOLI_DIR/.venv/bin/activate" >> "$HOME/.bashrc"
 fi
 
+# --- 5.5. (optional) build + push image to ECR ----------------------------
+# When BUILD_IMAGE=1 (set by ``run launch ray --build``), build the Ray
+# Docker image on THIS Graviton head — native ARM build is faster than
+# cross-building from x86 — and push to ECR. Skipped by default; the
+# alias's image_tag (in aliases.tsv) is assumed already-current in ECR.
+# Use ``image age ray`` to detect a stale image.
+if [[ "${BUILD_IMAGE:-0}" == "1" || "${BUILD_IMAGE,,}" == "true" ]]; then
+  if ! command -v docker >/dev/null; then
+    echo "BUILD_IMAGE=1 — installing docker on this head..."
+    sudo dnf -y install docker
+    sudo systemctl enable --now docker
+  fi
+  # IMAGE_TAG passed in by CLI (resolved from alias registry). Falls back
+  # to the ARM Ray tag if env is absent.
+  _full_tag="${IMAGE_TAG:-vecoli:v2-ray-arm64}"
+  _repo="${_full_tag%%:*}"
+  _tag="${_full_tag##*:}"
+  echo "BUILD_IMAGE=1 — building ${_full_tag} natively on this Graviton head."
+  echo "  (Cross-build from x86 local would be slower; native ARM is the right place.)"
+  # Use sudo for docker — usermod -aG docker $USER requires re-login,
+  # not viable mid-bootstrap. AWS CLI is preinstalled on AL2023.
+  cd "$VECOLI_DIR"
+  sudo -E bash runscripts/container/build-and-push-ecr.sh \
+    -i "${_tag}" -r "${_repo}" -R "${REGION}"
+  echo "Image ${_full_tag} pushed to ECR."
+fi
+
 # --- 6. config + sim_data + image_uri resolution ---------------------------
 test -f "$CONFIG_RELPATH" || { echo "Missing $CONFIG_RELPATH"; exit 1; }
 

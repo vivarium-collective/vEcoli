@@ -608,13 +608,19 @@ _run_bootstrap_on_head() {
   fi
   local image_env=""
   [[ -n "$resolved_image_uri" ]] && image_env="IMAGE_URI='$resolved_image_uri' "
+  # Image-tag env so bootstrap_head_ray.sh's optional ``BUILD_IMAGE=1``
+  # path knows which tag to build/push. Always passed when an image_tag
+  # is registered for the alias — cheap, used only when BUILD_IMAGE=1.
+  local image_tag_env=""
+  local _img_tag; _img_tag=$(_alias_to_image "$STATE_KEY")
+  [[ -n "$_img_tag" ]] && image_tag_env="IMAGE_TAG='$_img_tag' "
   # Thread the CLI-resolved EXP_ID so workflow.py / run_composite_lineage_*.py
   # use the unique sidecar-tracked ID rather than the BASE id from config.
   local exp_id_env=""
   [[ -n "${EXP_ID:-}" ]] && exp_id_env="EXPERIMENT_ID='$EXP_ID' "
   echo "running bootstrap (variant=${DEPLOY_MODE:-nextflow_batch}, config=${CONFIG_REL}, session=${TMUX_SESSION}, exp_id=${EXP_ID})..."
   ssh -i "$KEY_FILE" "ec2-user@$dns" \
-    "${extra_env}${config_env}${session_env}${sim_data_env}${image_env}${exp_id_env}bash ~/$(basename "$BOOTSTRAP_SCRIPT")"
+    "${extra_env}${config_env}${session_env}${sim_data_env}${image_env}${image_tag_env}${exp_id_env}bash ~/$(basename "$BOOTSTRAP_SCRIPT")"
 }
 
 # --- 5. ``head`` namespace --------------------------------------------------
