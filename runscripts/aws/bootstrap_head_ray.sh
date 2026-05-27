@@ -104,7 +104,8 @@ fi
 # cross-building from x86 — and push to ECR. Skipped by default; the
 # alias's image_tag (in aliases.tsv) is assumed already-current in ECR.
 # Use ``image age ray`` to detect a stale image.
-if [[ "${BUILD_IMAGE:-0}" == "1" || "${BUILD_IMAGE,,}" == "true" ]]; then
+_BUILD_IMAGE="${BUILD_IMAGE:-0}"
+if [[ "$_BUILD_IMAGE" == "1" || "${_BUILD_IMAGE,,}" == "true" ]]; then
   if ! command -v docker >/dev/null; then
     echo "BUILD_IMAGE=1 — installing docker on this head..."
     sudo dnf -y install docker

@@ -386,13 +386,12 @@ _use_variant() {
       ;;
     ray_cluster)
       HEAD_NAME="${HEAD_NAME_OVERRIDE:-${cfg_head:-$default_head}}"
-      # Driver = build host. Use Graviton 3 (same as c7g.* workers) so
-      # binaries built here (ray's bundled abseil, scipy/numpy/numba C
-      # extensions) execute on workers without SIGILL. t4g (Graviton 2)
-      # builds → c7g (Graviton 3) workers worked in theory but crashed
-      # in practice — some wheel's CPU-feature detection mispicked
-      # paths. Same cost as t4g.large.
-      HEAD_INSTANCE_TYPE="${HEAD_INSTANCE_TYPE_OVERRIDE:-c7g.large}"
+      # Driver = build host. Use modern x86 (matches c7i.* workers).
+      # Earlier c7g/Graviton experiment hit a Ray-actor-on-Graviton
+      # SIGILL inside numba JIT that affected both fresh + production
+      # images; see memory:ray_on_c7g_sigill. Reverted to x86 here so
+      # ``run launch ray --build`` produces an x86 image natively.
+      HEAD_INSTANCE_TYPE="${HEAD_INSTANCE_TYPE_OVERRIDE:-c7i.large}"
       BOOTSTRAP_SCRIPT="$SCRIPT_DIR/bootstrap_head_ray.sh"
       TMUX_SESSION="${TMUX_SESSION_OVERRIDE:-${cfg_tmux:-$default_tmux}}"
       EXTRA_FILES=("$SCRIPT_DIR/ec2_cluster_ray.py")
@@ -582,6 +581,33 @@ _rsync_repo_to_head() {
     --exclude='.vecoli-aws-state' \
     -e "ssh -i $KEY_FILE -o StrictHostKeyChecking=no" \
     "${REPO_ROOT}/" "ec2-user@${dns}:~/vEcoli/"
+  # If pyproject.toml has editable sources pointing at sibling repos,
+  # rsync those siblings too so the head's ``uv sync`` can resolve
+  # them. Match on names in [tool.uv.sources] blocks like
+  # ``foo = { path = "../foo", editable = true }``.
+  local siblings
+  siblings=$(awk '/^\[tool\.uv\.sources\]/{inblock=1; next}
+                  /^\[/{inblock=0}
+                  inblock && /path = "\.\.\/[^"]+"/ {
+                      match($0, /"\.\.\/([^"]+)"/, m); print m[1]
+                  }' "${REPO_ROOT}/pyproject.toml")
+  if [[ -n "$siblings" ]]; then
+    for sib in $siblings; do
+      local sib_dir="${REPO_ROOT}/../${sib}"
+      if [[ -d "$sib_dir" ]]; then
+        echo "Rsyncing sibling editable dep ${sib} → ec2-user@${dns}:~/${sib}/"
+        rsync -azP \
+          --exclude='.venv' --exclude='.git' \
+          --exclude='__pycache__' --exclude='*.pyc' \
+          --exclude='.ruff_cache' --exclude='.pytest_cache' \
+          -e "ssh -i $KEY_FILE -o StrictHostKeyChecking=no" \
+          "${sib_dir}/" "ec2-user@${dns}:~/${sib}/"
+      else
+        echo "WARNING: pyproject.toml references editable sibling '${sib}'" >&2
+        echo "  but ${sib_dir} doesn't exist locally — head ``uv sync`` will fail." >&2
+      fi
+    done
+  fi
 }
 
 # Common pattern: scp a bootstrap script (+ extra files) to head, ssh-run

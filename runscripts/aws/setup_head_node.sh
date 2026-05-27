@@ -45,14 +45,24 @@ USER_IP=$(curl -s -4 ifconfig.me)
 [[ -z "$USER_IP" ]] && { echo "could not detect public IPv4"; exit 1; }
 echo "Public IP for SSH ingress: ${USER_IP}/32"
 
+# Pick AMI arch from instance type: Graviton families end in `g` (c7g,
+# m7g, r7g, t4g), plus legacy `a1`. Everything else (Intel/AMD x86) is
+# x86_64.
+_family="${HEAD_INSTANCE_TYPE%%.*}"
+_letters="${_family//[0-9]/}"
+if [[ "${_letters: -1}" == "g" || "$_family" == "a1" ]]; then
+  AMI_ARCH="arm64"
+else
+  AMI_ARCH="x86_64"
+fi
 AMI_ID=$(aws_cli ec2 describe-images \
   --owners amazon \
   --filters \
-    "Name=name,Values=al2023-ami-*-arm64" \
+    "Name=name,Values=al2023-ami-*-${AMI_ARCH}" \
     "Name=state,Values=available" \
   --query 'sort_by(Images, &CreationDate)[-1].ImageId' \
   --output text)
-echo "AL2023 ARM64 AMI: ${AMI_ID}"
+echo "AL2023 ${AMI_ARCH} AMI: ${AMI_ID}"
 
 # --- Key pair ---------------------------------------------------------------
 mkdir -p "${HOME}/.ssh"
