@@ -191,6 +191,40 @@ def main() -> int:
                    or "m5.4xlarge")
     iam_profile = os.environ.get("IAM_INSTANCE_PROFILE") or "ECR"
     baked_ami_id = os.environ.get("BAKED_AMI_ID") or None
+    # process-bigraph 1.4.8 (PyPI, what's installed by vEcoli's frozen
+    # uv.lock) defaults to the x86 ECS-optimized AMI even when launching
+    # Graviton instances → InvalidParameterValue. Detect arch here from
+    # the worker instance type and pass an ARM AMI explicitly when
+    # needed. Upstream fix exists locally in the sibling but isn't
+    # installed; this in-vEcoli workaround unblocks until v1.4.9+ ships.
+    if baked_ami_id is None:
+        def _instance_arch(it: str) -> str:
+            family = it.split(".", 1)[0]
+            i = 0
+            while i < len(family) and family[i].isalpha():
+                i += 1
+            while i < len(family) and family[i].isdigit():
+                i += 1
+            if i < len(family) and family[i] == "g":
+                return "arm64"
+            if family == "a1":
+                return "arm64"
+            return "x86_64"
+        worker_arch = _instance_arch(worker_type)
+        head_arch = _instance_arch(head_type)
+        if worker_arch != head_arch:
+            raise SystemExit(
+                f"Mixed-arch cluster (head={head_type}/{head_arch} vs "
+                f"worker={worker_type}/{worker_arch}) requires explicit "
+                f"BAKED_AMI_ID env.")
+        if worker_arch == "arm64":
+            import boto3
+            ssm = boto3.client("ssm", region_name="us-gov-west-1")
+            baked_ami_id = ssm.get_parameter(
+                Name="/aws/service/ecs/optimized-ami/amazon-linux-2/arm64/recommended/image_id"
+            )["Parameter"]["Value"]
+            print(f"→ arch=arm64 auto-resolved baked_ami_id={baked_ami_id}",
+                  flush=True)
     keep_cluster = bool(int(os.environ.get("KEEP_CLUSTER") or "0"))
     cluster_id = os.environ.get(
         "CLUSTER_ID") or f"vecoli-ray-{int(time.time())}"

@@ -386,7 +386,13 @@ _use_variant() {
       ;;
     ray_cluster)
       HEAD_NAME="${HEAD_NAME_OVERRIDE:-${cfg_head:-$default_head}}"
-      HEAD_INSTANCE_TYPE="${HEAD_INSTANCE_TYPE_OVERRIDE:-t4g.large}"
+      # Driver = build host. Use Graviton 3 (same as c7g.* workers) so
+      # binaries built here (ray's bundled abseil, scipy/numpy/numba C
+      # extensions) execute on workers without SIGILL. t4g (Graviton 2)
+      # builds → c7g (Graviton 3) workers worked in theory but crashed
+      # in practice — some wheel's CPU-feature detection mispicked
+      # paths. Same cost as t4g.large.
+      HEAD_INSTANCE_TYPE="${HEAD_INSTANCE_TYPE_OVERRIDE:-c7g.large}"
       BOOTSTRAP_SCRIPT="$SCRIPT_DIR/bootstrap_head_ray.sh"
       TMUX_SESSION="${TMUX_SESSION_OVERRIDE:-${cfg_tmux:-$default_tmux}}"
       EXTRA_FILES=("$SCRIPT_DIR/ec2_cluster_ray.py")
