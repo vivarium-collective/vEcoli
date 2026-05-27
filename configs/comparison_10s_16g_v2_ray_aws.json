@@ -14,7 +14,7 @@
         "tmux_session": "vecoli-v2-ray",
         "ray": {
             "cluster_yaml": "runscripts/aws/vecoli-ray-ec2-cluster.yaml",
-            "head_instance_type": "c7i.large",
+            "head_instance_type": "c7i.xlarge",
             "worker_instance_type": "c7i.2xlarge",
             "min_workers": 10,
             "max_workers": 10,
