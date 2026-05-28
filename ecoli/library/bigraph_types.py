@@ -1308,12 +1308,19 @@ def bundle(schema: SimDataObjectStore, state, context: typing.Optional[BundleCon
 
 @realize.dispatch
 def realize(core, schema: SimDataObjectStore, state, path=()):
-    """Realize each entry as an Object and register in the global registry."""
+    """Realize each entry as an Object and register in the global registry.
+
+    Add-only semantics: does NOT call ``.clear()`` because the wrapped
+    Composite-as-Process pattern relies on pre-registered entries
+    surviving outer realize. (Previously cleared to avoid stale
+    cross-test leakage, but in production each Composite owns its own
+    process — cross-test leakage isn't a real risk and breaking the
+    wrapped-Composite case isn't worth the defense.)
+    """
     if not isinstance(state, dict):
         return schema, state, []
     from bigraph_schema.schema import Object
     result = {}
-    _sim_data_object_instances.clear()
     for key, encoded in state.items():
         if isinstance(key, str) and key.startswith('_'):
             continue

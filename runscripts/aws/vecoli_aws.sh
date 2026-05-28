@@ -60,7 +60,7 @@ aws_cli() { aws --profile "$PROFILE" --region "$REGION" "$@"; }
 # back to VECOLI_AWS_CONFIG env var if neither is supplied.
 _REGISTRY="$STATE_DIR/aliases.tsv"
 # Registry schema: TSV with 4 columns — alias, config, method, image_tag.
-# ``method`` is one of: batch | multiprocessing | ray | comparison (canonical), and
+# ``method`` is one of: batch | multiprocessing | ray | ray_colony | comparison (canonical), and
 # determines the bootstrap script + default head instance type at
 # ``head setup`` / ``run launch`` time.
 # ``image_tag`` is the Docker tag (e.g. ``vecoli:v2-comparison-arm64``)
@@ -231,13 +231,20 @@ _ecr_uri_for_tag() {
   echo "${acct}.dkr.ecr.${REGION}.amazonaws.com/${tag}"
 }
 # Normalize a user-supplied method value to one of:
-#   batch | multiprocessing | ray | comparison
+#   batch | multiprocessing | ray | ray_colony | comparison
 # Echoes the canonical name on success, "" on unknown input.
 _normalize_method() {
   case "$1" in
     batch|nextflow_batch)              echo "batch" ;;
     mp|multiprocessing|mp_single_node) echo "multiprocessing" ;;
     ray|ray_cluster)                   echo "ray" ;;
+    # ray_colony: sibling of ray. Same Ray-on-EC2-via-SSM
+    # infrastructure (bootstrap_head_ray_colony.sh +
+    # ec2_cluster_ray_colony.py), but invokes the greenfield
+    # ``run_colony_ray.py`` instead of ``run_composite_lineage_ray.py``.
+    # Each Ray actor runs one colony (greenfield in-place divide,
+    # cells multiply 1 → 2^target_doublings inside the actor).
+    ray_colony|ray_colony_cluster)     echo "ray_colony" ;;
     comparison|compare|comparison_head) echo "comparison" ;;
     *) echo "" ;;
   esac
@@ -267,6 +274,7 @@ _method_to_deploy_mode() {
     batch)           echo "nextflow_batch" ;;
     multiprocessing) echo "mp_single_node" ;;
     ray)             echo "ray_cluster" ;;
+    ray_colony)      echo "ray_colony_cluster" ;;
     comparison)      echo "comparison_head" ;;
     *) echo "" ;;
   esac
@@ -396,6 +404,18 @@ _use_variant() {
       TMUX_SESSION="${TMUX_SESSION_OVERRIDE:-${cfg_tmux:-$default_tmux}}"
       EXTRA_FILES=("$SCRIPT_DIR/ec2_cluster_ray.py")
       ;;
+    ray_colony_cluster)
+      # Same Ray-on-EC2 driver topology as ray_cluster; only the
+      # script that runs on the cluster changes. Each Ray actor runs
+      # one colony via the greenfield ``run_colony_ray.py`` (cells
+      # multiply 1 → 2^target_doublings in-place via the
+      # schema-driven _divide sentinel).
+      HEAD_NAME="${HEAD_NAME_OVERRIDE:-${cfg_head:-$default_head}}"
+      HEAD_INSTANCE_TYPE="${HEAD_INSTANCE_TYPE_OVERRIDE:-c7i.large}"
+      BOOTSTRAP_SCRIPT="$SCRIPT_DIR/bootstrap_head_ray_colony.sh"
+      TMUX_SESSION="${TMUX_SESSION_OVERRIDE:-${cfg_tmux:-$default_tmux}}"
+      EXTRA_FILES=("$SCRIPT_DIR/ec2_cluster_ray_colony.py")
+      ;;
     nextflow_batch|"")
       HEAD_NAME="${HEAD_NAME_OVERRIDE:-${cfg_head:-$default_head}}"
       HEAD_INSTANCE_TYPE="${HEAD_INSTANCE_TYPE_OVERRIDE:-t4g.large}"
@@ -415,7 +435,7 @@ _use_variant() {
       ;;
     *)
       echo "Unknown aws.deploy_mode: $DEPLOY_MODE" >&2
-      echo "Expected: nextflow_batch | mp_single_node | ray_cluster | comparison_head" >&2
+      echo "Expected: nextflow_batch | mp_single_node | ray_cluster | ray_colony_cluster | comparison_head" >&2
       return 1
       ;;
   esac
@@ -666,7 +686,7 @@ ns_head_setup() {
   if [[ -n "$requested_method" ]]; then
     local canon; canon=$(_normalize_method "$requested_method")
     if [[ -z "$canon" ]]; then
-      echo "Unknown method '$requested_method' — expected: batch | multiprocessing | ray | comparison" >&2
+      echo "Unknown method '$requested_method' — expected: batch | multiprocessing | ray | ray_colony | comparison" >&2
       return 1
     fi
     local current; current=$(_alias_to_method "$STATE_KEY")
@@ -684,7 +704,7 @@ ns_head_setup() {
   # leaving it unset would just defer the failure.
   if [[ -z "$(_alias_to_method "$STATE_KEY")" ]]; then
     echo "Alias '$STATE_KEY' has no method registered." >&2
-    echo "Run: $(basename "$0") head setup $STATE_KEY <batch|multiprocessing|ray>" >&2
+    echo "Run: $(basename "$0") head setup $STATE_KEY <batch|multiprocessing|ray|ray_colony>" >&2
     return 1
   fi
 
@@ -1190,7 +1210,7 @@ ns_experiment_new() {
   local alias_name="${1:-}" cfg="${2:-}" method_in="${3:-}" image_in="${4:-}"
   if [[ -z "$alias_name" || -z "$cfg" ]]; then
     echo "usage: experiment new [-f] <alias> <config_path> [<method>] [<image_tag>]" >&2
-    echo "  method:    batch | multiprocessing | ray | comparison (optional; settable" >&2
+    echo "  method:    batch | multiprocessing | ray | ray_colony | comparison (optional; settable" >&2
     echo "             at ``head setup <alias> <method>`` time)" >&2
     echo "  image_tag: e.g. vecoli:my-tag-arm64 (optional; settable later" >&2
     echo "             via ``experiment new -f <alias> <cfg> <method> <tag>``)" >&2
@@ -1215,7 +1235,7 @@ ns_experiment_new() {
   if [[ -n "$method_in" ]]; then
     method=$(_normalize_method "$method_in")
     if [[ -z "$method" ]]; then
-      echo "Unknown method '$method_in' — expected: batch | multiprocessing | ray | comparison" >&2
+      echo "Unknown method '$method_in' — expected: batch | multiprocessing | ray | ray_colony | comparison" >&2
       return 1
     fi
   fi
@@ -1231,7 +1251,7 @@ ns_experiment_new() {
   [[ -n "$image_in" ]] && summary+="  image=$image_in"
   echo "$summary"
   if [[ -z "$method" ]]; then
-    echo "  Set method: $(basename "$0") head setup $alias_name <batch|multiprocessing|ray>"
+    echo "  Set method: $(basename "$0") head setup $alias_name <batch|multiprocessing|ray|ray_colony>"
   fi
   if [[ -z "$image_in" && "$method" != "multiprocessing" ]]; then
     echo "  Set image:  $(basename "$0") experiment new -f $alias_name $cfg ${method:-<method>} <image:tag>"
@@ -2954,23 +2974,30 @@ ns_compare_report() {
       --force|--no-validate) force=1; shift ;;
       -h|--help)
         cat >&2 <<USAGE
-usage: $(basename "$0") compare report [--gens 1,2] [--seeds 0,1,...]
-                                       [--v1-id ID] [--v2-id ID]
-                                       [--extra-ids label=ID,...]
-                                       [--out doc/v1_v2_report_4way.md]
-                                       [--no-history] [--no-fetch] [--force]
+usage: $(basename "$0") compare report          [<flags>]      # both: fetch + parity
+       $(basename "$0") compare report analysis [<flags>]      # fast: plots only
+       $(basename "$0") compare report diff     [<flags>]      # slow: parity only
+
+Flags:
+  --gens 1,2,...            seeds for per-cell plots (default: 1-16)
+  --seeds 0,1,...           ids for per-cell plots (default: 0-9)
+  --v1-id ID, --v2-id ID    override sidecar-resolved experiment ids
+  --extra-ids label=ID,...  override sidecar-discovered mp/ray etc.
+  --out path                report path (default doc/v1_v2_report.md);
+                            assets land under _static/<stem>_assets/
+  --no-analyses             skip the per-experiment analyses/ fetch
+                            (implied by ``diff`` subcmd)
+  --no-history              skip the bulk-parity-matrix computation
+                            (implied by ``analysis`` subcmd; ~30-60 min saved)
+  --no-fetch (--cached)     skip ALL S3 sync — render report against
+                            cached out/<exp>/ on the head only
+  --force (--no-validate)   bypass the S3 id-existence pre-check
 
 Defaults pull v1/v2/mp/ray IDs from .vecoli-aws-state/<alias>.experiment-id
-sidecars. ``--extra-ids`` (or VECOLI_EXTRA_IDS) overrides the auto-discovered
-non-v1/non-v2 alias sidecars (e.g. mp, ray) and turns the table into N-way.
-``--out`` (or VECOLI_REPORT_OUT) controls the output path; default is
-``doc/v1_v2_report.md``. Assets land under ``_static/<stem>_assets/``.
-``--no-fetch`` (or ``--cached``) skips ALL S3 sync steps and runs the
-report against whatever is already in ``out/<exp>/`` on the head — much
-faster for iterating on report formatting after the first sync.
-Before SSH'ing to the head, each resolved id is checked against its
-alias's config base + S3 prefix; pass ``--force`` (or ``--no-validate``)
-to skip that check.
+sidecars. Sub-subcommands ``analysis`` and ``diff`` compose: run
+``analysis`` first to see plots fast, then ``diff`` later to fill in
+parity — the markdown is re-rendered each invocation from whatever's
+cached on the head, so sections fall back to _(missing)_ until populated.
 USAGE
         return 0 ;;
       *) echo "compare report: unknown arg '$1'" >&2; return 1 ;;
@@ -3132,7 +3159,7 @@ Usage: $(basename "$0") experiment <subcmd> [args]
 
   new <alias> <config> [<method>] [<image_tag>] [-f]
                        register alias→config in .vecoli-aws-state/aliases.tsv.
-                       method:    batch | multiprocessing | ray | comparison
+                       method:    batch | multiprocessing | ray | ray_colony | comparison
                                   (optional; settable later via ``head setup``)
                        image_tag: e.g. vecoli:my-arm64 (optional; settable later)
                        -f:        overwrite an existing alias.
@@ -3154,7 +3181,7 @@ Usage: $(basename "$0") head <subcmd> <alias> [args]
 
   setup <alias> [<method>]
                        provision an EC2 head for the alias. method must be
-                       batch | multiprocessing | ray | comparison; required
+                       batch | multiprocessing | ray | ray_colony | comparison; required
                        on first setup of a new alias, optional after (registry
                        remembers). Picks bootstrap script + default instance
                        type. Idempotent: starts a stopped head, reuses a
@@ -3335,14 +3362,17 @@ EBS for synced parquet).
                        experiment_id. Use for Ray/MP runs that produced
                        parquet but skipped analyses/ (Nextflow v1/v2 already
                        publish their own). Must run AFTER ``compare bootstrap``.
-  report [<alias>] [--gens 1,2] [--seeds 0,1] [--v1-id ID] [--v2-id ID]
-         [--extra-ids label=ID,...] [--engine-cost N] [--out path]
-         [--no-history] [--no-fetch] [--force]
-                       fetch + render N-way markdown report. Extras
-                       auto-discovered from any alias sidecar (mp, ray, etc.).
-                       --no-fetch reuses out/<exp>/ already on head (fast
-                       iteration on report formatting). Validates each id
-                       against S3 before SSH'ing — --force skips that check.
+  report [analysis|diff] [<alias>] [--gens 1,2] [--seeds 0,1]
+         [--v1-id ID] [--v2-id ID] [--extra-ids label=ID,...]
+         [--engine-cost N] [--out path]
+         [--no-history] [--no-analyses] [--no-fetch] [--force]
+                       fetch + render N-way markdown report. ``analysis``
+                       sub: fetch plots, skip parity (fast). ``diff`` sub:
+                       compute parity, skip plot re-fetch (slow). Bare
+                       ``report`` does both. Extras auto-discovered from
+                       any alias sidecar (mp, ray, etc.). --no-fetch reuses
+                       out/<exp>/ already on head (fast iteration). Each
+                       id validated against S3 before SSH'ing — --force skips.
   export [<alias>] [html|pdf] [path/to/report.md]
                        convert markdown report → single-file artifact via
                        pandoc (+ weasyprint for pdf).

@@ -117,17 +117,101 @@ def run_colony_actor(sim_data_path, target_doublings, max_duration,
     }
 
 
+def _resolve_inherited_config(config_path, cfg=None):
+    """Walk ``inherit_from`` chain + implicit default.json — same logic
+    bootstrap_head_ray.sh uses to read per-run knobs from the colony
+    config without needing EcoliSim imported on the driver."""
+    import json as _json
+    if cfg is None:
+        with open(config_path) as f:
+            cfg = _json.load(f)
+    cfg_dir = os.path.dirname(os.path.abspath(config_path))
+    merged = {}
+    if os.path.basename(os.path.abspath(config_path)) != 'default.json':
+        for cand in (os.path.join(cfg_dir, 'default.json'),
+                     os.path.join(cfg_dir, '..', 'configs', 'default.json')):
+            if os.path.isfile(cand):
+                with open(cand) as f:
+                    merged.update(_resolve_inherited_config(cand, _json.load(f)))
+                break
+    for parent_rel in cfg.get('inherit_from') or []:
+        for cand in (os.path.join(cfg_dir, parent_rel),
+                     os.path.join(cfg_dir, '..', 'configs', parent_rel),
+                     os.path.join(cfg_dir, parent_rel + '.json')):
+            if os.path.isfile(cand):
+                with open(cand) as f:
+                    merged.update(_resolve_inherited_config(cand, _json.load(f)))
+                break
+    merged.update(cfg)
+    return merged
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--sim-data-path', required=True)
+    # Two CLI shapes supported:
+    #   1. Config-driven (used by EC2 ec2_cluster_ray_colony.py):
+    #        --config <path.json> --ray_address auto --experiment-id <id>
+    #      All sim knobs (sim_data_path, target_doublings, max_duration,
+    #      base_seed) read from the config JSON. CLI args override.
+    #   2. CLI-only (used for local smoke tests):
+    #        --sim-data-path ... --target-doublings ... --max-duration ...
+    ap.add_argument('--sim-data-path', default=None)
     ap.add_argument('--config', default=None)
-    ap.add_argument('--target-doublings', type=int, default=1)
-    ap.add_argument('--base-seed', type=int, default=0)
-    ap.add_argument('--max-duration', type=float, default=3300.0)
-    ap.add_argument('--ray-address', default=None)
+    ap.add_argument('--target-doublings', type=int, default=None)
+    ap.add_argument('--base-seed', type=int, default=None)
+    ap.add_argument('--max-duration', type=float, default=None)
+    # Both --ray-address (hyphen) and --ray_address (underscore) accepted
+    # so the script slots into ec2_cluster_ray_colony.py's invocation
+    # which uses underscore (matches lineage runner convention).
+    ap.add_argument('--ray-address', '--ray_address',
+                    dest='ray_address', default=None)
+    ap.add_argument('--experiment-id', '--experiment_id',
+                    dest='experiment_id', default=None,
+                    help='Override config experiment_id. Used by '
+                         'vecoli_aws.sh to inject auto-generated unique '
+                         'IDs per launch.')
     ap.add_argument('--num-cpus', type=int, default=None,
                     help='Local Ray runtime CPU cap (ignored for cluster).')
     args = ap.parse_args()
+
+    # Read config (if supplied), then let CLI args override.
+    cfg = {}
+    if args.config:
+        import json as _json
+        with open(args.config) as f:
+            cfg = _json.load(f)
+        cfg = _resolve_inherited_config(args.config, cfg)
+
+    sim_data_path = args.sim_data_path or cfg.get('sim_data_path')
+    target_doublings = (args.target_doublings
+                        if args.target_doublings is not None
+                        else int(cfg.get('target_doublings', 1)))
+    base_seed = (args.base_seed
+                 if args.base_seed is not None
+                 else int(cfg.get('lineage_seed', cfg.get('base_seed', 0))))
+    experiment_id = args.experiment_id or cfg.get('experiment_id')
+
+    # max_duration: explicit (CLI > config) wins. Otherwise auto-derive
+    # from target_doublings: one cell cycle ≈ ``CYCLE_TIME`` sim-sec
+    # plus a buffer to cover the final gen's growth + divide. The
+    # composite then ticks for that many sim-seconds and stops. If
+    # auto-derived is too short for the actual cycle, you'll see
+    # fewer cells than target; bump CYCLE_TIME / buffer in that case.
+    CYCLE_TIME = 2700.0   # approximate sim-sec per generation
+    BUFFER = 600.0        # extra sim-sec past the last divide
+    if args.max_duration is not None:
+        max_duration = args.max_duration
+        max_duration_source = 'CLI'
+    elif cfg.get('max_duration') is not None:
+        max_duration = float(cfg['max_duration'])
+        max_duration_source = 'config'
+    else:
+        max_duration = target_doublings * CYCLE_TIME + BUFFER
+        max_duration_source = (f'auto-derived: {target_doublings} × '
+                                f'{CYCLE_TIME:.0f}s + {BUFFER:.0f}s')
+
+    if not sim_data_path:
+        ap.error('--sim-data-path required (or sim_data_path in --config)')
 
     ray_init_kwargs = {'log_to_driver': True}
     if args.ray_address:
@@ -138,18 +222,22 @@ def main():
     print(f'[ray-colony] ray runtime up '
           f'(address={args.ray_address or "local"})', flush=True)
 
-    sim_data_path = os.path.abspath(args.sim_data_path)
-    target_n = 2 ** args.target_doublings
-    print(f'[ray-colony] target: 1 -> {target_n} cells '
-          f'({args.target_doublings} doublings), '
-          f'max_duration={args.max_duration:.0f}s sim time', flush=True)
+    sim_data_path_abs = (sim_data_path if sim_data_path.startswith(('s3://', 'gs://'))
+                         else os.path.abspath(sim_data_path))
+    target_n = 2 ** target_doublings
+    print(f'[ray-colony] experiment_id={experiment_id!r} '
+          f'target: 1 -> {target_n} cells '
+          f'({target_doublings} doublings), '
+          f'max_duration={max_duration:.0f}s sim time '
+          f'[{max_duration_source}], '
+          f'base_seed={base_seed}', flush=True)
 
     t0 = time.perf_counter()
     fut = run_colony_actor.remote(
-        sim_data_path=sim_data_path,
-        target_doublings=args.target_doublings,
-        max_duration=args.max_duration,
-        base_seed=args.base_seed,
+        sim_data_path=sim_data_path_abs,
+        target_doublings=target_doublings,
+        max_duration=max_duration,
+        base_seed=base_seed,
         config_path=args.config,
     )
     result = ray.get(fut)
