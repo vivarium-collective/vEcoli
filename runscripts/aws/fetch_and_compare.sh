@@ -45,6 +45,44 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "${REPO_ROOT}"
 
+# Pick a Python interpreter. Non-interactive SSH shells don't source
+# ~/.bashrc, so the bootstrap's PATH and venv activation never run.
+# The bootstrap creates ${REPO_ROOT}/.venv/ with all project deps
+# (numpy, polars, etc.) installed — use that interpreter directly so
+# we don't depend on PATH at all. If .venv is missing, ``uv run`` can
+# still create + activate it on the fly.
+#
+# Reject bare ``python3``/``python`` outright — those exist on AL2023
+# but lack numpy/polars, and a fall-through there produces opaque
+# ImportError trails that mask the real "head not bootstrapped" issue.
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+if [[ -x "${REPO_ROOT}/.venv/bin/python" ]]; then
+  PY="${REPO_ROOT}/.venv/bin/python"
+elif command -v uv >/dev/null; then
+  PY="uv run --no-sync python"
+else
+  cat >&2 <<EOF
+ERROR: no project Python found on this head.
+
+  Looked for:  ${REPO_ROOT}/.venv/bin/python  (does not exist)
+  And:         uv                              (not on PATH)
+  PATH was:    ${PATH}
+
+The compare head needs a venv with numpy + polars (created by
+bootstrap_head_compare.sh via 'uv sync --frozen --extra aws --no-dev').
+
+Fix from your laptop:
+  runscripts/aws/vecoli_aws.sh compare bootstrap
+
+Or directly on the head:
+  cd ${REPO_ROOT} && curl -LsSf https://astral.sh/uv/install.sh | sh \\
+    && export PATH="\$HOME/.local/bin:\$PATH" \\
+    && uv sync --frozen --extra aws --no-dev
+EOF
+  exit 1
+fi
+echo "Using Python: $PY"
+
 aws_sync() {
   # aws s3 sync with --include filters and --exclude default
   aws s3 sync "$1" "$2" "${@:3}" --no-progress --only-show-errors
@@ -110,7 +148,6 @@ done
 # accepts comma-separated paths so the report renders each side-by-side.
 if [[ "${INCLUDE_HISTORY:-0}" == "1" ]]; then
   echo
-  if command -v uv >/dev/null; then PY="uv run --no-sync python"; else PY="python"; fi
   PARITY_PATHS=()
   # Pair v1 against v2 + each extra engine
   PAIRS=("v2:${V2_ID}")
@@ -150,7 +187,6 @@ fi
 
 echo
 echo "=== Generating report ==="
-if command -v uv >/dev/null; then PY="uv run --no-sync python"; else PY="python"; fi
 EXTRA_FLAG=()
 [[ -n "${EXTRA_IDS}" ]] && EXTRA_FLAG=(--extra-ids "${EXTRA_IDS}")
 COST_FLAG=()

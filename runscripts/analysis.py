@@ -616,8 +616,28 @@ def main():
         config = json.load(f)
     if args.config is not None:
         config_file = args.config
-        with fsspec_open(args.config, "r") as f:
-            SimConfig.merge_config_dicts(config, json.load(f))
+        # Resolve ``inherit_from`` chains so configs whose
+        # ``analysis_options`` are only present in a parent (e.g.
+        # comparison_10s_16g_v2_ray_aws.json inherits from
+        # comparison_10s_16g.json) still get the merged tree. The
+        # Nextflow workflow pre-resolves this into workflow_config.json
+        # before invoking analysis.py, but post-hoc callers
+        # (runscripts/aws/run_post_hoc_analysis.sh) pass the raw alias
+        # config — without this walk, ``config["analysis_options"]``
+        # ends up empty and the analysis loop does nothing.
+        def _load_with_inheritance(path: str) -> dict:
+            with fsspec_open(path, "r") as f:
+                cfg = json.load(f)
+            for inherit_path in reversed(cfg.get("inherit_from", [])):
+                inherited = _load_with_inheritance(
+                    os.path.join(CONFIG_DIR_PATH, inherit_path))
+                # Merge inherited into cfg with cfg winning (current
+                # config has highest priority over its ancestors).
+                SimConfig.merge_config_dicts(inherited, cfg)
+                cfg = inherited
+            return cfg
+
+        SimConfig.merge_config_dicts(config, _load_with_inheritance(args.config))
     if "out_uri" not in config["emitter_arg"]:
         out_uri = os.path.abspath(config["emitter_arg"]["out_dir"])
         object_store = ""

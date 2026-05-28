@@ -271,6 +271,21 @@ class CompositeDivision(Division):
         # no per-gen Python rebuild, no JSON shuttle.
         # Used by the composite_lineage engine.
         'single_daughters': 'boolean',
+        # Override paths to per-process seed fields inside a cell.
+        # Populated at build time. Each entry is the path from the
+        # cell root down to a process's ``config.seed`` field, e.g.
+        # ``['process', 'ecoli-chromosome-replication', 'config',
+        # 'seed']`` for a SharedProcess-stored partitioned process,
+        # or ``['allocator_1', 'config', 'seed']`` for a non-
+        # partitioned step at the cell root. CompositeDivision uses
+        # these to emit per-daughter seed overrides via
+        # ``crc32(path[-2], daughter_seed)`` (path[-2] is the unique
+        # process name) so each daughter ends up with independent
+        # process RNGs (mirrors v1's per-gen Composer regeneration,
+        # deterministically per lineage). Empty list disables per-
+        # process seed reseeding (daughters share mother's seeds —
+        # works but cells are correlated).
+        'seed_paths': 'list[list[string]]',
     }
 
     def outputs(self):
@@ -358,13 +373,57 @@ class CompositeDivision(Division):
             if self.parameters.get("single_daughters", False):
                 daughter_ids = daughter_ids[:1]
             print(f"DIVIDE! MOTHER {self.agent_id} -> DAUGHTERS {daughter_ids}")
-            # v2 framework only needs the daughter keys; state split
-            # is schema-driven via _divide_state.
+
+            # Per-daughter overrides: identity (agent_id) and seeds.
+            # Identity must differ — without it, daughters re-emit
+            # _divide for "mother {original}" forever (the key isn't
+            # in agents anymore). Per-process seeds must differ so
+            # the daughters' RNGs diverge (mirrors v1, where
+            # composer.generate() reseeds every process from a
+            # daughter-specific cli_seed). We use crc32(proc_name,
+            # daughter_seed) — deterministic per lineage, not byte-
+            # identical to v1's CamelCase _seedFromName scheme but
+            # semantically the same.
+            #
+            # path-copy merge in _handle_divide_sentinel (see
+            # bigraph_schema/methods/apply.py:_path_copy_merge)
+            # allocates only the dict spines touched by these
+            # overrides; everything else (sim_data refs, process
+            # parameters, etc.) is shared by reference between
+            # daughters and with the mother. So this is cheap.
+            seed_paths = self.parameters.get("seed_paths", []) or []
+            daughter_specs = []
+            for daughter_id in daughter_ids:
+                daughter_seed = int(self.random_state.randint(0, RAND_MAX))
+                override = {
+                    "division": {
+                        "config": {
+                            "agent_id": daughter_id,
+                            "seed": daughter_seed,
+                        },
+                    },
+                }
+                for path in seed_paths:
+                    # path = [..., '<proc_name>', 'config', 'seed']
+                    if len(path) < 2:
+                        continue
+                    proc_name = path[-3] if len(path) >= 3 else path[0]
+                    per_proc_seed = (
+                        binascii.crc32(proc_name.encode("utf-8"),
+                                       daughter_seed)
+                        & 0xFFFFFFFF
+                    )
+                    cursor = override
+                    for segment in path[:-1]:
+                        cursor = cursor.setdefault(segment, {})
+                    cursor[path[-1]] = per_proc_seed
+                daughter_specs.append((daughter_id, override))
+
             return {
                 "agents": {
                     "_divide": {
                         "mother": self.agent_id,
-                        "daughters": [{"key": did} for did in daughter_ids],
+                        "daughters": daughter_specs,
                     }
                 }
             }

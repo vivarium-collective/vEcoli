@@ -44,14 +44,27 @@ if ! command -v uv >/dev/null 2>&1; then
   export PATH="$HOME/.local/bin:$PATH"
 fi
 
-# --- 4. Clone vEcoli --------------------------------------------------------
+# --- 4. Get vEcoli onto the head -------------------------------------------
+# Three states to handle:
+#   a) dir absent           → clone fresh from GitHub.
+#   b) dir present + .git/  → git fetch + checkout + ff-pull.
+#   c) dir present, no .git → ``_rsync_repo_to_head`` (vecoli_aws.sh)
+#                             already excluded .git when copying the laptop
+#                             checkout up; treat the rsynced files as the
+#                             source of truth and skip git operations.
 if [[ ! -d "$VECOLI_DIR" ]]; then
   git clone "$VECOLI_REPO" "$VECOLI_DIR"
+  cd "$VECOLI_DIR"
+  git checkout "$VECOLI_BRANCH"
+elif [[ -d "$VECOLI_DIR/.git" ]]; then
+  cd "$VECOLI_DIR"
+  git fetch origin
+  git checkout "$VECOLI_BRANCH"
+  git pull --ff-only origin "$VECOLI_BRANCH"
+else
+  echo "vEcoli at $VECOLI_DIR has no .git/ — assuming it was rsynced from the laptop. Skipping git ops."
+  cd "$VECOLI_DIR"
 fi
-cd "$VECOLI_DIR"
-git fetch origin
-git checkout "$VECOLI_BRANCH"
-git pull --ff-only origin "$VECOLI_BRANCH"
 
 # --- 5. Pre-sync uv environment so the first ``compare`` command is fast ----
 # ``--extra aws`` pulls boto3 + botocore[crt] from uv.lock for in-region

@@ -2253,15 +2253,29 @@ EOF
 # (.vecoli-aws-state/v1.experiment-id and v2.experiment-id) so the most
 # recent runs are compared without having to remember the auto-generated
 # IDs. Env vars (VECOLI_V1_ID / VECOLI_V2_ID) still override.
+#
+# When no sidecar exists, fall through to the v1/v2 alias's config
+# experiment_id field (via _resolve_alias_coords). This keeps the
+# default tied to the alias's own config rather than hardcoded strings
+# or the active variant's $EXP_ID (which under ``compare report``
+# resolves to ``compare_head`` — wrong for the v2 column).
 _compare_default_v1_id() {
-  local f="$STATE_DIR/v1.experiment-id"
-  if [[ -f "$f" ]]; then local v; v=$(<"$f"); echo "${v//$'\n'/}"
-  else echo "comparison_10s_16g_v1_aws"; fi
+  local coords; coords=$(_resolve_alias_coords v1 2>/dev/null || true)
+  if [[ -n "$coords" ]]; then
+    local exp; IFS=$'\t' read -r exp _ <<<"$coords"
+    echo "$exp"
+  else
+    echo "comparison_10s_16g_v1_aws"  # last-ditch literal
+  fi
 }
 _compare_default_v2_id() {
-  local f="$STATE_DIR/v2.experiment-id"
-  if [[ -f "$f" ]]; then local v; v=$(<"$f"); echo "${v//$'\n'/}"
-  else echo "$EXP_ID"; fi
+  local coords; coords=$(_resolve_alias_coords v2 2>/dev/null || true)
+  if [[ -n "$coords" ]]; then
+    local exp; IFS=$'\t' read -r exp _ <<<"$coords"
+    echo "$exp"
+  else
+    echo "$EXP_ID"  # last-ditch (caller's active variant)
+  fi
 }
 
 # Read sidecar for an arbitrary alias (mp, ray, ...). Returns empty if
@@ -2290,6 +2304,88 @@ _compare_auto_extra_ids() {
     out+="${out:+,}${alias_name}=${id}"
   done < "$_REGISTRY"
   echo "$out"
+}
+
+# Validate v1/v2/extra experiment ids before invoking fetch_and_compare
+# on the head. Each id must:
+#   1. Be non-empty.
+#   2. Start with its alias's config experiment_id base (catches the
+#      v2-falls-through-to-compare_head bug where the sidecar is
+#      missing and the default picks up another variant's id).
+#   3. Have at least one object under
+#      s3://<bucket>/<prefix>/<exp_id>/ — catches typos and stale
+#      sidecars pointing at runs that never produced output.
+# Warnings (non-fatal):
+#   - id has no _YYYYMMDD-HHMMSS suffix (looks like a config base
+#     rather than a stamped run id; probably not what you want).
+#   - alias has no registry entry (skip the S3 check).
+# Echoes a one-line OK/ERROR per id to stderr. Returns 0 if every id
+# clears the fatal checks, 1 otherwise.
+_compare_validate_ids() {
+  local v1_id="$1" v2_id="$2" extra_ids="$3"
+  local fatal=0 warns=0
+  echo "Validating experiment ids..." >&2
+
+  local pairs=("v1=$v1_id" "v2=$v2_id")
+  if [[ -n "$extra_ids" ]]; then
+    local raw
+    for raw in $(echo "$extra_ids" | tr ',' ' '); do
+      [[ -z "$raw" ]] && continue
+      pairs+=("$raw")
+    done
+  fi
+
+  local sfx_re='_[0-9]{8}-[0-9]{6}$'
+  local entry label eid coords bucket prefix base
+  for entry in "${pairs[@]}"; do
+    label="${entry%%=*}"
+    eid="${entry#*=}"
+    if [[ -z "$eid" ]]; then
+      echo "  ERROR ${label}: experiment_id is empty" >&2
+      fatal=$((fatal + 1))
+      continue
+    fi
+    coords=$(_resolve_alias_coords "$label" 2>/dev/null || true)
+    if [[ -z "$coords" ]]; then
+      echo "  WARN  ${label}='${eid}': not a registered alias; skipping S3 check" >&2
+      warns=$((warns + 1))
+      continue
+    fi
+    IFS=$'\t' read -r _ bucket prefix base _ <<<"$coords"
+    if [[ "$eid" != "$base"* ]]; then
+      echo "  ERROR ${label}='${eid}': doesn't begin with ${label} alias base '${base}'" >&2
+      echo "        Fix: pass --${label}-id <real_id>, or 'run launch ${label}' to populate the sidecar." >&2
+      fatal=$((fatal + 1))
+      continue
+    fi
+    if ! [[ "$eid" =~ $sfx_re ]]; then
+      echo "  WARN  ${label}='${eid}': no _YYYYMMDD-HHMMSS suffix (looks like a config base, not a stamped run)" >&2
+      warns=$((warns + 1))
+    fi
+    local first_key
+    first_key=$(aws_cli s3api list-objects-v2 \
+      --bucket "$bucket" --prefix "${prefix}/${eid}/" \
+      --max-keys 1 --query 'Contents[0].Key' --output text 2>/dev/null || true)
+    if [[ -z "$first_key" || "$first_key" == "None" ]]; then
+      echo "  ERROR ${label}='${eid}': no S3 objects at s3://${bucket}/${prefix}/${eid}/" >&2
+      fatal=$((fatal + 1))
+    else
+      echo "  OK    ${label}='${eid}'" >&2
+    fi
+  done
+
+  echo >&2
+  if (( fatal > 0 )); then
+    echo "compare report: ${fatal} id error(s), ${warns} warning(s) — aborting." >&2
+    echo "Pass --force to skip validation." >&2
+    return 1
+  fi
+  if (( warns > 0 )); then
+    echo "compare report: ${warns} warning(s); continuing." >&2
+  else
+    echo "compare report: all ids validated." >&2
+  fi
+  return 0
 }
 
 ns_compare_parity() {
@@ -2602,6 +2698,233 @@ ns_compare_full_parity() {
   echo "Summary: $REPO_ROOT/${out_summary}"
   echo "Per-col: $REPO_ROOT/${out_summary}.cols"
 }
+
+# Rsync the local repo to the compare head, then run
+# ``bootstrap_head_compare.sh`` over ssh to install uv + create
+# .venv with numpy/polars. Wrapper around ``_run_bootstrap_on_head``
+# that adds the rsync step — otherwise the head ends up with just the
+# bootstrap script and no pyproject.toml, so ``uv sync`` errors out.
+# ``run launch`` rsyncs before bootstrap on its own, so this wrapper
+# is needed only for the standalone ``compare bootstrap`` entry point.
+ns_compare_bootstrap() {
+  local dns; dns=$(require_running_dns)
+  echo "Rsyncing local repo → ec2-user@${dns}:~/vEcoli/ (skipping .git/.venv/out/)..."
+  _rsync_repo_to_head "$dns"
+  _run_bootstrap_on_head ""
+}
+
+# Generate the analyses/ plots that Ray/MP runners skipped, then push
+# them to S3 under the alias's experiment_id. Resolves the alias to
+# its config + stamped exp_id + sim_data URI + bucket/prefix, then runs
+# runscripts/aws/run_post_hoc_analysis.sh on the compare head (which
+# already has uv + .venv with the analysis stack).
+#
+# Usage: $(basename "$0") compare analyze <alias> [--analysis_name NAMES]
+#                                                  [--types TYPES] [--cpus N]
+ns_compare_analyze() {
+  local target_alias="" analysis_names="" analysis_types="" cpus=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --analysis_name|--analysis-name) analysis_names="$2"; shift 2 ;;
+      --types|-t)                      analysis_types="$2"; shift 2 ;;
+      --cpus|-n)                       cpus="$2"; shift 2 ;;
+      -h|--help)
+        cat >&2 <<USAGE
+usage: $(basename "$0") compare analyze <alias> [--analysis_name "n1 n2 ..."]
+                                                [--types "single multiseed"]
+                                                [--cpus N]
+
+Drive runscripts/analysis.py for <alias> on the compare head and upload
+plots to S3 under the alias's experiment_id, so ``compare report``
+picks them up. Useful for Ray/MP runs that produced parquet but not
+analyses (Nextflow v1/v2 runs already publish their own analyses/).
+
+  --analysis_name  restrict to specific analysis script name(s)
+                   (e.g. "mass_fraction_summary ecocyc_table")
+  --types          restrict to specific analysis types
+                   (any of: multiexperiment multivariant multiseed
+                   multigeneration multidaughter single parca)
+  --cpus           DuckDB threadpool size (default: 4)
+USAGE
+        return 0 ;;
+      -*) echo "compare analyze: unknown flag '$1'" >&2; return 1 ;;
+      *)
+        if [[ -z "$target_alias" ]]; then target_alias="$1"; shift
+        else echo "compare analyze: unexpected positional '$1'" >&2; return 1
+        fi ;;
+    esac
+  done
+  if [[ -z "$target_alias" ]]; then
+    echo "compare analyze: missing required <alias> (e.g. ray, mp)" >&2
+    return 1
+  fi
+
+  local coords; coords=$(_resolve_alias_coords "$target_alias") || return 1
+  local target_exp target_bucket target_prefix target_base target_cfg
+  IFS=$'\t' read -r target_exp target_bucket target_prefix target_base target_cfg <<<"$coords"
+
+  if [[ ! -f "$REPO_ROOT/$target_cfg" ]]; then
+    echo "compare analyze: config not found at $REPO_ROOT/$target_cfg" >&2
+    return 1
+  fi
+  # Pull sim_data_path out of the alias config. Composite-lineage configs
+  # (ray, mp) carry the s3 URI directly; nextflow configs leave it null
+  # (parca generates it). For an alias whose config has sim_data_path:null,
+  # there's no post-hoc path here — that's a Nextflow run that already
+  # produced analyses, so this subcommand shouldn't be called on it.
+  local sim_data_uri
+  sim_data_uri=$(python3 -c "
+import json, sys
+with open('$REPO_ROOT/$target_cfg') as f:
+    cfg = json.load(f)
+v = cfg.get('sim_data_path')
+print(v if v else '', end='')
+")
+  if [[ -z "$sim_data_uri" || "$sim_data_uri" == "None" ]]; then
+    echo "compare analyze: $target_alias config has no sim_data_path." >&2
+    echo "  This subcommand is for composite-lineage runs (mp/ray) that reuse a" >&2
+    echo "  pre-existing parca simData.cPickle. Nextflow runs (v1/v2) already publish" >&2
+    echo "  their own analyses/." >&2
+    return 1
+  fi
+
+  echo "Resolved:"
+  echo "  alias       = $target_alias"
+  echo "  exp_id      = $target_exp"
+  echo "  config      = $target_cfg"
+  echo "  sim_data    = $sim_data_uri"
+  echo "  s3 target   = s3://$target_bucket/$target_prefix/$target_exp/analyses/"
+
+  local dns; dns=$(require_running_dns)
+  echo "Pushing analysis scripts to compare head..."
+  ssh -i "$KEY_FILE" "ec2-user@$dns" 'mkdir -p ~/vEcoli/runscripts/aws'
+  scp -i "$KEY_FILE" \
+      "$SCRIPT_DIR/run_post_hoc_analysis.sh" \
+      "ec2-user@$dns:~/vEcoli/runscripts/aws/"
+  scp -i "$KEY_FILE" \
+      "$REPO_ROOT/runscripts/analysis.py" \
+      "ec2-user@$dns:~/vEcoli/runscripts/"
+
+  local env_pairs="CONFIG_RELPATH='$target_cfg' EXP_ID='$target_exp'"
+  env_pairs+=" SIM_DATA_URI='$sim_data_uri'"
+  env_pairs+=" BUCKET='$target_bucket' PREFIX='$target_prefix'"
+  [[ -n "$analysis_names" ]] && env_pairs+=" ANALYSIS_NAME='$analysis_names'"
+  [[ -n "$analysis_types" ]] && env_pairs+=" ANALYSIS_TYPES='$analysis_types'"
+  [[ -n "$cpus" ]] && env_pairs+=" CPUS='$cpus'"
+
+  echo "Running run_post_hoc_analysis.sh on head..."
+  ssh -i "$KEY_FILE" "ec2-user@$dns" \
+    "set -e; cd ~/vEcoli && $env_pairs bash runscripts/aws/run_post_hoc_analysis.sh"
+  echo
+  echo "Done. Re-run 'compare report' to pick up the new plots for $target_alias."
+}
+
+# Walk the alias registry, list each alias's S3 prefix, pick the
+# lexicographically latest ``<base>_YYYYMMDD-HHMMSS`` directory, and
+# write that id back to .vecoli-aws-state/<alias>.experiment-id.
+# After running, ``compare report`` auto-discovers a full v1/v2/mp/ray
+# comparison without the user having to remember stamped ids.
+ns_compare_discover() {
+  local dry_run=0 only="" force=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dry-run|-n) dry_run=1; shift ;;
+      --alias)      only="$2"; shift 2 ;;
+      --force)      force=1; shift ;;
+      -h|--help)
+        cat >&2 <<USAGE
+usage: $(basename "$0") compare discover [--alias <name>] [--dry-run] [--force]
+
+For each non-``compare`` alias in the registry, list its S3 prefix and
+write the lexicographically latest stamped run id (<base>_YYYYMMDD-HHMMSS)
+to .vecoli-aws-state/<alias>.experiment-id. Subsequent ``compare report``
+calls then pick up the freshest run for each alias automatically.
+
+  --alias <name>   only discover the named alias
+  --dry-run        show what would be written, don't touch sidecars
+  --force          overwrite an existing sidecar even if it lexically
+                   sorts higher than the latest stamped S3 dir
+USAGE
+        return 0 ;;
+      *) echo "compare discover: unknown arg '$1'" >&2; return 1 ;;
+    esac
+  done
+
+  echo "Scanning S3 for latest experiment ids per alias..." >&2
+
+  local found=0 wrote=0 skipped=0
+  while IFS=$'\t' read -r alias_name _cfg _method _img; do
+    [[ -z "$alias_name" ]] && continue
+    case "$alias_name" in
+      compare) continue ;;  # not a workflow alias
+    esac
+    if [[ -n "$only" && "$only" != "$alias_name" ]]; then
+      continue
+    fi
+
+    local coords; coords=$(_resolve_alias_coords "$alias_name" 2>/dev/null || true)
+    if [[ -z "$coords" ]]; then
+      echo "  skip ${alias_name}: alias not resolvable" >&2
+      continue
+    fi
+    local bucket prefix
+    IFS=$'\t' read -r _ bucket prefix _ _ <<<"$coords"
+
+    # `aws s3 ls` on a prefix returns directory entries as ``PRE <name>/``.
+    # Pick the lexicographically max stamped entry — timestamps in the
+    # _YYYYMMDD-HHMMSS suffix sort correctly as strings.
+    local listing
+    listing=$(aws_cli s3 ls "s3://${bucket}/${prefix}/" 2>/dev/null || true)
+    if [[ -z "$listing" ]]; then
+      echo "  skip ${alias_name}: nothing under s3://${bucket}/${prefix}/" >&2
+      continue
+    fi
+    local latest
+    latest=$(echo "$listing" \
+      | awk '/^[[:space:]]*PRE / { sub(/\/$/, "", $NF); print $NF }' \
+      | grep -E '_[0-9]{8}-[0-9]{6}$' \
+      | sort \
+      | tail -1)
+    if [[ -z "$latest" ]]; then
+      echo "  skip ${alias_name}: no stamped runs under s3://${bucket}/${prefix}/" >&2
+      continue
+    fi
+
+    found=$((found + 1))
+    local sidecar="$STATE_DIR/${alias_name}.experiment-id"
+    local cur_sidecar=""
+    if [[ -f "$sidecar" ]]; then
+      cur_sidecar=$(<"$sidecar"); cur_sidecar="${cur_sidecar//$'\n'/}"
+    fi
+
+    if [[ -n "$cur_sidecar" && "$cur_sidecar" == "$latest" ]]; then
+      echo "  ok   ${alias_name}: sidecar already at ${latest}" >&2
+      continue
+    fi
+    if (( force == 0 )) && [[ -n "$cur_sidecar" && "$cur_sidecar" > "$latest" ]]; then
+      echo "  skip ${alias_name}: sidecar='${cur_sidecar}' lexically > S3 latest='${latest}' (use --force)" >&2
+      skipped=$((skipped + 1))
+      continue
+    fi
+
+    if (( dry_run == 1 )); then
+      echo "  DRY  ${alias_name}: would write ${latest} → ${sidecar}" >&2
+    else
+      mkdir -p "$STATE_DIR"
+      printf '%s\n' "$latest" > "$sidecar"
+      echo "  wrote ${alias_name}: ${latest} → ${sidecar}" >&2
+      wrote=$((wrote + 1))
+    fi
+  done < "$_REGISTRY"
+
+  echo >&2
+  if (( dry_run == 1 )); then
+    echo "compare discover (dry-run): ${found} alias(es) had a stamped run in S3." >&2
+  else
+    echo "compare discover: wrote ${wrote} sidecar(s), skipped ${skipped}." >&2
+  fi
+}
+
 ns_compare_report() {
   # CLI flags + env-var fallbacks (CLI wins). Defaults: v1/v2/extras
   # come from sidecars, seeds = 0..9, gens = 1..16.
@@ -2614,6 +2937,7 @@ ns_compare_report() {
   local include_history="${VECOLI_INCLUDE_HISTORY:-1}"
   local out_path="${VECOLI_REPORT_OUT:-}"
   local no_fetch=0
+  local force=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --gens)        gens="$2"; shift 2 ;;
@@ -2625,13 +2949,14 @@ ns_compare_report() {
       --out)         out_path="$2"; shift 2 ;;
       --no-history)  include_history=0; shift ;;
       --no-fetch|--cached) no_fetch=1; shift ;;
+      --force|--no-validate) force=1; shift ;;
       -h|--help)
         cat >&2 <<USAGE
 usage: $(basename "$0") compare report [--gens 1,2] [--seeds 0,1,...]
                                        [--v1-id ID] [--v2-id ID]
                                        [--extra-ids label=ID,...]
                                        [--out doc/v1_v2_report_4way.md]
-                                       [--no-history] [--no-fetch]
+                                       [--no-history] [--no-fetch] [--force]
 
 Defaults pull v1/v2/mp/ray IDs from .vecoli-aws-state/<alias>.experiment-id
 sidecars. ``--extra-ids`` (or VECOLI_EXTRA_IDS) overrides the auto-discovered
@@ -2641,6 +2966,9 @@ non-v1/non-v2 alias sidecars (e.g. mp, ray) and turns the table into N-way.
 ``--no-fetch`` (or ``--cached``) skips ALL S3 sync steps and runs the
 report against whatever is already in ``out/<exp>/`` on the head — much
 faster for iterating on report formatting after the first sync.
+Before SSH'ing to the head, each resolved id is checked against its
+alias's config base + S3 prefix; pass ``--force`` (or ``--no-validate``)
+to skip that check.
 USAGE
         return 0 ;;
       *) echo "compare report: unknown arg '$1'" >&2; return 1 ;;
@@ -2658,6 +2986,9 @@ USAGE
   if [[ -z "${VECOLI_EXTRA_IDS+x}" && -z "$extra_ids" ]]; then
     extra_ids=$(_compare_auto_extra_ids)
     [[ -n "$extra_ids" ]] && echo "Auto-discovered extras: $extra_ids"
+  fi
+  if (( force == 0 )); then
+    _compare_validate_ids "$v1_id" "$v2_id" "$extra_ids" || return 1
   fi
   local dns; dns=$(require_running_dns)
   echo "Pushing latest scripts to head..."
@@ -2989,13 +3320,26 @@ EBS for synced parquet).
                        output to specific gens; --until N is shorthand for
                        --gens 1,2,...,N. Prints per-seed tables + median
                        ratio per gen (a/b).
+  discover [<alias>] [--alias name] [--dry-run] [--force]
+                       walk the alias registry, list each alias's S3 prefix,
+                       and write the latest stamped <base>_YYYYMMDD-HHMMSS id
+                       to .vecoli-aws-state/<alias>.experiment-id. Run this
+                       to populate missing sidecars (e.g. after a fresh
+                       checkout) so ``compare report`` auto-includes mp/ray.
+  analyze <alias> [--analysis_name N] [--types T] [--cpus N]
+                       run runscripts/analysis.py for <alias> on the compare
+                       head and upload plots to S3 under the alias's
+                       experiment_id. Use for Ray/MP runs that produced
+                       parquet but skipped analyses/ (Nextflow v1/v2 already
+                       publish their own). Must run AFTER ``compare bootstrap``.
   report [<alias>] [--gens 1,2] [--seeds 0,1] [--v1-id ID] [--v2-id ID]
          [--extra-ids label=ID,...] [--engine-cost N] [--out path]
-         [--no-history] [--no-fetch]
+         [--no-history] [--no-fetch] [--force]
                        fetch + render N-way markdown report. Extras
                        auto-discovered from any alias sidecar (mp, ray, etc.).
                        --no-fetch reuses out/<exp>/ already on head (fast
-                       iteration on report formatting).
+                       iteration on report formatting). Validates each id
+                       against S3 before SSH'ing — --force skips that check.
   export [<alias>] [html|pdf] [path/to/report.md]
                        convert markdown report → single-file artifact via
                        pandoc (+ weasyprint for pdf).
@@ -3121,9 +3465,17 @@ case "$cmd" in
       full-parity)      _dispatch_with_default_alias ns_compare_full_parity compare "$@" ;;
       gens)             _dispatch_with_default_alias ns_compare_gens        compare "$@" ;;
       time)             ns_compare_time "$@" ;;
+      discover)         _dispatch_with_default_alias ns_compare_discover    compare "$@" ;;
+      analyze)
+        # ``analyze``'s first positional is the *target alias to analyze*
+        # (e.g. ray), NOT the head context — the head is always ``compare``.
+        # Pin the variant to compare and forward all args.
+        _use_variant compare || exit 1
+        ns_compare_analyze "$@"
+        ;;
       report)           _dispatch_with_default_alias ns_compare_report      compare "$@" ;;
       export)           _dispatch_with_default_alias ns_compare_export      compare "$@" ;;
-      bootstrap)        _dispatch_with_default_alias _run_bootstrap_on_head compare "$@" ;;
+      bootstrap)        _dispatch_with_default_alias ns_compare_bootstrap   compare "$@" ;;
       help|-h|--help)   _help_compare ;;
       *) echo "compare: unknown subcmd '$sub'" >&2; _help_compare >&2; exit 1 ;;
     esac

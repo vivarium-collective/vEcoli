@@ -97,7 +97,8 @@ def build_ecoli_document(core, sim_config, load_sim_data=None):
 
     # 3. Build flow graph (step execution order)
     flow, configs, classes = _build_flow(
-        sim_config, load_sim_data, configs, classes, partitioned, time_step)
+        sim_config, load_sim_data, configs, classes, partitioned,
+        partitioned_configs, time_step)
 
     # 3b. Extract each edge's interface (inputs/outputs) via a temporary
     # instance BEFORE configs are rewritten into serializable refs.
@@ -736,7 +737,8 @@ def _build_topology(config, partitioned, configs):
 # Flow graph
 # ---------------------------------------------------------------------------
 
-def _build_flow(config, load_sim_data, configs, classes, partitioned, time_step):
+def _build_flow(config, load_sim_data, configs, classes, partitioned,
+                partitioned_configs, time_step):
     """Build step execution flow and add infrastructure steps."""
     from ecoli.processes.allocator import Allocator
     from ecoli.processes.unique_update import UniqueUpdate
@@ -822,6 +824,31 @@ def _build_flow(config, load_sim_data, configs, classes, partitioned, time_step)
     if config.get("divide"):
         from ecoli.processes.cell_division import (
             CompositeDivision, daughter_phylogeny_id)
+
+        # Discover per-process seed paths so CompositeDivision can
+        # emit per-daughter seed overrides at divide time. Two homes
+        # for seeded process configs:
+        #   1. Partitioned processes live in the cell's ``process``
+        #      store as SharedProcess entries; their config['seed']
+        #      lives at ``process/<name>/config/seed``.
+        #   2. Non-partitioned steps live at the cell root; their
+        #      config['seed'] is at ``<name>/config/seed``.
+        # Anything with ``seed`` in its resolved config is a candidate.
+        seed_paths = []
+        for proc_name in partitioned:
+            shared_cfg = partitioned_configs.get(proc_name, {})
+            if isinstance(shared_cfg, dict) and 'seed' in shared_cfg:
+                seed_paths.append(['process', proc_name, 'config', 'seed'])
+        for step_name, step_cfg in configs.items():
+            if step_name == 'division':
+                continue  # division reseeds itself via its own override
+            if step_name in partitioned:
+                continue  # handled above as SharedProcess
+            if not isinstance(step_cfg, dict):
+                continue
+            if 'seed' in step_cfg:
+                seed_paths.append([step_name, 'config', 'seed'])
+
         # v2 uses CompositeDivision (skips the v1 Composer roundtrip —
         # the framework handles daughter state reconstruction via
         # type-driven _divide_state and Link instantiation).
@@ -845,6 +872,10 @@ def _build_flow(config, load_sim_data, configs, classes, partitioned, time_step)
             # extract daughter 0. Reserved for a future tree-mode
             # honest-composite design where division stays in-place.
             "single_daughters": False,
+            # Paths inside the cell tree for per-process seed reseeding
+            # at divide. See CompositeDivision.config_schema['seed_paths']
+            # for the format. Empty list disables (correlated daughters).
+            "seed_paths": seed_paths,
         }
         configs["division"] = division_config
         classes["division"] = CompositeDivision
@@ -1134,7 +1165,7 @@ class EcoliProcess(_Composite):
     config_schema = {
         # --- sim_data sourcing (one of these is required at initialize) ---
         'sim_data_path': 'maybe[string]',
-        'parca_options': 'maybe[tree[any]]',
+        'parca_options': 'maybe[tree[node]]',
 
         # --- cell identity ---
         'agent_id': 'string',
@@ -1153,10 +1184,10 @@ class EcoliProcess(_Composite):
         # Anything in here is deep-merged onto configs/default.json before
         # build_ecoli_document is called. Use this to add antibiotics
         # processes, custom topology, etc. (mirrors the JSON-config path).
-        'sim_config': 'tree[any]',
+        'sim_config': 'tree[node]',
 
         # --- initial state options ---
-        'initial_state': 'tree[any]',
+        'initial_state': 'tree[node]',
         'initial_state_file': 'maybe[string]',
         'initial_state_overrides': 'list[string]',
 
@@ -1178,10 +1209,31 @@ class EcoliProcess(_Composite):
 
     def initialize(self, config=None):
         """Resolve sim_data, build the inner cell, configure the bridge."""
+        # Ensure ECOLI_TYPES is on self.core. Required because the Ray
+        # protocol's shadow constructs its template instance with a
+        # fresh ``allocate_core()`` (no domain types registered), and
+        # build_ecoli_document references vEcoli types like
+        # ``sim_data_object_store`` that aren't in BASE_TYPES.
+        # Idempotent for cores that already have the types.
+        from ecoli.library.bigraph_types import ECOLI_TYPES
+        try:
+            self.core.register_types(ECOLI_TYPES)
+        except Exception:
+            pass  # already registered
+
         cfg = self._config
 
         # Collapse the user-facing keys into a sim_config dict that
         # build_ecoli_document understands.
+        #
+        # Filter out the empty-string / empty-dict defaults the
+        # framework fills in for unset string/tree[node] fields. Those
+        # are "not set" semantically; copying them would clobber the
+        # real values from configs/default.json (e.g. condition='' would
+        # overwrite condition='basal' and crash LoadSimData with an
+        # unhelpful "process X is not known" because sim_data.condition_to_
+        # doubling_time[''] raises KeyError, caught and re-raised by
+        # get_config_by_name).
         user_config = dict(cfg.get('sim_config') or {})
         for key in (
                 'agent_id', 'seed', 'time_step', 'initial_global_time',
@@ -1189,8 +1241,15 @@ class EcoliProcess(_Composite):
                 'initial_state', 'initial_state_file',
                 'initial_state_overrides', 'divide'):
             value = cfg.get(key)
-            if value is not None:
-                user_config[key] = value
+            if value is None:
+                continue
+            if isinstance(value, str) and value == '':
+                continue
+            if isinstance(value, dict) and not value:
+                continue
+            if isinstance(value, list) and not value:
+                continue
+            user_config[key] = value
 
         sim_data_path = _resolve_sim_data(
             cfg.get('sim_data_path'), cfg.get('parca_options'))
