@@ -1,37 +1,47 @@
-"""Colony simulation: one Composite, N cells in an ``agents`` map.
+"""Colony simulation: one Composite, agents map of E. coli cells.
 
-Each cell is an ``EcoliCellAgent`` (subclass of EcoliCellProcess that
-adds the _remove/_add divide emission to the outer agents map). On
-inner division, the cell emits the sentinel and the framework swaps
-the mother for two fresh daughter agents in-place.
+This driver is intentionally minimal: it builds a single :py:class:`Composite`
+whose state is just ``{'agents': {'0': <cell_state>}}`` produced by
+:py:func:`~ecoli.composites.ecoli_composite.build_ecoli_document`, then runs
+it. Division happens *inside* the Composite, exactly the way it already
+works inside the lineage runner's per-gen inner Composite:
 
-Two execution modes:
-  --local    address="local:EcoliCellAgent" — single Python process,
-             cells run sequentially. Use for the N=2-4 milestone test
-             to validate division propagation.
-  (default)  address="ray:EcoliCellAgent" — process_bigraph Ray
-             protocol with shared shard-actor pool. Use on a Ray
-             cluster for the scaled colony runs.
+1. ``CompositeDivision`` (at ``agents/<id>/division``) detects mass +
+   chromosome threshold and emits ``{'agents': {'_divide': {mother,
+   daughters}}}``. Its ``agents`` port is wired to ``('..', '..',
+   'agents')`` — the root agents map.
+2. The framework's ``_handle_divide_sentinel`` walks the cell's typed
+   schema, splitting bulk (binomial), unique molecules (domain-aware),
+   sharing listeners, re-realizing process links with fresh instances.
+3. The mother key is popped, two daughter keys are installed in
+   ``agents``. ``_realize_structural_subtrees`` instantiates the new
+   daughter processes; ``_apply_structural_events`` updates
+   ``process_paths`` / ``step_paths`` incrementally.
+4. On the next tick the daughters run alongside any siblings; if either
+   crosses the mass threshold it divides again. Population grows
+   exponentially with no driver-side bookkeeping.
 
-Strategy: pre-provision the cluster for the final-gen cell count
-(no autoscaling — final gen ~ 50% of total compute).
+No ``EcoliCellAgent`` wrapper, no manual ``_remove`` + ``_add``, no
+outer/inner boundary — the engine does all the work because the cell is
+*already* a process tree directly under ``agents/<id>``.
 
-Usage (local milestone):
-    uv run python runscripts/run_colony.py --local \\
-        --sim-data-path out/.../simData.cPickle \\
+Usage (local milestone, one division):
+    uv run python runscripts/run_colony.py \\
+        --sim-data-path out/kb/simData.cPickle \\
         --target-doublings 1 --max-duration 3600
 
-Usage (Ray cluster):
+Usage (Ray cluster, eight doublings):
     uv run python runscripts/run_colony.py \\
-        --sim-data-uri s3://.../simData.cPickle \\
-        --target-doublings 8 \\
-        --n-shards 64 \\
-        --ray-address ray://10.99.x.x:10001
+        --sim-data-path s3://.../simData.cPickle \\
+        --target-doublings 8 --max-duration 28800 \\
+        --ray-address ray://10.99.x.x:10001 \\
+        --parallel
 """
 import os
 
-# Pin numerics to single-threaded BEFORE any numpy/scipy/numba/ray
-# import. Identical rationale to run_composite_lineage_ray.py.
+# Pin numerics single-threaded BEFORE any numpy/scipy/numba/ray import.
+# Threading config is read at import time; setting these after numpy is
+# already bound is too late. ``setdefault`` so the caller can override.
 os.environ.setdefault('OMP_NUM_THREADS', '1')
 os.environ.setdefault('MKL_NUM_THREADS', '1')
 os.environ.setdefault('OPENBLAS_NUM_THREADS', '1')
@@ -50,58 +60,12 @@ import json
 import time
 
 from configs import CONFIG_DIR_PATH
-from ecoli.library.bigraph_types import ECOLI_TYPES
-from ecoli.composites.ecoli_cell_agent import (
-    EcoliCellAgent, set_shared_sim_data)
 
 
-def build_cell_agent(agent_id, lineage_seed, sim_data_path,
-                     sim_config, address):
-    """Outer process-node declaration for one cell."""
-    return {
-        '_type': 'process',
-        'address': address,
-        'config': {
-            'agent_id': agent_id,
-            'lineage_seed': lineage_seed,
-            'sim_data_path': sim_data_path,
-            'sim_config': sim_config,
-            'self_address': address,
-        },
-        'inputs': {},
-        'outputs': {
-            # Empty wire projects to the parent slot (the outer
-            # ``agents`` map). ``['..']`` would lift further to root —
-            # only correct for cells nested 3 levels deep (like
-            # process_bigraph.growth_division's environment/<id>/cell
-            # pattern). Ours are at agents/<id> so the parent slot is
-            # already the map we want to mutate.
-            'agents': [],
-        },
-        'interval': 1.0,
-    }
-
-
-def build_initial_state(sim_data_path, sim_config, n_initial_cells,
-                        base_seed, address):
-    return {
-        'agents': {
-            str(i): build_cell_agent(
-                agent_id=str(i),
-                lineage_seed=base_seed + i,
-                sim_data_path=sim_data_path,
-                sim_config=sim_config,
-                address=address,
-            )
-            for i in range(n_initial_cells)
-        },
-    }
-
-
-def load_sim_config(extra_config_path=None):
+def _load_sim_config(extra_config_path=None):
     """Load default.json (+ optional overrides) and run EcoliSim's
-    preprocessing so ``processes`` is a {name: Class} dict, topology /
-    process_configs are resolved, etc. — the shape ``build_ecoli_document``
+    preprocessing so ``processes`` is ``{name: Class}``, topology and
+    process_configs are resolved — the shape ``build_ecoli_document``
     expects."""
     from ecoli.experiments.ecoli_master_sim import EcoliSim
     cfg_path = os.path.join(CONFIG_DIR_PATH, 'default.json')
@@ -109,9 +73,6 @@ def load_sim_config(extra_config_path=None):
     if extra_config_path:
         with open(extra_config_path) as f:
             sim.config.update(json.load(f))
-    # Run EcoliSim's normal pre-build preprocessing so the config dict
-    # has resolved process classes / topology / process_configs (the
-    # ConfigEntry descriptor mirrors writes to self.config).
     sim.processes = sim._retrieve_processes(
         sim.processes, sim.add_processes,
         sim.exclude_processes, sim.swap_processes)
@@ -124,136 +85,114 @@ def load_sim_config(extra_config_path=None):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--sim-data-path', required=False, default=None,
-                    help='Local sim_data path (for --local mode).')
-    ap.add_argument('--sim-data-uri', required=False, default=None,
-                    help='S3 sim_data URI (for Ray cluster mode).')
+    ap.add_argument('--sim-data-path', required=True,
+                    help='Local sim_data path or s3:// URI.')
     ap.add_argument('--config', default=None,
                     help='Extra config JSON merged onto default.json.')
-    ap.add_argument('--initial-cells', type=int, default=1)
     ap.add_argument('--target-doublings', type=int, default=1,
-                    help='Final-gen cell target = 2^this. Default 1 -> 2 cells '
-                         '(the milestone test).')
+                    help='Final-gen cell target = 2^this. Default 1 -> 2 cells.')
     ap.add_argument('--base-seed', type=int, default=0)
     ap.add_argument('--max-duration', type=float, default=3600.0,
                     help='Sim-time cap (s). Default 3600s ~ one division.')
-    ap.add_argument('--local', action='store_true',
-                    help='Single-process mode (address=local:EcoliCellAgent). '
-                         'Use for the small-N validation milestone.')
-    ap.add_argument('--n-shards', type=int, default=None,
-                    help='Ray shard-actor pool size (cluster mode only).')
+    ap.add_argument('--parallel', action='store_true',
+                    help='Pass parallel_processes=True to Composite so '
+                         'sibling cells run on separate workers.')
     ap.add_argument('--ray-address', default=None,
-                    help='ray://host:port (cluster mode).')
+                    help='ray://host:port. Required for shared-cluster '
+                         'execution; otherwise local Ray is started.')
     args = ap.parse_args()
 
-    sim_data_path = args.sim_data_path or args.sim_data_uri
-    if sim_data_path is None:
-        raise SystemExit('Need either --sim-data-path or --sim-data-uri.')
-
     target_n = 2 ** args.target_doublings
-    print(f'[colony] target: {args.initial_cells} -> {target_n} cells '
+    print(f'[colony] target: 1 -> {target_n} cells '
           f'({args.target_doublings} doublings)', flush=True)
 
-    # Address prefix selects the execution protocol. Local mode uses
-    # the ``local:!module.Class`` form so the framework auto-imports
-    # without a separate registry call.
-    if args.local:
-        address = 'local:!ecoli.composites.ecoli_cell_agent.EcoliCellAgent'
-    else:
-        address = 'ray:EcoliCellAgent'
-    print(f'[colony] cell address: {address}', flush=True)
-
-    # Build the core type registry with vEcoli types.
+    # --- type registry ----------------------------------------------
     from process_bigraph import Composite, allocate_core
+    from ecoli.library.bigraph_types import ECOLI_TYPES
     core = allocate_core()
     core.register_types(ECOLI_TYPES)
 
-    # In cluster mode also register the process class with the Ray
-    # protocol so shard actors can find it.
-    if not args.local:
-        from runscripts.run_composite_lineage_ray import _patch_s3fs_skip_create_bucket
-        _patch_s3fs_skip_create_bucket()
-        if args.n_shards is not None:
-            os.environ['RAY_SHARDS_DEFAULT'] = str(args.n_shards)
-            print(f'[colony] RAY_SHARDS_DEFAULT={args.n_shards}', flush=True)
-        import ray
-        from process_bigraph.protocols.ray import register_process_class
-        register_process_class('EcoliCellAgent', EcoliCellAgent)
-        ray_address = args.ray_address or os.environ.get('RAY_ADDRESS')
-        if ray_address:
-            ray.init(address=ray_address, log_to_driver=False)
-            print(f'[colony] connected to Ray cluster: {ray_address}',
-                  flush=True)
-        else:
-            ray.init()
-            print('[colony] local Ray runtime', flush=True)
+    # --- ray (cluster mode) -----------------------------------------
+    if args.ray_address or args.parallel:
+        try:
+            import ray
+        except ImportError:
+            ray = None
+        if ray is not None:
+            if args.ray_address:
+                ray.init(address=args.ray_address, log_to_driver=False)
+                print(f'[colony] connected to Ray cluster: '
+                      f'{args.ray_address}', flush=True)
+            elif not ray.is_initialized():
+                ray.init()
+                print('[colony] local Ray runtime started', flush=True)
 
-    sim_config = load_sim_config(args.config)
-    sim_config['sim_data_path'] = sim_data_path
+    # --- sim_config -------------------------------------------------
+    sim_config = _load_sim_config(args.config)
+    sim_config['sim_data_path'] = args.sim_data_path
+    sim_config['seed'] = args.base_seed
+    sim_config['agent_id'] = '0'
+    # divide=True is already on default.json; this is just belt-and-
+    # suspenders — without it CompositeDivision is not added.
+    sim_config['divide'] = True
 
-    # Pre-load sim_data ONCE and register it module-globally so every
-    # EcoliCellAgent (mother + all daughters) shares one in-memory
-    # Metabolism runtime state — avoids per-cell pickle reload that
-    # caused FBA GLP_NOFEAS in daughters (mother's bulk produced
-    # against state A, daughter FBA against fresh-load state A').
+    # --- sim_data (loaded once) -------------------------------------
+    # Per-gen LoadSimData wrappers reuse this loaded pickle by setting
+    # ``sim_data=`` on the call. This keeps mother and daughters on the
+    # same Metabolism runtime state (eval'd lambdas live on the
+    # sim_data instance — see memory:metabolism_pickle_patch).
     from ecoli.library.sim_data import LoadSimData
-    print('[colony] pre-loading sim_data once for shared use...',
+    from ecoli.composites.ecoli_composite import build_ecoli_document
+    print(f'[colony] loading sim_data from {args.sim_data_path}...',
           flush=True)
     t0 = time.perf_counter()
-    base_kwargs = dict(sim_config)
-    base_kwargs['seed'] = args.base_seed
-    base_lsd = LoadSimData(**base_kwargs)
-    set_shared_sim_data(base_lsd.sim_data)
+    lsd = LoadSimData(**{**sim_config, 'seed': args.base_seed})
     print(f'[colony] sim_data loaded in {time.perf_counter()-t0:.1f}s',
           flush=True)
 
-    state = build_initial_state(
-        sim_data_path=sim_data_path,
-        sim_config=sim_config,
-        n_initial_cells=args.initial_cells,
-        base_seed=args.base_seed,
-        address=address,
-    )
+    # --- build the cell document -----------------------------------
+    # ``build_ecoli_document`` returns
+    # ``{'agents': {'0': <full_cell_state>}}`` where cell_state contains
+    # bulk + unique + listeners + environment + every process/step
+    # declaration (with address/config — realize re-instantiates).
+    # CompositeDivision lives inside this same cell tree at
+    # ``agents/0/division`` and its ``agents`` port is wired up to the
+    # root agents map by ``_build_topology``.
+    print('[colony] building gen-0 cell document...', flush=True)
+    t0 = time.perf_counter()
+    state = build_ecoli_document(core, sim_config, load_sim_data=lsd)
+    print(f'[colony] document built in {time.perf_counter()-t0:.1f}s; '
+          f'initial agents: {sorted(state["agents"].keys())}',
+          flush=True)
 
-    # Schema tells the framework `agents` is a map of process
-    # declarations — stops Tree.realize from recursing into the cell's
-    # config (which contains the entire resolved sim_config, hundreds
-    # of process classes + topology + flow, and would otherwise be
-    # traversed key-by-key by the leaf-probing realize loop).
-    schema = {'agents': {'_type': 'map', '_value': 'process'}}
-    sim = Composite(
-        {'state': state, 'schema': schema,
-         'parallel_processes': not args.local},
+    # --- Composite ---------------------------------------------------
+    # ``run_steps_on_init=True`` matches what EcoliCellProcess does
+    # internally (primes listeners on init). ``parallel_processes``
+    # lets sibling cells run on separate workers once the colony grows
+    # past a handful of cells.
+    composite = Composite(
+        {'schema': {},
+         'state': state,
+         'run_steps_on_init': True,
+         'parallel_processes': args.parallel},
         core=core,
     )
+    print(f'[colony] composite ready. process_paths='
+          f'{len(composite.process_paths)} step_paths='
+          f'{len(composite.step_paths)}', flush=True)
 
-    print(f'[colony] process_paths: {len(sim.process_paths)} '
-          f'({sorted(sim.process_paths.keys())})', flush=True)
-    # Show the cell's realized outputs to confirm 'agents' is wired
-    for cid, val in sim.state.get('agents', {}).items():
-        if isinstance(val, dict):
-            print(f'[colony]   cell {cid} outputs wire: {val.get("outputs")}',
-                  flush=True)
-            print(f'[colony]   cell {cid} _outputs schema keys: '
-                  f'{list(val.get("_outputs", {}).keys()) if isinstance(val.get("_outputs"), dict) else type(val.get("_outputs")).__name__}',
-                  flush=True)
+    # --- run ---------------------------------------------------------
     print(f'[colony] running for max {args.max_duration:.0f}s sim time...',
           flush=True)
     t0 = time.perf_counter()
-    sim.run(args.max_duration)
+    composite.run(args.max_duration)
     wall = time.perf_counter() - t0
 
-    final_n = len(sim.state.get('agents', {}))
-    final_ids = sorted(sim.state.get('agents', {}).keys())
-    print(f'[colony] done. wall={wall:.1f}s sim_time={sim.state.get("global_time")} '
-          f'final_cells={final_n} ids={final_ids}', flush=True)
-    # Check that daughters were realized (have instance), not just decl dicts.
-    for cid, val in sim.state.get('agents', {}).items():
-        inst = val.get('instance') if isinstance(val, dict) else None
-        inst_type = type(inst).__name__ if inst is not None else 'NO_INSTANCE'
-        print(f'[colony]   agent {cid}: instance={inst_type}', flush=True)
-    print(f'[colony] process_paths after run: '
-          f'{sorted(sim.process_paths.keys())}', flush=True)
+    final_agents = composite.state.get('agents', {})
+    print(f'[colony] done. wall={wall:.1f}s '
+          f'sim_time={composite.state.get("global_time"):.1f} '
+          f'final_cells={len(final_agents)} '
+          f'ids={sorted(final_agents.keys())}', flush=True)
 
 
 if __name__ == '__main__':
