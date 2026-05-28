@@ -1,0 +1,29 @@
+{
+    "inherit_from": ["default.json"],
+    "experiment_id": "colony_ray_aws",
+
+    "sim_data_path": "s3://smsvpctest-shared-sharedbucket60d199d6-abfvwv0day91/vecoli-output/comparison_10s_16g_v2_aws_listener_fix/comparison_10s_16g_v2_aws_listener_fix/parca/kb/simData.cPickle",
+
+    "emitter_arg": {
+        "out_uri": "s3://smsvpctest-shared-sharedbucket60d199d6-abfvwv0day91/vecoli-output/colony_ray_aws",
+        "threaded": false
+    },
+
+    "target_doublings": 3,
+    "lineage_seed": 0,
+
+    "aws": {
+        "deploy_mode": "ray_colony_cluster",
+        "region": "us-gov-west-1",
+        "head_name": "vecoli-v2-ray-colony-head",
+        "tmux_session": "vecoli-v2-ray-colony",
+        "ray": {
+            "cluster_yaml": "runscripts/aws/vecoli-ray-ec2-cluster.yaml",
+            "head_instance_type": "c7i.xlarge",
+            "max_workers": 1,
+            "idle_timeout_minutes": 30
+        }
+    },
+
+    "progress_bar": false
+}

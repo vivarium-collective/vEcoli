@@ -286,6 +286,36 @@ class CompositeDivision(Division):
         # process seed reseeding (daughters share mother's seeds —
         # works but cells are correlated).
         'seed_paths': 'list[list[string]]',
+        # Cell-as-Composite-as-Process mode. When set, divide:
+        #   1. calls ``core.divide(cell_schema, mother_state)`` —
+        #      the same type-driven walk ``_handle_divide_sentinel``
+        #      uses, so daughters get the proper binomial bulk split,
+        #      unique-molecule divide, divide_share / divide_reset
+        #      semantics, etc.
+        #   2. applies per-daughter overrides (``agent_id``, seeds)
+        #      via ``_path_copy_merge``
+        #   3. substitutes each daughter's resulting cell tree into
+        #      ``daughter_wrap_template.config.state`` to produce a
+        #      Composite-Process declaration of the same shape the
+        #      probe/outer used for the mother
+        #   4. emits ``_add``/``_remove`` sentinels — outer's
+        #      ``realize()`` instantiates the daughter cell-Composites,
+        #      same code path as the mother's initial instantiation
+        #
+        # Without these set, falls back to the legacy ``_divide``
+        # sentinel path (mother lives at parent map, daughters land
+        # in-place at the same map — vEcoli's standard architecture).
+        #
+        # ``daughter_wrap_template``: the cell-Composite process decl
+        # shape (e.g. ``{'_type': 'process', 'address': 'local:Composite',
+        # 'config': {'state': <REPLACED>, 'bridge': {...}, ...}, ...}``)
+        # with the ``config.state`` slot reserved for substitution.
+        #
+        # ``cell_schema``: the cell tree's schema, needed for ``divide``
+        # dispatch. Pass the same schema the cell-Composite's inner
+        # state uses (e.g. ``composite.schema`` of the inner Composite).
+        'daughter_wrap_template': 'maybe[tree[node]]',
+        'cell_schema': 'maybe[tree[node]]',
     }
 
     def outputs(self):
@@ -311,7 +341,7 @@ class CompositeDivision(Division):
         # happened yet. The reset semantics live on the outputs side
         # (the divider), not here.
         threshold = self.parameters.get("division_threshold")
-        return {
+        result = {
             'division_variable': 'union[boolean,float]',
             'full_chromosome': 'unique_array',
             'media_id': 'string',
@@ -320,6 +350,13 @@ class CompositeDivision(Division):
                 '_default': threshold,
             },
         }
+        # In wrap-template mode the cell tree (parent of this step
+        # in flat mode) must be readable so we can pass it through
+        # ``core.divide(cell_schema, mother_state)`` and into the
+        # daughter wrap template. Caller wires this to ``('..',)``.
+        if self.parameters.get('daughter_wrap_template'):
+            result['mother_state'] = 'tree[node]'
+        return result
 
     def __init__(self, parameters=None):
         # Bypass Division.__init__ (which requires composer /
@@ -418,6 +455,58 @@ class CompositeDivision(Division):
                         cursor = cursor.setdefault(segment, {})
                     cursor[path[-1]] = per_proc_seed
                 daughter_specs.append((daughter_id, override))
+
+            wrap_template = self.parameters.get('daughter_wrap_template')
+            if wrap_template:
+                # Cell-as-Composite mode: do the divide here (so we
+                # can build a fully-wrapped Composite-Process decl
+                # for each daughter), then emit ``_add``/``_remove``
+                # with those decls. Outer's realize() instantiates
+                # the daughter Composites — same path as the mother's
+                # initial instantiation.
+                from copy import deepcopy
+                from bigraph_schema.methods.divide import divide as _divide_walk
+                from bigraph_schema.methods.apply import _path_copy_merge
+
+                cell_schema = self.parameters.get('cell_schema')
+                if cell_schema is None:
+                    raise RuntimeError(
+                        "CompositeDivision.daughter_wrap_template requires "
+                        "cell_schema config to dispatch the type-driven "
+                        "divide walk.")
+                mother_state = states['mother_state']
+
+                # Type-driven divide walk produces 2 baseline daughters
+                # (binomial bulk split, unique-molecule divide,
+                # divide_share/divide_reset semantics — same as
+                # _handle_divide_sentinel).
+                baselines = _divide_walk(
+                    cell_schema, mother_state,
+                    context=mother_state, path=())
+
+                # For single-lineage mode we still keep len(baselines)
+                # == 2 from the walk; just take the first when only
+                # one daughter requested.
+                daughter_add_entries = []
+                for i, (daughter_id, override) in enumerate(daughter_specs):
+                    baseline = baselines[i] if i < len(baselines) else baselines[0]
+                    daughter_state = (
+                        _path_copy_merge(baseline, override)
+                        if override else baseline)
+                    # Substitute daughter state into the wrap template's
+                    # config.state slot. deepcopy so we don't mutate
+                    # the shared template between daughters.
+                    wrapped = deepcopy(wrap_template)
+                    wrapped.setdefault('config', {})['state'] = daughter_state
+                    daughter_add_entries.append(
+                        (daughter_id, {'cell': wrapped}))
+
+                return {
+                    "agents": {
+                        "_remove": [self.agent_id],
+                        "_add": daughter_add_entries,
+                    }
+                }
 
             return {
                 "agents": {

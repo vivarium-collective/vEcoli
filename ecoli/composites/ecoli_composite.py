@@ -60,7 +60,7 @@ def _fill_schema_defaults(target, schema):
 # Document builder
 # ---------------------------------------------------------------------------
 
-def build_ecoli_document(core, sim_config, load_sim_data=None):
+def build_ecoli_document(core, sim_config, load_sim_data=None, flat=False):
     """Build a complete composite document from sim_config.
 
     The document contains:
@@ -68,9 +68,6 @@ def build_ecoli_document(core, sim_config, load_sim_data=None):
     - Process/step declarations (address + config + wires)
     - Step flow wiring (layer tokens and triggers)
     - Per-process runtime state (next_update_time, request, allocate)
-
-    Returns a state dict shaped as ``{'agents': {<agent_id>: {...}}}``.
-    Load with ``Composite({'state': document}, core=core)``.
 
     Args:
         load_sim_data: Optional pre-built ``LoadSimData`` to reuse.
@@ -80,6 +77,26 @@ def build_ecoli_document(core, sim_config, load_sim_data=None):
             ``sim_data`` pickle is shared across multiple per-gen
             wrappers, so the seed_library precompute and the gen-0
             build don't double-load the pickle.
+        flat: When ``False`` (default), returns ``{'agents': {<agent_id>:
+            cell_state}}`` — the wrapped form the greenfield colony
+            driver and lineage runner expect. CompositeDivision's
+            ``agents`` output wires to ``('..', '..', 'agents')``
+            (lifts to the outer agents map).
+
+            When ``True``, returns ``cell_state`` directly (no agents
+            wrap) AND sets CompositeDivision's ``agents`` output wire
+            to ``['agents']`` (a sibling slot inside the cell's own
+            state that's empty at construction and gets created
+            dynamically when divide fires). This is the shape needed
+            for the cell-as-Composite-as-Process pattern (each cell
+            wrapped as ``ray:Composite`` or ``local:Composite``) where
+            the bridge propagates the inner ``agents`` slot upward to
+            the outer agents map. Mirrors the ``grow_divide_agent``
+            structure in ``process-bigraph/processes/growth_division.py``.
+
+    Returns:
+        The composite document. Shape depends on ``flat``.
+        Load with ``Composite({'state': document}, core=core)``.
     """
     from ecoli.library.sim_data import LoadSimData, RAND_MAX
 
@@ -93,7 +110,7 @@ def build_ecoli_document(core, sim_config, load_sim_data=None):
         load_sim_data, sim_config)
 
     # 2. Build topology (port → wire path mapping)
-    topology = _build_topology(sim_config, partitioned, configs)
+    topology = _build_topology(sim_config, partitioned, configs, flat=flat)
 
     # 3. Build flow graph (step execution order)
     flow, configs, classes = _build_flow(
@@ -341,6 +358,11 @@ def build_ecoli_document(core, sim_config, load_sim_data=None):
     if flow:
         wire_step_layers(cell_state, flow)
 
+    if flat:
+        # Flat mode: caller is wrapping the cell as a Composite-as-
+        # Process and supplies its own agents-map nesting at the
+        # outer level. Return cell_state directly.
+        return cell_state
     return {'agents': {agent_id: cell_state}}
 
 
@@ -691,7 +713,7 @@ def _resolve_process_configs(load_sim_data, config):
 # Topology
 # ---------------------------------------------------------------------------
 
-def _build_topology(config, partitioned, configs):
+def _build_topology(config, partitioned, configs, flat=False):
     """Build port→wire topology from config."""
     topology = {}
     for process_id, ports in config["topology"].items():
@@ -722,13 +744,64 @@ def _build_topology(config, partitioned, configs):
                 "global_time": ("global_time",),
                 "divide": ("divide",),
             }
+        # Division ``agents`` wire depends on whether the cell tree is
+        # wrapped in ``{agents: {<id>: cell_state}}`` (default) or flat
+        # (cell_state directly at composite root). In the wrapped case
+        # CompositeDivision is at ``agents/<id>/division`` so going
+        # two levels up reaches the ``agents`` map. In flat mode
+        # CompositeDivision is at ``<root>/division`` so the agents
+        # slot is a sibling — wire is just ``('agents',)``. The slot
+        # is empty at construction and gets created dynamically when
+        # the divide sentinel is applied (mirrors how the Divide step
+        # in ``process-bigraph/processes/growth_division.py`` emits to
+        # an empty inner ``environment`` slot that the bridge then
+        # propagates to the outer environment map).
+        #
+        # CELL-AS-COMPOSITE BRIDGE-EMIT MODE: when configured,
+        # CompositeDivision's agents output routes to a DEDICATED
+        # ``divide_emit`` slot (a sibling of ``agents`` in wrapped
+        # mode, or at root in flat mode). The cell-Composite's bridge
+        # output then wires to ``divide_emit`` instead of ``agents``,
+        # so only divide events cross the bridge to the outer. Without
+        # this, every inner sub-process update has shape
+        # ``{'agents': {<id>: {<field>: <delta>}}}`` and the bridge
+        # wire to ``['agents']`` would propagate ALL of them, drowning
+        # the outer's apply_updates in O(N_subprocesses) reconciles
+        # per tick (measured: 14.7s/30s wall in profile).
+        if config.get('division_wrap_template'):
+            division_agents_wire = (
+                ("divide_emit",) if flat
+                else ("..", "..", "divide_emit")
+            )
+        else:
+            division_agents_wire = (
+                ("agents",) if flat
+                else ("..", "..", "agents")
+            )
         topology["division"] = {
             "division_variable": tuple(config["division_variable"]),
             "full_chromosome": tuple(config["chromosome_path"]),
-            "agents": ("..", "..", "agents"),
+            "agents": division_agents_wire,
             "media_id": ("environment", "media_id"),
             "division_threshold": ("division_threshold",),
         }
+        # Cell-as-Composite mode (daughter_wrap_template configured)
+        # needs CompositeDivision to read the mother's full cell tree
+        # so it can dispatch ``core.divide(cell_schema, mother_state)``
+        # and build daughter Composite-Process decls. Only works in
+        # WRAPPED mode — in flat mode division is at the cell tree
+        # root and ``('..',)`` tries to go above the cell-Composite's
+        # inner state top, which raises "cannot go above the top in
+        # path: ['..']". Wrapped mode places division at
+        # ``cell.state.agents.<id>.division`` so ``('..',)`` resolves
+        # cleanly to the mother cell tree.
+        if config.get('division_wrap_template'):
+            if flat:
+                raise NotImplementedError(
+                    "division_wrap_template requires wrapped mode "
+                    "(flat=False) — mother_state cannot wire above "
+                    "the cell tree root in flat mode.")
+            topology["division"]["mother_state"] = ("..",)
 
     return topology
 
@@ -877,6 +950,19 @@ def _build_flow(config, load_sim_data, configs, classes, partitioned,
             # for the format. Empty list disables (correlated daughters).
             "seed_paths": seed_paths,
         }
+        # Cell-as-Composite mode: caller can pass a daughter wrap
+        # template + cell schema in sim_config under the
+        # ``division_wrap_template`` / ``division_cell_schema`` keys.
+        # CompositeDivision uses them to build fully-wrapped daughter
+        # Composite-Process decls and emit _add/_remove instead of the
+        # legacy _divide sentinel. The matching topology change is in
+        # _build_topology (adds a ``mother_state`` wire when this is
+        # configured).
+        if config.get('division_wrap_template'):
+            division_config['daughter_wrap_template'] = (
+                config['division_wrap_template'])
+            division_config['cell_schema'] = (
+                config.get('division_cell_schema'))
         configs["division"] = division_config
         classes["division"] = CompositeDivision
 

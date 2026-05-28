@@ -49,18 +49,68 @@ import time
 import ray
 
 
+def _patch_s3fs_skip_create_bucket() -> None:
+    """Monkey-patch ``s3fs.S3FileSystem._mkdir`` to never call
+    ``CreateBucket``. See the long-form rationale in
+    ``run_composite_lineage_ray._patch_s3fs_skip_create_bucket`` — same
+    GovCloud + aiobotocore quirk applies to the colony parquet emitter
+    path. All buckets in this deployment pre-exist, so makedirs-on-S3
+    is a no-op and we can safely short-circuit ``_mkdir``.
+    """
+    try:
+        import s3fs
+    except ImportError:
+        return
+
+    async def _mkdir_no_create_bucket(self, path, acl=False,
+                                       create_parents=True, **kwargs):
+        return
+
+    s3fs.S3FileSystem._mkdir = _mkdir_no_create_bucket
+
+
+# Patch BEFORE any import that might construct an S3FileSystem.
+_patch_s3fs_skip_create_bucket()
+
+
 @ray.remote
 def run_colony_actor(sim_data_path, target_doublings, max_duration,
-                     base_seed, config_path):
+                     base_seed, config_path,
+                     experiment_id=None, out_uri=None):
     """Actor entry: build and run the colony Composite.
 
     Mirrors ``runscripts/run_colony.main`` body exactly — same code
     path, just executed inside a Ray actor process so we can later
     schedule M of these across a cluster (``ray.get([... .remote(s)
     for s in seeds])``).
+
+    When ``out_uri`` is provided, one
+    :py:class:`~ecoli.library.parquet_emitter.ParquetEmitter` is
+    lazily constructed per ``agent_id`` (mother + each daughter as it
+    appears via in-place division) and a history row is emitted for
+    each surviving cell at every poll-step. The existing single-agent
+    ParquetEmitter drops emits whose ``data['agents']`` map has >1
+    entry, so the per-cell pool fans out each tick into N single-agent
+    emit payloads, one per emitter. All emitters get finalized at run
+    end so their pending buffer flushes to S3.
     """
-    # Re-pin in the actor for safety; ``ray start`` doesn't always
-    # propagate driver env.
+    # Re-apply s3fs patch inside the actor: Ray spawns actors as
+    # separate processes that don't re-execute module-level code, so
+    # the module-level patch doesn't propagate automatically.
+    _patch_s3fs_skip_create_bucket()
+
+    # Polars / object-store Rust SDK reads AWS_REGION at the process
+    # level, NOT from boto3's config or storage_options. Ray actor
+    # processes are spawned by ``ray start`` on cluster workers and do
+    # NOT inherit env from the driver. Without these, boto3/polars
+    # default to us-east-1 and a HeadObject against a GovCloud bucket
+    # returns 400 Bad Request. setdefault preserves any explicit
+    # override (e.g. running this code outside GovCloud).
+    os.environ.setdefault("AWS_REGION", "us-gov-west-1")
+    os.environ.setdefault("AWS_DEFAULT_REGION", "us-gov-west-1")
+
+    # Re-pin numerics in the actor for safety; ``ray start`` doesn't
+    # always propagate driver env.
     for k in ('OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS',
               'NUMBA_NUM_THREADS', 'NUMEXPR_NUM_THREADS',
               'VECLIB_MAXIMUM_THREADS', 'POLARS_MAX_THREADS'):
@@ -104,9 +154,134 @@ def run_colony_actor(sim_data_path, target_doublings, max_duration,
         core=core,
     )
 
+    # --- per-cell ParquetEmitter pool ---------------------------------
+    # See class docstring above. ``agent_emitters`` is keyed by string
+    # agent_id and grows lazily as new cells appear (mother + daughters).
+    import numpy as np
+    agent_emitters: dict = {}
+    EMIT_KEYS = ('listeners', 'bulk', 'process_state')
+
+    def _get_emitter(agent_id: str):
+        em = agent_emitters.get(agent_id)
+        if em is not None:
+            return em
+        from ecoli.library.parquet_emitter import ParquetEmitter
+        em = ParquetEmitter({'out_uri': out_uri, 'threaded': False})
+        # Configuration emit sets the agent's hive partition path
+        # (experiment_id/variant=0/lineage_seed/generation/agent_id).
+        # ``generation`` is derived from len(agent_id) so daughters
+        # ('00', '01') land at generation=2, granddaughters at 3, etc.
+        em.emit({
+            'table': 'configuration',
+            'data': {
+                'metadata': {
+                    'experiment_id': experiment_id or 'colony_run',
+                    'variant': 0,
+                    'lineage_seed': base_seed,
+                    'agent_id': agent_id,
+                    'initial_global_time': float(
+                        composite.state.get('global_time', 0.0)),
+                },
+            },
+        })
+        agent_emitters[agent_id] = em
+        return em
+
+    def _emit_tick():
+        """Emit one history row per surviving agent. No-op without out_uri."""
+        if not out_uri:
+            return
+        global_t = float(composite.state.get('global_time', 0.0))
+        agents = composite.state.get('agents', {})
+        if not isinstance(agents, dict):
+            return
+        for agent_id, agent_state in agents.items():
+            if not isinstance(agent_state, dict):
+                continue
+            subtree = {}
+            for k in EMIT_KEYS:
+                v = agent_state.get(k)
+                if v is None:
+                    continue
+                # ``bulk`` is a structured numpy array; project counts
+                # out to match the per-tick column shape v1 / lineage
+                # parquet rows use (a plain Int64 list).
+                if (k == 'bulk' and isinstance(v, np.ndarray)
+                        and v.dtype.names
+                        and 'count' in v.dtype.names):
+                    v = np.asarray(v['count'], dtype=np.int64)
+                subtree[k] = v
+            if not subtree:
+                continue
+            em = _get_emitter(str(agent_id))
+            em.emit({
+                'table': 'history',
+                'data': {
+                    'agents': {str(agent_id): subtree},
+                    'time': global_t,
+                },
+            })
+
+    # --- run loop: tick-by-tick so we can emit each step --------------
+    # Original code called ``composite.run(max_duration)`` once. That
+    # blocks for the full duration with no opportunity to emit between
+    # ticks — final parquet would be one row at finalize. The
+    # tick-by-tick pattern matches what EcoliSim.run_to_division does
+    # for the lineage path (poll_s=1.0 → one emit per sim-second).
+    POLL_S = 1.0
+    import threading
+    holder: dict = {}
+
+    def _drive():
+        try:
+            _emit_tick()  # initial state row, mirroring lineage emit cadence
+            end_t = (float(composite.state.get('global_time', 0.0))
+                     + float(max_duration))
+            while float(composite.state.get('global_time', 0.0)) < end_t:
+                remaining = end_t - float(composite.state.get('global_time', 0.0))
+                step = min(POLL_S, remaining)
+                composite.run(step)
+                _emit_tick()
+            holder['ok'] = True
+        except BaseException as e:  # noqa: BLE001 — propagate to actor
+            holder['exc'] = e
+
     t0 = time.perf_counter()
-    composite.run(float(max_duration))
+    runner = threading.Thread(target=_drive, daemon=True)
+    runner.start()
+    # Poll loop: log sim_time every HEARTBEAT_SECS of wall clock. Reads
+    # of composite.state['global_time'] race the sim loop's writes but
+    # at worst we see a stale value (no crash) — fine for a heartbeat.
+    HEARTBEAT_SECS = 60.0
+    while runner.is_alive():
+        runner.join(timeout=HEARTBEAT_SECS)
+        if runner.is_alive():
+            gt = composite.state.get('global_time', 0.0)
+            agents = composite.state.get('agents', {})
+            n_cells = len(agents) if isinstance(agents, dict) else 0
+            print(
+                f"[ray-colony] heartbeat: sim_time={gt:.1f}s  "
+                f"cells={n_cells}  wall={time.perf_counter() - t0:.0f}s",
+                flush=True,
+            )
     wall = time.perf_counter() - t0
+    # Flush pending buffers + write per-agent ``_success.pq`` markers.
+    # ParquetEmitter holds up to ``batch_size`` (400) rows in memory
+    # between writes; without finalize, the last partial batch never
+    # reaches S3. Finalize each agent's emitter individually so a
+    # failure for one cell doesn't drop the others.
+    if out_uri and agent_emitters:
+        print(f"[ray-colony] finalizing {len(agent_emitters)} per-cell "
+              f"emitter(s)...", flush=True)
+        for aid, em in agent_emitters.items():
+            try:
+                em.success = 'ok' in holder
+                em.finalize()
+            except Exception as e:
+                print(f"[ray-colony] emitter finalize warning (agent={aid}): {e}",
+                      flush=True)
+    if 'exc' in holder:
+        raise holder['exc']
 
     final_agents = composite.state.get('agents', {})
     return {
@@ -190,6 +365,11 @@ def main():
                  if args.base_seed is not None
                  else int(cfg.get('lineage_seed', cfg.get('base_seed', 0))))
     experiment_id = args.experiment_id or cfg.get('experiment_id')
+    # Out URI for parquet emission. Falls through to None when running
+    # locally with no emitter configured — the actor's emit loop is a
+    # no-op in that case.
+    out_uri = (cfg.get('emitter_arg') or {}).get('out_uri') \
+        or (cfg.get('emitter_arg') or {}).get('out_dir')
 
     # max_duration: explicit (CLI > config) wins. Otherwise auto-derive
     # from target_doublings: one cell cycle ≈ ``CYCLE_TIME`` sim-sec
@@ -239,6 +419,8 @@ def main():
         max_duration=max_duration,
         base_seed=base_seed,
         config_path=args.config,
+        experiment_id=experiment_id,
+        out_uri=out_uri,
     )
     result = ray.get(fut)
     driver_wall = time.perf_counter() - t0

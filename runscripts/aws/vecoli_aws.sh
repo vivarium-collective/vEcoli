@@ -646,12 +646,18 @@ _run_bootstrap_on_head() {
   local session_env="SESSION='$TMUX_SESSION' "
   local sim_data_env=""
   [[ -n "${SIM_DATA_S3_URI:-}" ]] && sim_data_env="SIM_DATA_S3_URI='$SIM_DATA_S3_URI' "
-  # Auto-resolve IMAGE_URI for ray when not set explicitly via env. The
-  # alias's registered image_tag (4th column of aliases.tsv) gets
-  # combined with account_id + region into the full ECR URI that
-  # ec2_cluster_ray.py expects. Ad-hoc env override still wins.
+  # Auto-resolve IMAGE_URI for ray-based deploy modes when not set
+  # explicitly via env. The alias's registered image_tag (4th column of
+  # aliases.tsv) gets combined with account_id + region into the full
+  # ECR URI that ec2_cluster_ray*.py expects. Ad-hoc env override still
+  # wins. ``ray_colony_cluster`` was previously skipped here, falling
+  # through to a hardcoded ``vecoli:v2-comparison-arm64`` default in
+  # bootstrap_head_ray_colony.sh — an x86_64 colony cluster would then
+  # pull the arm64 image and fail at exec with "exec format error".
   local resolved_image_uri="${IMAGE_URI:-}"
-  if [[ -z "$resolved_image_uri" && "$DEPLOY_MODE" == "ray_cluster" ]]; then
+  if [[ -z "$resolved_image_uri" ]] \
+       && [[ "$DEPLOY_MODE" == "ray_cluster" \
+              || "$DEPLOY_MODE" == "ray_colony_cluster" ]]; then
     local _tag; _tag=$(_alias_to_image "$STATE_KEY")
     if [[ -n "$_tag" ]]; then
       resolved_image_uri=$(_ecr_uri_for_tag "$_tag")
@@ -1597,12 +1603,17 @@ ns_run_launch() {
 
   # Kill any stale tmux session for this variant before re-launching
   # (only on fresh launch — resume reattaches the running session).
+  # For ray/ray_colony, also terminate the prior cluster's EC2s — tmux
+  # kill SIGKILLs python before ``with cluster:`` __exit__ runs, so
+  # without this the cluster head + workers from the previous launch
+  # keep running (and cost $$).
   if (( resume == 0 )); then
     ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no "ec2-user@$dns" \
       "tmux has-session -t '$TMUX_SESSION' 2>/dev/null \
          && (echo '  killing stale tmux session: $TMUX_SESSION'; \
              tmux kill-session -t '$TMUX_SESSION') \
          || true"
+    _terminate_ray_cluster_for_alias "$dns"
   fi
 
   _run_bootstrap_on_head "$extra_env"
@@ -1626,10 +1637,54 @@ ns_run_id() {
     echo "$EXP_ID  (no sidecar — using config base; ``run launch $STATE_KEY`` to assign)"
   fi
 }
+# Terminate the most-recent Ray cluster spawned by this alias's driver.
+# The driver prints ``→ cluster_id=vecoli-ray-<timestamp>`` to its
+# workflow log on first bringup; we grep the latest such line, then
+# terminate every EC2 instance tagged ``process-bigraph-cluster=<id>``.
+# Safe for non-ray aliases: returns silently if no cluster_id is found.
+#
+# When the driver is killed via ``tmux kill-session``, Python is
+# SIGKILLed before the ``with cluster:`` context manager can run its
+# __exit__ → the head/worker EC2s leak. This is the recovery path.
+_terminate_ray_cluster_for_alias() {
+  local dns="$1"
+  # Only meaningful for the ray family.
+  case "$DEPLOY_MODE" in
+    ray_cluster|ray_colony_cluster) ;;
+    *) return 0 ;;
+  esac
+  local log="\$HOME/${TMUX_SESSION}_workflow.log"
+  local cluster_id
+  cluster_id=$(ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no \
+      "ec2-user@$dns" "grep -oE 'cluster_id=vecoli-ray-[0-9]+' $log 2>/dev/null | tail -1 | sed 's/^cluster_id=//'" \
+      2>/dev/null | tr -d '\r')
+  if [[ -z "$cluster_id" ]]; then
+    echo "  (no cluster_id found in $log on head — nothing to terminate)"
+    return 0
+  fi
+  echo "Terminating Ray cluster instances tagged process-bigraph-cluster=$cluster_id..."
+  local ids
+  ids=$(aws_cli ec2 describe-instances \
+        --filters "Name=tag:process-bigraph-cluster,Values=$cluster_id" \
+                  "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+        --query 'Reservations[].Instances[].InstanceId' --output text 2>/dev/null \
+        | tr '\t\r' '\n' | awk 'NF')
+  if [[ -z "$ids" ]]; then
+    echo "  (no live instances for cluster_id=$cluster_id)"
+    return 0
+  fi
+  # shellcheck disable=SC2086
+  aws_cli ec2 terminate-instances --instance-ids $ids >/dev/null
+  for id in $ids; do echo "  terminated $id"; done
+}
+
 ns_run_cancel() {
   local dns; dns=$(require_running_dns)
   echo "Killing tmux session '$TMUX_SESSION' on $dns..."
   ssh -i "$KEY_FILE" "ec2-user@$dns" "tmux kill-session -t $TMUX_SESSION 2>/dev/null || echo '  (no session to kill)'"
+  # Ray/colony: also nuke the cluster EC2s the driver spawned. tmux
+  # kill SIGKILLs python before its ``with cluster:`` __exit__ can run.
+  _terminate_ray_cluster_for_alias "$dns"
   if [[ -n "$QUEUE" ]]; then
     echo "Canceling RUNNING + RUNNABLE Batch jobs in queue $QUEUE..."
     for s in RUNNING RUNNABLE STARTING; do
@@ -2227,6 +2282,67 @@ fi"
       fi
       ;;
   esac
+}
+
+# Render a runtime curve from the alias's driver workflow log.
+#
+# Parses the ``[ray-colony] heartbeat: sim_time=Xs cells=N wall=Ws``
+# lines that run_colony_ray.py emits each minute of wall-clock and
+# plots sim-seconds-per-wall-second vs sim_time (top panel) alongside
+# cell count (bottom panel), with vertical markers at observed
+# divisions. Useful for diagnosing per-cell slowdown as a colony grows.
+#
+# Args (optional):
+#   -o PATH   output PNG path (default: out/colony_runtime_<exp_id>.png)
+ns_run_timing() {
+  local out_path=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -o|--output) out_path="$2"; shift 2 ;;
+      -h|--help)
+        cat >&2 <<USAGE
+usage: $(basename "$0") run timing <alias> [-o path/to/plot.png]
+
+Fetches the alias's driver workflow log from its head node, parses the
+heartbeat lines, and renders a runtime curve PNG locally. Works while
+the run is in flight (heartbeats are written as the sim advances) and
+after completion.
+USAGE
+        return 0 ;;
+      *) echo "run timing: unknown arg '$1'" >&2; return 1 ;;
+    esac
+  done
+  [[ -z "$out_path" ]] && out_path="out/colony_runtime_${EXP_ID}.png"
+
+  local dns; dns=$(require_running_dns)
+  local tmpdir; tmpdir=$(mktemp -d)
+  # Clean up tmpdir even on failure paths. ``RETURN`` traps in bash are
+  # global (not function-scoped), so this fires again when the outer
+  # _dispatch_variant returns — at which point ``tmpdir`` is no longer
+  # in scope. ``${tmpdir:-}`` makes the second firing a no-op rm of ""
+  # rather than tripping ``set -u``.
+  trap 'rm -rf "${tmpdir:-}"' RETURN
+
+  echo "Fetching workflow log from $dns:~/${TMUX_SESSION}_workflow.log..."
+  scp -i "$KEY_FILE" -o StrictHostKeyChecking=no \
+      "ec2-user@$dns:~/${TMUX_SESSION}_workflow.log" \
+      "$tmpdir/log" 2>/dev/null || {
+    echo "  no log at ~/${TMUX_SESSION}_workflow.log on head" >&2
+    echo "  (alias has no run yet, or the driver hasn't logged anything)" >&2
+    return 1
+  }
+
+  mkdir -p "$(dirname "$REPO_ROOT/$out_path")"
+  if [[ -x "$REPO_ROOT/.venv/bin/python" ]]; then
+    PY=( "$REPO_ROOT/.venv/bin/python" )
+  else
+    PY=( uv run --no-sync python )
+  fi
+  "${PY[@]}" "$REPO_ROOT/runscripts/plot_colony_runtime.py" \
+    --log "$tmpdir/log" \
+    -o "$REPO_ROOT/$out_path" \
+    --title "$STATE_KEY  ${EXP_ID}"
+  echo "Plot: $REPO_ROOT/$out_path"
 }
 
 # --- 8. ``cache`` namespace -------------------------------------------------
@@ -3296,6 +3412,12 @@ Usage: $(basename "$0") run <subcmd> <alias> [args]
                        or fails. Auto-prints a head-state diagnostic when
                        neither the workflow log nor the bootstrap log is on
                        the head (see ``diag`` below).
+  timing <alias> [-o PATH]
+                       parse heartbeat lines in the driver workflow log
+                       and render a runtime curve PNG (sim/wall rate +
+                       cell count vs sim_time, with division markers).
+                       Works mid-run and post-run. Default output:
+                       out/colony_runtime_<exp_id>.png.
   diag   <alias>       head-state diagnostic: ~/ contents, tmux ls, running
                        procs, uptime (compare to experiment launch — newer
                        uptime means the head was replaced), disk, dmesg OOM,
@@ -3474,6 +3596,7 @@ case "$cmd" in
       coverage)         _dispatch_variant ns_run_coverage "$@" ;;
       tail)             _dispatch_variant ns_run_tail   "$@" ;;
       log)              _dispatch_variant ns_run_log    "$@" ;;
+      timing)           _dispatch_variant ns_run_timing "$@" ;;
       diag)             _dispatch_variant ns_run_diag   "$@" ;;
       help|-h|--help)   _help_run ;;
       *) echo "run: unknown subcmd '$sub'" >&2; _help_run >&2; exit 1 ;;

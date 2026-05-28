@@ -206,6 +206,13 @@ if tmux has-session -t "$SESSION" 2>/dev/null; then
 fi
 [[ -n "${EXPERIMENT_ID:-}" ]] && echo "Using CLI-supplied experiment_id=${EXPERIMENT_ID}"
 LOG_FILE="\$HOME/${SESSION}_workflow.log"
+# python -u and PYTHONUNBUFFERED both disable stdout block-buffering
+# (set both because tee on the right side of the pipe means stdout is
+# a pipe → block-buffered by default → driver prints sit in a 4-8KB
+# buffer for minutes before ever reaching the log file). Without this
+# the streaming-log lines from cluster.exec_blocking_on_head
+# (process_bigraph's "exp│ ..." forwarder) are invisible until the
+# buffer fills, which on a quiet workload looks like the driver hung.
 tmux new-session -d -s "$SESSION" \
   "cd $VECOLI_DIR && source .venv/bin/activate && \
    IMAGE_URI='$IMAGE_URI' \
@@ -213,7 +220,8 @@ tmux new-session -d -s "$SESSION" \
    SIM_DATA_URI='$SIM_DATA_S3_URI' \
    CONFIG_RELPATH='$CONFIG_RELPATH' \
    EXPERIMENT_ID='${EXPERIMENT_ID:-}' \
-   python runscripts/aws/ec2_cluster_ray_colony.py \
+   PYTHONUNBUFFERED=1 \
+   python -u runscripts/aws/ec2_cluster_ray_colony.py \
      2>&1 | tee ${LOG_FILE}"
 echo "Ray driver launched (session=$SESSION, log=~/${SESSION}_workflow.log)."
 echo "Driver provisions the cluster, runs the experiment via SSM, then tears down."

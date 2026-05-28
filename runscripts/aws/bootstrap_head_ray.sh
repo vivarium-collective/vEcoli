@@ -206,6 +206,10 @@ if tmux has-session -t "$SESSION" 2>/dev/null; then
 fi
 [[ -n "${EXPERIMENT_ID:-}" ]] && echo "Using CLI-supplied experiment_id=${EXPERIMENT_ID}"
 LOG_FILE="\$HOME/${SESSION}_workflow.log"
+# python -u + PYTHONUNBUFFERED so the streaming-log lines from
+# cluster.exec_blocking_on_head reach the tee'd LOG_FILE promptly
+# rather than waiting for stdout's block buffer to fill. See the
+# sibling bootstrap_head_ray_colony.sh for the longer rationale.
 tmux new-session -d -s "$SESSION" \
   "cd $VECOLI_DIR && source .venv/bin/activate && \
    IMAGE_URI='$IMAGE_URI' \
@@ -213,7 +217,8 @@ tmux new-session -d -s "$SESSION" \
    SIM_DATA_URI='$SIM_DATA_S3_URI' \
    CONFIG_RELPATH='$CONFIG_RELPATH' \
    EXPERIMENT_ID='${EXPERIMENT_ID:-}' \
-   python runscripts/aws/ec2_cluster_ray.py \
+   PYTHONUNBUFFERED=1 \
+   python -u runscripts/aws/ec2_cluster_ray.py \
      2>&1 | tee ${LOG_FILE}"
 echo "Ray driver launched (session=$SESSION, log=~/${SESSION}_workflow.log)."
 echo "Driver provisions the cluster, runs the experiment via SSM, then tears down."
