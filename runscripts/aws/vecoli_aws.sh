@@ -750,6 +750,67 @@ ns_head_list() {
     --query 'Reservations[].Instances[].[InstanceId,State.Name,LaunchTime,PublicDnsName,InstanceType]' \
     --output table
 }
+
+# Cross-alias listing of every vEcoli-owned EC2. Filter Name=vecoli-*
+# captures BOTH:
+#   - driver heads      (vecoli-{alias}-head, e.g. vecoli-v2-ray-head)
+#   - Ray cluster nodes (vecoli-ray-{timestamp}-{head,worker} since
+#                        ec2_cluster_ray.py defaults cluster_id to
+#                        vecoli-ray-* — confirmed at line 229-230)
+# Safe against spatio-flux (sf-* cluster_id) and any non-vEcoli
+# instance in the account.
+#
+# Output (tab-separated, one row per instance):
+#   InstanceId<TAB>Name<TAB>State<TAB>InstanceType<TAB>LaunchTime
+_list_vecoli_instances() {
+  aws_cli ec2 describe-instances \
+    --filters "Name=tag:Name,Values=vecoli-*" \
+              "Name=instance-state-name,Values=running,pending,stopping,stopped" \
+    --query 'Reservations[].Instances[].[InstanceId,Tags[?Key==`Name`]|[0].Value,State.Name,InstanceType,LaunchTime]' \
+    --output text 2>/dev/null
+}
+
+# Render rows from ``_list_vecoli_instances`` grouped by category.
+# Categories (matched on Name tag):
+#   driver-head   vecoli-{alias}-head       (per-alias workflow driver)
+#   ray-cluster   vecoli-ray-<digits>-*     (EC2SSMRayCluster head/workers)
+#   other         anything else (vecoli-*)  (unexpected — investigate)
+# Prints per-category subheading + count and a final total. Empty
+# stdin → "(none)" line + total 0.
+_print_vecoli_instances() {
+  awk -F'\t' '
+    BEGIN { ORDER[1]="driver-head"; ORDER[2]="ray-cluster"; ORDER[3]="other"; N_CAT=3 }
+    NF == 0 { next }
+    {
+      name=$2
+      if (name ~ /^vecoli-ray-[0-9]+-(head|worker)$/) cat = "ray-cluster"
+      else if (name ~ /-head$/)                       cat = "driver-head"
+      else                                             cat = "other"
+      rows[cat] = rows[cat] sprintf("  %-22s  %-32s  %-10s  %-14s  %s\n", $1, name, $3, $4, $5)
+      counts[cat]++
+      total++
+    }
+    END {
+      if (total == 0) { print "  (none)"; exit }
+      for (i = 1; i <= N_CAT; i++) {
+        c = ORDER[i]
+        if (!counts[c]) continue
+        printf "── %s (%d) ──\n", c, counts[c]
+        printf "  %-22s  %-32s  %-10s  %-14s  %s\n", "INSTANCE-ID", "NAME", "STATE", "TYPE", "LAUNCHED"
+        printf "%s", rows[c]
+      }
+      printf "Total: %d instance(s).\n", total
+    }
+  '
+}
+
+ns_head_list_all() {
+  # Read-only dry-run of what ``head terminate-all`` would target.
+  # Use this BEFORE terminate-all when you want to see scope first
+  # (e.g., are there orphaned Ray cluster workers from a dead driver?).
+  echo "All vEcoli-owned EC2 (Name=vecoli-*, any state):"
+  _list_vecoli_instances | _print_vecoli_instances
+}
 ns_head_dedupe() {
   # Terminate every running/pending instance tagged with HEAD_NAME
   # EXCEPT the one with the earliest LaunchTime (the original — it's
@@ -1031,11 +1092,7 @@ ns_head_terminate_all() {
     esac
   done
 
-  local rows; rows=$(aws_cli ec2 describe-instances \
-    --filters "Name=tag:Name,Values=vecoli-*" \
-              "Name=instance-state-name,Values=running,pending,stopping,stopped" \
-    --query 'Reservations[].Instances[].[InstanceId,Tags[?Key==`Name`]|[0].Value,State.Name]' \
-    --output text 2>/dev/null)
+  local rows; rows=$(_list_vecoli_instances)
 
   # Discover unique Batch queues from the alias registry. Multiple
   # aliases often share a queue (v1 and v2 both use vecoli-arm), so
@@ -1055,15 +1112,15 @@ ns_head_terminate_all() {
   fi
 
   if [[ -z "$rows" && -z "$queues" ]]; then
-    echo "Nothing to clean up: no vecoli-* heads, no Batch queues registered."
+    echo "Nothing to clean up: no vecoli-* instances, no Batch queues registered."
     return 0
   fi
 
   if [[ -n "$rows" ]]; then
-    echo "Heads matching vecoli-*:"
-    echo "$rows" | awk '{ printf "  %-22s  %-30s  %s\n", $1, $2, $3 }'
+    echo "vEcoli-owned EC2 to terminate (Name=vecoli-*):"
+    echo "$rows" | _print_vecoli_instances
   else
-    echo "No vecoli-* heads currently provisioned."
+    echo "No vecoli-* instances currently provisioned."
   fi
   if [[ -n "$queues" ]]; then
     echo
@@ -1108,7 +1165,7 @@ ns_head_terminate_all() {
   if [[ -n "$rows" ]]; then
     echo
     local ids; ids=$(echo "$rows" | awk '{print $1}' | tr '\n' ' ')
-    echo "Terminating EC2 heads..."
+    echo "Terminating EC2 instances (heads + any Ray cluster workers)..."
     # shellcheck disable=SC2086
     aws_cli ec2 terminate-instances --instance-ids $ids >/dev/null
     echo "Waiting for terminated state..."
@@ -1862,6 +1919,80 @@ ns_run_tail() {
      [[ -f \$F ]] || F=\$HOME/v2_workflow.log; \
      tail -f \$F | sed -u 's/\\x1b\\[[0-9;]*[a-zA-Z]//g; s/\\x1b\\][0-9];[^\\x07]*\\x07//g'"
 }
+
+# Head-state diagnostic script body — printed to stdout, intended to
+# be fed as the remote command for an ssh call. Used by ``run diag``
+# directly and inlined by ``run log`` when neither the workflow log
+# nor the bootstrap log exists (the situation where normal log paths
+# are dry and you need to know what's actually on the instance).
+#
+# What each section answers:
+#   whoami/HOME/pwd    — rule out path-resolution surprises (logs in
+#                        a different $HOME, ec2-user vs root)
+#   ~/ contents        — what files ARE on the head (we expect
+#                        ${TMUX_SESSION}_workflow.log and
+#                        bootstrap_${TMUX_SESSION}.log)
+#   tmux ls            — session really gone vs. hidden by a name typo
+#   running procs      — leftover driver / ray / tmux processes that
+#                        should have cleaned up after workflow end
+#   uptime -s          — when THIS instance came up. If after the
+#                        experiment launch timestamp, this head is a
+#                        replacement and the original head (with the
+#                        real logs) is gone.
+#   df -h              — full disk wipes tee'd writes silently
+#   dmesg OOM          — kernel-killed processes (driver runs in tmux
+#                        with no memory cgroup; a Python OOM kills tee)
+#   cloud-init-output  — head's own startup log (bootstrap chatter
+#                        before the script's own logfile is open)
+#   /var/log/messages  — systemd / kernel errors
+#
+# TMUX_SESSION expands LOCALLY (heredoc with unquoted EOF) so printed
+# filenames match the alias. ``\$HOME`` etc. are escaped so they
+# expand REMOTELY.
+_head_diag_remote_script() {
+  cat <<DIAG_EOF
+echo '=== whoami / HOME / pwd ==='
+whoami; echo HOME=\$HOME; pwd
+echo
+echo '=== ~/ contents (looking for ${TMUX_SESSION}_workflow.log, bootstrap_${TMUX_SESSION}.log) ==='
+ls -la \$HOME/ 2>/dev/null | head -40
+echo
+echo '=== tmux sessions ==='
+tmux ls 2>&1 || true
+echo
+echo '=== running python/ray/ec2_cluster/tmux procs ==='
+ps -ef | grep -E 'python|ray|ec2_cluster|tmux' | grep -v grep | head -20 || true
+echo
+echo '=== instance uptime -s (compare to experiment launch timestamp) ==='
+uptime -s
+echo
+echo '=== disk usage ==='
+df -h \$HOME /tmp /var/log 2>/dev/null | head -10 || true
+echo
+echo '=== dmesg: OOM kills ==='
+sudo dmesg 2>/dev/null | grep -iE 'killed process|out of memory|oom' | tail -5 || echo '  (none)'
+echo
+echo '=== cloud-init-output tail (when bootstrap ran on this instance) ==='
+sudo tail -20 /var/log/cloud-init-output.log 2>/dev/null || echo '  (no cloud-init-output)'
+echo
+echo '=== /var/log/messages errors (last 10) ==='
+sudo grep -iE 'error|fail|kill' /var/log/messages 2>/dev/null | tail -10 || echo '  (no /var/log/messages access)'
+DIAG_EOF
+}
+
+# Head-state diagnostic. Useful when ``run log`` finds nothing —
+# auto-invoked from ``run log`` in that case; also callable directly.
+ns_run_diag() {
+  local dns; dns=$(get_running_dns)
+  if [[ -z "$dns" || "$dns" == "None" ]]; then
+    echo "(head $HEAD_NAME not running — nothing to diagnose)"
+    return 0
+  fi
+  echo "=== Head-state diagnostic on $dns (alias=$STATE_KEY, session=$TMUX_SESSION) ==="
+  ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no "ec2-user@$dns" \
+    "$(_head_diag_remote_script)" 2>/dev/null || true
+}
+
 ns_run_log() {
   # Pull both the cluster's experiment log (uploaded to S3 at
   # workflow end) and the head node's driver log (still on the
@@ -1889,22 +2020,32 @@ ns_run_log() {
     local strip_ansi="sed -u 's/\\x1b\\[[0-9;]*[a-zA-Z]//g; s/\\x1b\\][0-9];[^\\x07]*\\x07//g'"
     local reader="cat"
     [[ -n "$n" ]] && reader="tail -n $n"
-    local cmd="WF=\$HOME/${TMUX_SESSION}_workflow.log; \
-      [[ -f \$WF ]] || WF=\$HOME/v2_workflow.log; \
-      if [[ -f \$WF ]]; then \
-        $reader \$WF | $strip_ansi; \
-      else \
-        BL=\$HOME/bootstrap_${TMUX_SESSION}.log; \
-        if [[ -f \$BL ]]; then \
-          echo '(no workflow log — bootstrap never reached tmux launch.'; \
-          echo ' showing bootstrap log instead: ~/bootstrap_${TMUX_SESSION}.log)'; \
-          echo; \
-          $reader \$BL | $strip_ansi; \
-        else \
-          echo 'no driver log on head (and no bootstrap log either —'; \
-          echo 'either head is fresh or bootstrap died before redirect setup)'; \
-        fi; \
-      fi"
+    # Inline the head-state diagnostic in the no-logs branch so a
+    # single ssh call reports both "nothing here" AND the state
+    # needed to figure out why (replacement head, OOM kill, full
+    # disk, etc.). One ssh roundtrip keeps the common log-found
+    # path cheap.
+    local diag_script; diag_script=$(_head_diag_remote_script)
+    local cmd
+    cmd="WF=\$HOME/${TMUX_SESSION}_workflow.log
+[[ -f \$WF ]] || WF=\$HOME/v2_workflow.log
+if [[ -f \$WF ]]; then
+  $reader \$WF | $strip_ansi
+else
+  BL=\$HOME/bootstrap_${TMUX_SESSION}.log
+  if [[ -f \$BL ]]; then
+    echo '(no workflow log — bootstrap never reached tmux launch.'
+    echo ' showing bootstrap log instead: ~/bootstrap_${TMUX_SESSION}.log)'
+    echo
+    $reader \$BL | $strip_ansi
+  else
+    echo 'no driver log on head (and no bootstrap log either —'
+    echo 'either head is fresh or bootstrap died before redirect setup)'
+    echo
+    echo '=== Head-state diagnostic ==='
+$diag_script
+  fi
+fi"
     ssh -i "$KEY_FILE" "ec2-user@$dns" "$cmd" || true
   else
     echo "(head $HEAD_NAME not running — skipping driver log)"
@@ -2693,6 +2834,11 @@ Usage: $(basename "$0") head <subcmd> <alias> [args]
                        VECOLI_RAY_SUBNET env to override default subnet.
   list <alias>         show every non-terminated EC2 with this alias's
                        HEAD_NAME tag (surfaces dupes).
+  list-all             show every vEcoli-owned EC2 (Name=vecoli-*),
+                       grouped by category: driver heads / Ray cluster
+                       (head + workers) / other. Read-only — use before
+                       ``terminate-all`` to preview scope. Filter is
+                       safe against spatio-flux (sf-*) and other tenants.
   dedupe <alias>       keep oldest running head, terminate the rest.
   sync <alias> [-c|--container]
                        rsync local repo → ~/vEcoli on head (skips
@@ -2710,11 +2856,14 @@ Usage: $(basename "$0") head <subcmd> <alias> [args]
 
   terminate-all [--cancel-jobs]
                        NUKE every EC2 tagged vecoli-* (no alias arg, confirmed).
+                       Covers driver heads AND orphaned Ray cluster instances
+                       (workers + cluster head) since both are named vecoli-*.
+                       Run ``list-all`` first to preview the scope.
                        --cancel-jobs ALSO terminates active Batch jobs across
                        every queue in the alias registry (jobs run on
                        Batch-managed compute and outlive their heads).
                        Does NOT touch: Batch queue, ECR images, S3 outputs,
-                       sidecars, alias registry.
+                       sidecars, alias registry, non-vecoli instances.
   help                 this screen
 EOF
 }
@@ -2783,7 +2932,16 @@ Usage: $(basename "$0") run <subcmd> <alias> [args]
                        print driver log + variant-specific cluster log
                        (lineage_ray.log for ray; nextflow trace + failed-task
                        CloudWatch streams for batch). Use after a run finishes
-                       or fails.
+                       or fails. Auto-prints a head-state diagnostic when
+                       neither the workflow log nor the bootstrap log is on
+                       the head (see ``diag`` below).
+  diag   <alias>       head-state diagnostic: ~/ contents, tmux ls, running
+                       procs, uptime (compare to experiment launch — newer
+                       uptime means the head was replaced), disk, dmesg OOM,
+                       cloud-init-output, /var/log/messages errors. Auto-fires
+                       from ``run log`` when no logs are present; run it
+                       directly when you want the state without trying to
+                       read a log first.
   help                 this screen
 EOF
 }
@@ -2900,6 +3058,7 @@ case "$cmd" in
       terminate)        _dispatch_variant ns_head_terminate     "$@" ;;
       terminate-all)    ns_head_terminate_all "$@" ;;
       list)             _dispatch_variant ns_head_list       "$@" ;;
+      list-all)         ns_head_list_all "$@" ;;
       dedupe)           _dispatch_variant ns_head_dedupe     "$@" ;;
       sync)             _dispatch_variant ns_head_sync       "$@" ;;
       rebuild)          _dispatch_variant ns_head_rebuild    "$@" ;;
@@ -2938,6 +3097,7 @@ case "$cmd" in
       coverage)         _dispatch_variant ns_run_coverage "$@" ;;
       tail)             _dispatch_variant ns_run_tail   "$@" ;;
       log)              _dispatch_variant ns_run_log    "$@" ;;
+      diag)             _dispatch_variant ns_run_diag   "$@" ;;
       help|-h|--help)   _help_run ;;
       *) echo "run: unknown subcmd '$sub'" >&2; _help_run >&2; exit 1 ;;
     esac

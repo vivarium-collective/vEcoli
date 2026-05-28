@@ -51,7 +51,8 @@ import time
 
 from configs import CONFIG_DIR_PATH
 from ecoli.library.bigraph_types import ECOLI_TYPES
-from ecoli.composites.ecoli_cell_agent import EcoliCellAgent
+from ecoli.composites.ecoli_cell_agent import (
+    EcoliCellAgent, set_shared_sim_data)
 
 
 def build_cell_agent(agent_id, lineage_seed, sim_data_path,
@@ -189,6 +190,22 @@ def main():
 
     sim_config = load_sim_config(args.config)
     sim_config['sim_data_path'] = sim_data_path
+
+    # Pre-load sim_data ONCE and register it module-globally so every
+    # EcoliCellAgent (mother + all daughters) shares one in-memory
+    # Metabolism runtime state — avoids per-cell pickle reload that
+    # caused FBA GLP_NOFEAS in daughters (mother's bulk produced
+    # against state A, daughter FBA against fresh-load state A').
+    from ecoli.library.sim_data import LoadSimData
+    print('[colony] pre-loading sim_data once for shared use...',
+          flush=True)
+    t0 = time.perf_counter()
+    base_kwargs = dict(sim_config)
+    base_kwargs['seed'] = args.base_seed
+    base_lsd = LoadSimData(**base_kwargs)
+    set_shared_sim_data(base_lsd.sim_data)
+    print(f'[colony] sim_data loaded in {time.perf_counter()-t0:.1f}s',
+          flush=True)
 
     state = build_initial_state(
         sim_data_path=sim_data_path,
