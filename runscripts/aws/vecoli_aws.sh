@@ -2938,6 +2938,7 @@ ns_compare_report() {
   local out_path="${VECOLI_REPORT_OUT:-}"
   local no_fetch=0
   local force=0
+  local fetch_analyses=1
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --gens)        gens="$2"; shift 2 ;;
@@ -2948,6 +2949,7 @@ ns_compare_report() {
       --engine-cost) engine_cost="$2"; shift 2 ;;
       --out)         out_path="$2"; shift 2 ;;
       --no-history)  include_history=0; shift ;;
+      --no-analyses) fetch_analyses=0; shift ;;
       --no-fetch|--cached) no_fetch=1; shift ;;
       --force|--no-validate) force=1; shift ;;
       -h|--help)
@@ -3008,6 +3010,7 @@ USAGE
     V1_ID='$v1_id' V2_ID='$v2_id' SEEDS='$seeds' GENS='$gens' \
     EXTRA_IDS='$extra_ids' ENGINE_COST='$engine_cost' \
     INCLUDE_HISTORY='$include_history' \
+    FETCH_ANALYSES='$fetch_analyses' \
     REPORT_OUT='$out_path' \
     NO_FETCH='$no_fetch' \
     BUCKET='$BUCKET' PREFIX='${PREFIX%%/*}' \
@@ -3473,7 +3476,17 @@ case "$cmd" in
         _use_variant compare || exit 1
         ns_compare_analyze "$@"
         ;;
-      report)           _dispatch_with_default_alias ns_compare_report      compare "$@" ;;
+      report)
+        # Sub-subcommands: ``report analysis`` (fast plots-only) and
+        # ``report diff`` (parity matrices only). Bare ``report`` does
+        # both, matching the original behavior. Any other first arg
+        # (incl. an explicit ``--`` flag) falls through to the default.
+        case "${1:-}" in
+          analysis) shift; _dispatch_with_default_alias ns_compare_report compare --no-history "$@" ;;
+          diff)     shift; _dispatch_with_default_alias ns_compare_report compare --no-analyses "$@" ;;
+          *)               _dispatch_with_default_alias ns_compare_report compare "$@" ;;
+        esac
+        ;;
       export)           _dispatch_with_default_alias ns_compare_export      compare "$@" ;;
       bootstrap)        _dispatch_with_default_alias ns_compare_bootstrap   compare "$@" ;;
       help|-h|--help)   _help_compare ;;

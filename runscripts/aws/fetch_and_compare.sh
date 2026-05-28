@@ -38,6 +38,15 @@ EXTRA_IDS="${EXTRA_IDS:-}"
 # Example:
 # ENGINE_COST="mp=single:c7g.metal:1200,ray=cluster:t4g.large:c7g.metal:4:800"
 ENGINE_COST="${ENGINE_COST:-}"
+# Per-step toggles so ``compare report analysis``/``diff`` can split
+# the workflow:
+#   FETCH_ANALYSES=1  pull the per-experiment analyses/ tree (small HTML/TSV
+#                     plot artifacts the report renders to PNG).
+#   INCLUDE_HISTORY=1 compute the all-timestep bulk parity matrix
+#                     (~30-60 min — pulls history parquet per cell).
+# Trace CSV + nextflow workdir text files are always pulled (cheap +
+# needed by the runtime/cost/division-time tables regardless of mode).
+FETCH_ANALYSES="${FETCH_ANALYSES:-1}"
 
 # Resolve repo root from this script's location (works whether invoked from
 # repo root or via absolute path).
@@ -118,8 +127,14 @@ for exp in "${V1_ID}" "${V2_ID}" ${extra_ids_bare}; do
   fi
   echo "=== Fetching ${exp} ==="
 
-  # 1. Analyses: small HTML/TSV plots, the report renders these to PNG
-  aws_sync "${base_remote}/analyses/" "${base_local}/analyses/"
+  # 1. Analyses: small HTML/TSV plots, the report renders these to PNG.
+  # Skipped in ``diff`` mode (FETCH_ANALYSES=0) where the user only
+  # wants the parity matrix re-computed and trusts the cached plots.
+  if [[ "${FETCH_ANALYSES}" == "1" ]]; then
+    aws_sync "${base_remote}/analyses/" "${base_local}/analyses/"
+  else
+    echo "  (skipping analyses fetch — FETCH_ANALYSES=0)"
+  fi
 
   # 2. Nextflow workdirs: only the text files used for division-time scraping
   aws_sync "${base_remote}/nextflow/nextflow_workdirs/" \
