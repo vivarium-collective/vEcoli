@@ -108,7 +108,18 @@ class NetworkFlowGLPK(NetworkFlowProblemBase):
         self._lp = glp.glp_create_prob()
         self._smcp = glp.glp_smcp()  # simplex solver control parameters
         glp.glp_init_smcp(self._smcp)
-        self._smcp.msg_lev = glp.GLP_MSG_ERR
+        # GLP_MSG_OFF: GLPK's "numerical instability (primal simplex,
+        # phase II)" notes are informational — the solver refactorizes
+        # and recovers, returning a valid solution. They have always
+        # been noisy on FBA models; at scale (e.g. Ray actors fanned
+        # out across cluster workers) the stderr writes themselves
+        # dominate wall time as they get forwarded through Ray's log
+        # capture → SSM stream → terminal. Real solver failures still
+        # surface: non-OPT status raises ``RuntimeError`` at the end
+        # of ``solve()``, so we don't lose actionable diagnostics by
+        # silencing the chatter. Callers that want the noisy output
+        # for debugging can set ``self.message_level = MessageLevel.ERR``.
+        self._smcp.msg_lev = glp.GLP_MSG_OFF
         self.simplex_iteration_limit = 10000
         self._n_vars = 0
         self._n_eq_constraints = 0

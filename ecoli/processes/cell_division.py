@@ -354,8 +354,15 @@ class CompositeDivision(Division):
         # in flat mode) must be readable so we can pass it through
         # ``core.divide(cell_schema, mother_state)`` and into the
         # daughter wrap template. Caller wires this to ``('..',)``.
+        #
+        # ``maybe[node]`` (rather than ``tree[node]``) is the loosest
+        # acceptable schema — ``tree[node]`` triggers a recursive
+        # serialization walk that converts the cell tree's numpy
+        # struct array fields (bulk, unique molecules) into nested
+        # dicts, breaking everything downstream that does
+        # ``bulk['id']`` numpy column access.
         if self.parameters.get('daughter_wrap_template'):
-            result['mother_state'] = 'tree[node]'
+            result['mother_state'] = 'maybe[node]'
         return result
 
     def __init__(self, parameters=None):
@@ -493,11 +500,45 @@ class CompositeDivision(Division):
                     daughter_state = (
                         _path_copy_merge(baseline, override)
                         if override else baseline)
+                    # DEBUG: dump daughter bulk shape before wrap
+                    import sys as _sys
+                    _sys.stderr.write(
+                        f'[divide-debug] daughter={daughter_id} '
+                        f'state top keys: {sorted(daughter_state.keys())[:8]}\n')
+                    bulk = daughter_state.get('bulk')
+                    _sys.stderr.write(
+                        f'[divide-debug] daughter={daughter_id} '
+                        f'bulk type={type(bulk).__name__} '
+                        f'has_dtype={hasattr(bulk, "dtype")}\n')
+                    if hasattr(bulk, 'dtype'):
+                        _sys.stderr.write(
+                            f'[divide-debug]   bulk.dtype.names={bulk.dtype.names}\n')
+                    # Compare to mother
+                    mom_bulk = mother_state.get('bulk')
+                    _sys.stderr.write(
+                        f'[divide-debug] mother bulk type={type(mom_bulk).__name__} '
+                        f'has_dtype={hasattr(mom_bulk, "dtype")}\n')
+                    if hasattr(mom_bulk, 'dtype'):
+                        _sys.stderr.write(
+                            f'[divide-debug]   mother bulk.dtype.names={mom_bulk.dtype.names}\n')
+                    _sys.stderr.flush()
                     # Substitute daughter state into the wrap template's
                     # config.state slot. deepcopy so we don't mutate
                     # the shared template between daughters.
+                    #
+                    # Wrap under ``{agents: {daughter_id: daughter_state}}``
+                    # so the daughter Composite's state has the same
+                    # wrapped-mode shape as the mother: wires inside
+                    # the cell tree were designed for ``agents.<id>``
+                    # paths (e.g. division.outputs.agents wires to
+                    # ``('..', '..', 'agents')``). Without the wrap,
+                    # daughter state would be flat at root and these
+                    # wires would resolve to wrong / out-of-bounds
+                    # paths.
                     wrapped = deepcopy(wrap_template)
-                    wrapped.setdefault('config', {})['state'] = daughter_state
+                    wrapped.setdefault('config', {})['state'] = {
+                        'agents': {daughter_id: daughter_state},
+                    }
                     daughter_add_entries.append(
                         (daughter_id, {'cell': wrapped}))
 

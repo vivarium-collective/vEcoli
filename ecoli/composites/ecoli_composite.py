@@ -362,8 +362,21 @@ def build_ecoli_document(core, sim_config, load_sim_data=None, flat=False):
         # Flat mode: caller is wrapping the cell as a Composite-as-
         # Process and supplies its own agents-map nesting at the
         # outer level. Return cell_state directly.
-        return cell_state
-    return {'agents': {agent_id: cell_state}}
+        result = cell_state
+    else:
+        result = {'agents': {agent_id: cell_state}}
+
+    # Cell-as-Composite mode: add the dedicated ``divide_emit`` slot
+    # where CompositeDivision routes its _add/_remove sentinels.
+    # Typed loosely as ``map[node]`` so divide events of any daughter
+    # shape land without schema fight. The cell-Composite's bridge
+    # output wires here, so only divide events (not every inner
+    # sub-process update) cross to the outer — see _build_topology
+    # for the matching division_agents_wire routing.
+    if sim_config.get('division_wrap_template'):
+        result['divide_emit'] = {'_type': 'map[node]', '_value': {}}
+
+    return result
 
 
 # Keep backward compat alias

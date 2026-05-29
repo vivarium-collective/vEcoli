@@ -121,10 +121,25 @@ def main():
             _bt._sim_data_object_instances[k] = v
     probe_cell = Composite({'state': cell_doc_probe, 'schema': {}}, core=core)
     cell_schema_resolved = probe_cell.schema
+    # Extract the inner cell tree's schema (the per-agent shape) from
+    # the full composite schema. The full schema has ``{agents: Map[
+    # cell_tree], global_time: ..., sim_data_objects: ...}`` at top.
+    # CompositeDivision's ``mother_state`` wire ``('..',)`` reads
+    # ``cell.state.agents.<id>`` which IS the cell tree itself — so
+    # ``_divide_walk`` needs the cell tree schema, not the full
+    # composite schema (mismatch produces nonsense daughter state
+    # with '0' as a top key plus mixed cell tree keys).
+    agents_node = cell_schema_resolved.get('agents') if hasattr(cell_schema_resolved, 'get') else None
+    cell_tree_schema = getattr(agents_node, '_value', None) if agents_node is not None else None
+    if cell_tree_schema is None:
+        # Fallback: walk the resolved schema for the agents map's value.
+        try:
+            cell_tree_schema = cell_schema_resolved['agents']._value
+        except Exception:
+            cell_tree_schema = cell_schema_resolved
     print(f'[probe]   pass 1 built + instantiated in '
-          f'{time.perf_counter()-t0:.1f}s; cell_schema has '
-          f'{len(cell_schema_resolved) if hasattr(cell_schema_resolved, "__len__") else "?"} top-level entries',
-          flush=True)
+          f'{time.perf_counter()-t0:.1f}s; cell_tree_schema type: '
+          f'{type(cell_tree_schema).__name__}', flush=True)
 
     # Build the daughter wrap template — same shape the outer uses
     # to wrap the mother. Note ``config.state`` is left out; the
@@ -144,15 +159,31 @@ def main():
         'address': args.address,
         'config': {
             # 'state': <CompositeDivision substitutes daughter_state here>
+            # Pass the resolved cell_schema so the daughter Composite
+            # doesn't re-infer from its (huge, Object-laden) state at
+            # realize time. Without this, infer walks the daughter's
+            # cell tree, hits a Python object (sim_data ref, pint
+            # Quantity, etc.), and dispatches to serialize(Object,
+            # value) which recursively calls infer(None, value) —
+            # passing None for core because that serialize handler
+            # has no signature for it — and explodes on
+            # ``core.access_type``.
+            # FULL composite schema (with agents map at top) so the
+            # daughter Composite inherits the same wrapped-mode shape
+            # as the mother. CompositeDivision wraps each daughter
+            # cell tree under {agents: {<daughter_id>: tree}} so the
+            # daughter Composite's state has the agents map at top,
+            # matching the wires inside the cell tree (which expect
+            # wrapped mode).
+            'schema': cell_schema_resolved,
             'bridge': {
-                'outputs': {
-                    # Read divide events from a DEDICATED slot that
-                    # only CompositeDivision touches — not from
-                    # ``agents`` (which mother lives in and every
-                    # inner sub-process write reflects up through).
-                    # _build_topology routes division.outputs.agents
-                    # to ``divide_emit`` when ``division_wrap_template``
-                    # is configured.
+                # CONDUIT (not outputs): divide events from
+                # ``divide_emit`` propagate to bridge_updates AND
+                # are stripped from local apply. The daughter
+                # _add/_remove sentinels reach outer.agents (correct)
+                # without instantiating nested daughter cell-
+                # Composites locally (which would cascade re-divide).
+                'conduits': {
                     'agents': ['divide_emit'],
                 },
             },
@@ -223,7 +254,7 @@ def main():
     sim_config_full = {
         **sim_config,
         'division_wrap_template': daughter_wrap_template,
-        'division_cell_schema': cell_schema_resolved,
+        'division_cell_schema': cell_tree_schema,
     }
     cell_doc = build_ecoli_document(core, sim_config_full,
                                      load_sim_data=lsd, flat=False)
@@ -248,14 +279,13 @@ def main():
         'config': {
             'state': cell_doc,
             'bridge': {
-                'outputs': {
-                    # Read divide events from a DEDICATED slot that
-                    # only CompositeDivision touches — not from
-                    # ``agents`` (which mother lives in and every
-                    # inner sub-process write reflects up through).
-                    # _build_topology routes division.outputs.agents
-                    # to ``divide_emit`` when ``division_wrap_template``
-                    # is configured.
+                # CONDUIT (not outputs): divide events from
+                # ``divide_emit`` propagate to bridge_updates AND
+                # are stripped from local apply. The daughter
+                # _add/_remove sentinels reach outer.agents (correct)
+                # without instantiating nested daughter cell-
+                # Composites locally (which would cascade re-divide).
+                'conduits': {
                     'agents': ['divide_emit'],
                 },
             },
