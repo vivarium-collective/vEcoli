@@ -146,6 +146,22 @@ def main():
     print(f'[probe]   pass 1 built + instantiated in '
           f'{time.perf_counter()-t0:.1f}s; cell_tree_schema type: '
           f'{type(cell_tree_schema).__name__}', flush=True)
+    # Dump cell_tree_schema's keys so we can verify it covers all cell
+    # tree fields (bulk, unique, environment, boundary, sim_data_objects).
+    if isinstance(cell_tree_schema, dict):
+        print(f'[probe]   cell_tree_schema keys ({len(cell_tree_schema)}): '
+              f'{sorted(cell_tree_schema.keys())[:25]}', flush=True)
+    else:
+        # Resolved Node — has fields as attributes; print all attrs
+        # that look like cell tree top-level keys.
+        all_attrs = [a for a in dir(cell_tree_schema)
+                     if not a.startswith('_')]
+        print(f'[probe]   cell_tree_schema attrs ({len(all_attrs)}): '
+              f'{sorted(all_attrs)[:25]}', flush=True)
+    # Compare to mother cell's actual state keys
+    mother_inst = probe_cell.state.get('agents', {}).get('0', {})
+    print(f'[probe]   mother cell state keys ({len(mother_inst)}): '
+          f'{sorted(mother_inst.keys())[:25]}', flush=True)
 
     # Build the daughter wrap template — same shape the outer uses
     # to wrap the mother. Note ``config.state`` is left out; the
@@ -174,13 +190,16 @@ def main():
             # passing None for core because that serialize handler
             # has no signature for it — and explodes on
             # ``core.access_type``.
-            # Don't pass cell_schema_resolved — it triggers a schema
-            # resolve conflict at ('0', 'division_threshold') where
-            # the inferred Maybe[big_tree] from state collides with
-            # the explicit Overwrite[Union[...]] from the passed
-            # schema. Let the daughter Composite infer schema from
-            # its state, same as the mother does at construction.
-            # 'schema': cell_schema_resolved,
+            # Use mother's FULL resolved schema. The daughter has the
+            # same structural shape as mother (just different state
+            # values), so the same schema applies. Trying to build a
+            # minimal schema from ``{agents: Map[cell_tree_schema],
+            # global_time}`` was missing fields like ``sim_data_objects``,
+            # ``bulk``, ``unique``, ``environment``, ``boundary`` that
+            # the cell tree actually has — those fell through to
+            # ``realize(None) → infer → serialize`` on Python
+            # objects, taking forever.
+            'schema': cell_schema_resolved,
             'bridge': {
                 # CONDUIT (not outputs): divide events from
                 # ``divide_emit`` propagate to bridge_updates AND
@@ -196,7 +215,10 @@ def main():
                 'outputs': {'agents': 'map[node]'},
             },
             'run_steps_on_init': True,
-            'parallel_processes': True,
+            # parallel_processes False because scipy lsoda integrator
+            # (used by Equilibrium) is not thread-safe across parallel
+            # daughter Composites. Each daughter ticks sequentially.
+            'parallel_processes': False,
         },
         'inputs': {},
         'outputs': {
@@ -308,7 +330,10 @@ def main():
                 'outputs': {'agents': 'map[node]'},
             },
             'run_steps_on_init': True,
-            'parallel_processes': True,
+            # parallel_processes False because scipy lsoda integrator
+            # (used by Equilibrium) is not thread-safe across parallel
+            # daughter Composites. Each daughter ticks sequentially.
+            'parallel_processes': False,
         },
         'inputs': {},
         'outputs': {
@@ -340,7 +365,12 @@ def main():
     outer = Composite(
         {'state': outer_state,
          'schema': {'agents': {'_type': 'map', '_value': {'cell': 'process'}}},
-         'parallel_processes': True},
+         # parallel_processes False so 2 daughter cell-Composites don't
+         # run concurrently — scipy.integrate.lsoda inside Equilibrium
+         # isn't thread-safe. Daughters tick sequentially. For Ray
+         # distribution this would be revisited (Ray actors are
+         # process-isolated so lsoda is safe across them).
+         'parallel_processes': False},
         core=core,
     )
     print(f'[probe]   built in {time.perf_counter()-t0:.1f}s', flush=True)
@@ -361,8 +391,47 @@ def main():
     cell_instance = outer.state['agents']['0']['cell'].get('instance')
     if cell_instance is not None:
         set_cell_composite_instance(cell_instance)
-        print(f'[probe] installed cell-Composite instance for divide '
-              f'mother_state access', flush=True)
+        # Register the cell tree schema as a NAMED TYPE ``ecoli`` in
+        # the core's type registry. Then the daughter Composite's
+        # state schema can reference it as ``map[ecoli]`` — realize
+        # looks up the registered schema by name and uses it by
+        # reference, avoiding re-derivation per daughter. This is
+        # the schema-sharing the user pointed out: we already know
+        # the cell tree shape, no need to recompute it for every
+        # division event.
+        _agents_sch = cell_instance.schema['agents']
+        if hasattr(_agents_sch, '_value'):
+            cell_tree_node = _agents_sch._value
+        elif isinstance(_agents_sch, dict):
+            cell_tree_node = _agents_sch.get('_value', _agents_sch)
+        else:
+            cell_tree_node = _agents_sch
+        print(f'[probe] cell tree schema type: {type(cell_tree_node).__name__}, '
+              f'has {len(cell_tree_node) if hasattr(cell_tree_node, "__len__") else "?"} '
+              f'keys/fields', flush=True)
+        # _value's dict has only a partial schema (emit-targets like
+        # bulk/listeners/process_state). The FULL schema for a
+        # specific agent entry is stored separately at the entry's
+        # exact path — for mother that's ``cell.schema['agents']['0']``.
+        # This contains ALL the fields the state actually has.
+        if '0' in _agents_sch:
+            cell_tree_node = _agents_sch['0']
+            print(f'[probe] using cell.schema[agents][0] for full per-entry '
+                  f'schema (better than _value which only has emit targets)',
+                  flush=True)
+        if isinstance(cell_tree_node, dict):
+            print(f'[probe] cell tree schema keys ({len(cell_tree_node)}): '
+                  f'{sorted(cell_tree_node.keys())[:40]}', flush=True)
+        core.register_type('ecoli', cell_tree_node)
+        set_cell_tree_schema(cell_tree_node)
+        # Update wrap_template to use the registered named type.
+        daughter_wrap_template['config']['schema'] = {
+            'agents': 'map[ecoli]',
+            'global_time': 'float',
+        }
+        set_daughter_wrap_template(daughter_wrap_template)
+        print(f'[probe] registered cell tree as `ecoli` type; '
+              f'wrap_template uses map[ecoli]', flush=True)
 
     cell_entry = outer.state['agents']['0'].get('cell')
     if not isinstance(cell_entry, dict):
@@ -419,7 +488,16 @@ def main():
     # Inner cell's timing — note this only reflects LAST cell.run() call
     # because timing accumulators reset on each run(). Still useful to
     # see relative process costs inside the cell.
-    cell_inst = outer.state['agents']['0']['cell'].get('instance')
+    # After divide, mother '0' is removed and daughters take her place.
+    # Pick whichever agent is around (mother pre-divide, OR first
+    # daughter post-divide) for the inner-cell timing report.
+    _agents_now = outer.state.get('agents', {})
+    if not _agents_now:
+        print('[probe] no agents in outer.state — skipping inner timing',
+              flush=True)
+        return
+    _first_aid = sorted(_agents_now.keys())[0]
+    cell_inst = outer.state['agents'][_first_aid].get('cell', {}).get('instance')
     if cell_inst is not None:
         print('\n=== TIMING (inner cell — last tick only) ===', flush=True)
         s_cell = cell_inst.timing_summary()

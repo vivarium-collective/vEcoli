@@ -571,6 +571,13 @@ class CompositeDivision(Division):
                 # == 2 from the walk; just take the first when only
                 # one daughter requested.
                 daughter_add_entries = []
+                # DEBUG: dump first daughter state + wrap_template to
+                # disk so we can test daughter Composite construction
+                # in isolation (without re-running mother for 7 wall
+                # min each time). Triggered by env var
+                # ``VECOLI_DUMP_DAUGHTER`` = output path.
+                import os as _os
+                _dump_path = _os.environ.get('VECOLI_DUMP_DAUGHTER')
                 for i, (daughter_id, override) in enumerate(daughter_specs):
                     baseline = baselines[i] if i < len(baselines) else baselines[0]
                     daughter_state = (
@@ -617,6 +624,38 @@ class CompositeDivision(Division):
                     }
                     daughter_add_entries.append(
                         (daughter_id, {'cell': wrapped}))
+                    # In-process daughter-construct test: when env var
+                    # ``VECOLI_TEST_DAUGHTER`` is set, try to instantiate
+                    # the daughter Composite RIGHT HERE (instead of
+                    # propagating through outer.realize). Lets us SIGUSR1
+                    # the live python immediately to find the hang
+                    # without waiting for OUTER's apply path.
+                    if _os.environ.get('VECOLI_TEST_DAUGHTER') and i == 0:
+                        import sys as _ds, time as _dt
+                        import faulthandler as _fh
+                        from process_bigraph import Composite as _C
+                        _ds.stderr.write(
+                            f'[in-proc] starting daughter Composite '
+                            f'instantiation PID={_os.getpid()}\n')
+                        _ds.stderr.flush()
+                        # Auto-dump traceback after 60s if still hanging.
+                        # No external signal needed.
+                        _fh.dump_traceback_later(60, repeat=True)
+                        _t = _dt.perf_counter()
+                        try:
+                            _dC = _C(wrapped['config'], core=self.core)
+                            _ds.stderr.write(
+                                f'[in-proc] ✅ daughter built in '
+                                f'{_dt.perf_counter()-_t:.1f}s; '
+                                f'state keys: {sorted(_dC.state.keys())[:8]}\n')
+                        except Exception as _e:
+                            _ds.stderr.write(
+                                f'[in-proc] ❌ daughter init failed '
+                                f'after {_dt.perf_counter()-_t:.1f}s: '
+                                f'{type(_e).__name__}: {str(_e)[:300]}\n')
+                        _fh.cancel_dump_traceback_later()
+                        _ds.stderr.flush()
+                        raise SystemExit(0)
 
                 return {
                     "agents": {
