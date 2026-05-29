@@ -239,6 +239,48 @@ class Division(Step):
         return {}
 
 
+# Module-level cache for cell-as-Composite mode. Set by the caller
+# (probe / driver) BEFORE divide fires. Bypasses the type system,
+# which would otherwise try to walk these values as state and
+# either (a) infer nonsense schemas from a schema Node tree, or
+# (b) recursively realize the wrap_template as if it were a live
+# process declaration in the cell tree.
+_CELL_TREE_SCHEMA = None
+_DAUGHTER_WRAP_TEMPLATE = None
+# Reference to the live cell-Composite instance so CompositeDivision
+# can read mother state directly at divide time without going through
+# the wire system (which corrupts numpy struct arrays into dicts even
+# with a precise port schema, AND introduces resolve_merges conflicts
+# from wrapping the destination schema in Maybe at init).
+_CELL_COMPOSITE_INSTANCE = None
+
+
+def set_cell_composite_instance(instance):
+    """Install the cell-Composite instance so CompositeDivision can
+    read its own parent cell tree state at divide time. Single global
+    slot — assumes one cell-Composite per process for now. For
+    multi-cell setups (post-divide), each daughter would need its
+    own slot keyed by agent_id."""
+    global _CELL_COMPOSITE_INSTANCE
+    _CELL_COMPOSITE_INSTANCE = instance
+
+
+def set_cell_tree_schema(schema):
+    """Install the cell tree schema for use by CompositeDivision at
+    divide time."""
+    global _CELL_TREE_SCHEMA
+    _CELL_TREE_SCHEMA = schema
+
+
+def set_daughter_wrap_template(template):
+    """Install the cell-Composite process decl shape used to wrap
+    each daughter cell tree before emitting ``_add`` through the
+    bridge. Single global slot — assumes one cell-Composite type
+    per process."""
+    global _DAUGHTER_WRAP_TEMPLATE
+    _DAUGHTER_WRAP_TEMPLATE = template
+
+
 class CompositeDivision(Division):
     """v2-native subclass of Division.
 
@@ -314,8 +356,16 @@ class CompositeDivision(Division):
         # ``cell_schema``: the cell tree's schema, needed for ``divide``
         # dispatch. Pass the same schema the cell-Composite's inner
         # state uses (e.g. ``composite.schema`` of the inner Composite).
-        'daughter_wrap_template': 'maybe[tree[node]]',
-        'cell_schema': 'maybe[tree[node]]',
+        # ``cell_as_composite_mode`` is a simple boolean flag — when
+        # True, divide uses the type-driven walk + wraps daughters
+        # via the module-level template. The actual template and
+        # schema come from ``set_daughter_wrap_template`` /
+        # ``set_cell_tree_schema`` — NOT config — because storing
+        # either in config would trigger the type system to walk
+        # them as state (a schema Node tree would produce nonsense
+        # inferred types; a process decl would get realized as a
+        # live process inside the cell tree).
+        'cell_as_composite_mode': 'boolean',
     }
 
     def outputs(self):
@@ -350,8 +400,8 @@ class CompositeDivision(Division):
                 '_default': threshold,
             },
         }
-        # In wrap-template mode the cell tree (parent of this step
-        # in flat mode) must be readable so we can pass it through
+        # In cell-as-Composite mode the cell tree (parent of this step
+        # in wrapped mode) must be readable so we can pass it through
         # ``core.divide(cell_schema, mother_state)`` and into the
         # daughter wrap template. Caller wires this to ``('..',)``.
         #
@@ -361,8 +411,15 @@ class CompositeDivision(Division):
         # struct array fields (bulk, unique molecules) into nested
         # dicts, breaking everything downstream that does
         # ``bulk['id']`` numpy column access.
-        if self.parameters.get('daughter_wrap_template'):
-            result['mother_state'] = 'maybe[node]'
+        # NOTE: cell_as_composite_mode does NOT add a mother_state
+        # input wire. The wire would project the cell tree's schema
+        # via the type system, which (a) wraps the destination in
+        # Maybe causing resolve conflicts at init AND (b) corrupts
+        # numpy struct arrays into dicts via the view walk. Instead,
+        # CompositeDivision reads mother state directly from the
+        # ``_CELL_COMPOSITE_INSTANCE`` global at divide time —
+        # bypassing the type system entirely. See
+        # ``set_cell_composite_instance`` and update().
         return result
 
     def __init__(self, parameters=None):
@@ -386,6 +443,13 @@ class CompositeDivision(Division):
         self.dry_mass_inc_dict = self.parameters["dry_mass_inc_dict"]
 
     def update(self, states, interval=None):
+        import sys as _sys
+        import time as _ti
+        _sys.stderr.write(
+            f'[div-call] t={_ti.time():.3f} agent={self.agent_id} '
+            f'div_var={states.get("division_variable")} '
+            f'thresh={states.get("division_threshold")}\n')
+        _sys.stderr.flush()
         if states["division_threshold"] == "mass_distribution":
             current_media_id = states["media_id"]
             new_threshold = (
@@ -463,7 +527,8 @@ class CompositeDivision(Division):
                     cursor[path[-1]] = per_proc_seed
                 daughter_specs.append((daughter_id, override))
 
-            wrap_template = self.parameters.get('daughter_wrap_template')
+            wrap_template = _DAUGHTER_WRAP_TEMPLATE if self.parameters.get(
+                'cell_as_composite_mode') else None
             if wrap_template:
                 # Cell-as-Composite mode: do the divide here (so we
                 # can build a fully-wrapped Composite-Process decl
@@ -475,13 +540,24 @@ class CompositeDivision(Division):
                 from bigraph_schema.methods.divide import divide as _divide_walk
                 from bigraph_schema.methods.apply import _path_copy_merge
 
-                cell_schema = self.parameters.get('cell_schema')
+                cell_schema = _CELL_TREE_SCHEMA
                 if cell_schema is None:
                     raise RuntimeError(
-                        "CompositeDivision.daughter_wrap_template requires "
-                        "cell_schema config to dispatch the type-driven "
-                        "divide walk.")
-                mother_state = states['mother_state']
+                        "cell_as_composite_mode requires "
+                        "set_cell_tree_schema(cell_tree_schema) to be called "
+                        "before divide fires (typically by the probe / driver "
+                        "after the throwaway pass-1 Composite is built).")
+                # Read mother state directly from the cell-Composite's
+                # live state, NOT via a wire port. See module-level
+                # cache comment for why.
+                if _CELL_COMPOSITE_INSTANCE is None:
+                    raise RuntimeError(
+                        "cell_as_composite_mode requires "
+                        "set_cell_composite_instance(cell) to be called "
+                        "after the cell-Composite is built so divide can "
+                        "read mother state by reference.")
+                mother_state = _CELL_COMPOSITE_INSTANCE.state['agents'][
+                    self.agent_id]
 
                 # Type-driven divide walk produces 2 baseline daughters
                 # (binomial bulk split, unique-molecule divide,

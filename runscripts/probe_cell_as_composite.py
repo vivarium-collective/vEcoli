@@ -51,7 +51,13 @@ except ImportError:
 
 import argparse
 import time
+import signal
+import faulthandler
 from pprint import pformat
+
+# Dump tracebacks for ALL threads to stderr on SIGUSR1. Use to
+# diagnose hangs: ``kill -USR1 <pid>``.
+faulthandler.register(signal.SIGUSR1, all_threads=True)
 
 
 def main():
@@ -168,14 +174,13 @@ def main():
             # passing None for core because that serialize handler
             # has no signature for it — and explodes on
             # ``core.access_type``.
-            # FULL composite schema (with agents map at top) so the
-            # daughter Composite inherits the same wrapped-mode shape
-            # as the mother. CompositeDivision wraps each daughter
-            # cell tree under {agents: {<daughter_id>: tree}} so the
-            # daughter Composite's state has the agents map at top,
-            # matching the wires inside the cell tree (which expect
-            # wrapped mode).
-            'schema': cell_schema_resolved,
+            # Don't pass cell_schema_resolved — it triggers a schema
+            # resolve conflict at ('0', 'division_threshold') where
+            # the inferred Maybe[big_tree] from state collides with
+            # the explicit Overwrite[Union[...]] from the passed
+            # schema. Let the daughter Composite infer schema from
+            # its state, same as the mother does at construction.
+            # 'schema': cell_schema_resolved,
             'bridge': {
                 # CONDUIT (not outputs): divide events from
                 # ``divide_emit`` propagate to bridge_updates AND
@@ -251,10 +256,20 @@ def main():
     print('[probe] PASS 2: rebuild cell tree with wrap_template + '
           'cell_schema in division config...', flush=True)
     t0 = time.perf_counter()
+    # Install cell tree schema + daughter wrap template into the
+    # cell_division module's cache. CompositeDivision reads from
+    # there at divide time. Bypassing config for these — see
+    # cell_division module for why. Cell-Composite instance is
+    # installed below AFTER the outer is built.
+    from ecoli.processes.cell_division import (
+        set_cell_tree_schema, set_daughter_wrap_template,
+        set_cell_composite_instance)
+    set_cell_tree_schema(cell_tree_schema)
+    set_daughter_wrap_template(daughter_wrap_template)
+
     sim_config_full = {
         **sim_config,
-        'division_wrap_template': daughter_wrap_template,
-        'division_cell_schema': cell_tree_schema,
+        'cell_as_composite_mode': True,
     }
     cell_doc = build_ecoli_document(core, sim_config_full,
                                      load_sim_data=lsd, flat=False)
@@ -340,6 +355,15 @@ def main():
     agents_0 = outer.state.get('agents', {}).get('0', {})
     print(f'[probe] outer.state.agents.0 keys ({len(agents_0)}): '
           f'{sorted(agents_0.keys())[:15]}...', flush=True)
+    # Install the cell-Composite instance so CompositeDivision can
+    # read mother state at divide time without going through the
+    # wire system.
+    cell_instance = outer.state['agents']['0']['cell'].get('instance')
+    if cell_instance is not None:
+        set_cell_composite_instance(cell_instance)
+        print(f'[probe] installed cell-Composite instance for divide '
+              f'mother_state access', flush=True)
+
     cell_entry = outer.state['agents']['0'].get('cell')
     if not isinstance(cell_entry, dict):
         print(f'[probe] !!! outer.state.agents.0.cell is {type(cell_entry).__name__} — '

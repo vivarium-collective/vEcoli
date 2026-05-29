@@ -373,7 +373,7 @@ def build_ecoli_document(core, sim_config, load_sim_data=None, flat=False):
     # output wires here, so only divide events (not every inner
     # sub-process update) cross to the outer — see _build_topology
     # for the matching division_agents_wire routing.
-    if sim_config.get('division_wrap_template'):
+    if sim_config.get('cell_as_composite_mode'):
         result['divide_emit'] = {'_type': 'map[node]', '_value': {}}
 
     return result
@@ -781,7 +781,7 @@ def _build_topology(config, partitioned, configs, flat=False):
         # wire to ``['agents']`` would propagate ALL of them, drowning
         # the outer's apply_updates in O(N_subprocesses) reconciles
         # per tick (measured: 14.7s/30s wall in profile).
-        if config.get('division_wrap_template'):
+        if config.get('cell_as_composite_mode'):
             division_agents_wire = (
                 ("divide_emit",) if flat
                 else ("..", "..", "divide_emit")
@@ -798,23 +798,14 @@ def _build_topology(config, partitioned, configs, flat=False):
             "media_id": ("environment", "media_id"),
             "division_threshold": ("division_threshold",),
         }
-        # Cell-as-Composite mode (daughter_wrap_template configured)
-        # needs CompositeDivision to read the mother's full cell tree
-        # so it can dispatch ``core.divide(cell_schema, mother_state)``
-        # and build daughter Composite-Process decls. Only works in
-        # WRAPPED mode — in flat mode division is at the cell tree
-        # root and ``('..',)`` tries to go above the cell-Composite's
-        # inner state top, which raises "cannot go above the top in
-        # path: ['..']". Wrapped mode places division at
-        # ``cell.state.agents.<id>.division`` so ``('..',)`` resolves
-        # cleanly to the mother cell tree.
-        if config.get('division_wrap_template'):
-            if flat:
-                raise NotImplementedError(
-                    "division_wrap_template requires wrapped mode "
-                    "(flat=False) — mother_state cannot wire above "
-                    "the cell tree root in flat mode.")
-            topology["division"]["mother_state"] = ("..",)
+        # NOTE: cell_as_composite_mode previously added a mother_state
+        # input wire here. Removed — CompositeDivision now reads
+        # mother state directly from the cell-Composite instance via
+        # the module-level ``_CELL_COMPOSITE_INSTANCE`` cache.
+        # The wire approach corrupted numpy struct arrays (view walk
+        # converted to dicts) and caused resolve_merges conflicts at
+        # init even when using the precise cell tree schema as the
+        # port type.
 
     return topology
 
@@ -971,11 +962,15 @@ def _build_flow(config, load_sim_data, configs, classes, partitioned,
         # legacy _divide sentinel. The matching topology change is in
         # _build_topology (adds a ``mother_state`` wire when this is
         # configured).
-        if config.get('division_wrap_template'):
-            division_config['daughter_wrap_template'] = (
-                config['division_wrap_template'])
-            division_config['cell_schema'] = (
-                config.get('division_cell_schema'))
+        if config.get('cell_as_composite_mode'):
+            # cell_as_composite_mode is just a boolean flag — the actual
+            # daughter wrap template and cell schema come from the
+            # cell_division module-level cache (set via
+            # ``set_daughter_wrap_template`` / ``set_cell_tree_schema``)
+            # because storing them in config would trigger the type
+            # system to walk them as state (schema → nonsense inferred
+            # types; wrap_template → recursive realize-as-process).
+            division_config['cell_as_composite_mode'] = True
         configs["division"] = division_config
         classes["division"] = CompositeDivision
 

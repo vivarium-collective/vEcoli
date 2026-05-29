@@ -47,6 +47,11 @@ class CellParquetEmitter(Step):
 
     def __init__(self, config=None, core=None):
         super().__init__(config, core=core)
+        import sys as _sys
+        import time as _ti
+        _sys.stderr.write(
+            f'[cpe-init] t={_ti.time():.3f} agent={config.get("agent_id") if config else "?"}\n')
+        _sys.stderr.flush()
         from ecoli.library.parquet_emitter import ParquetEmitter
         self._emitter = ParquetEmitter({
             'out_dir': self.config['out_dir'],
