@@ -38,8 +38,81 @@ from typing import Any, Optional
 
 from process_bigraph import Composite, Process
 
-from ecoli.library.bigraph_types import ECOLI_TYPES
+from ecoli.library.bigraph_types import (
+    ECOLI_TYPES, get_cached_load_sim_data)
 from ecoli.library.sim_data import LoadSimData
+
+
+class EcoliCellComposite(Composite):
+    """Cell-as-Composite that builds its cell tree from sim_data on
+    the receiving process instead of accepting a pre-built state.
+
+    USE CASE: daughter cell-Composites in the Ray cell-as-Composite
+    architecture. The mother's CompositeDivision emits a SMALL data-
+    only overlay (divided bulk + unique molecules + per-cell seeds
+    + division_threshold) as the daughter declaration. The receiving
+    actor builds an ``EcoliCellComposite``, which calls
+    ``build_ecoli_document(core, sim_config, lsd)`` to construct a
+    fresh process tree (no un-pickleable Process instances carried
+    across the boundary) and overlays the divided data.
+
+    This avoids the cloudpickle failure on Process instances with
+    scipy lsoda's ``_queue.SimpleQueue``, threading locks, etc. —
+    those instances are built locally on each actor from sim_data.
+
+    Required config (in addition to standard Composite fields):
+        ``cell_build_config``: dict with:
+            - ``sim_config``: vEcoli sim config dict
+            - ``agent_id``: daughter's lineage id (e.g. ``'00'``)
+            - ``sim_data_path``: path to ``simData.cPickle``
+        Existing ``config['state']['agents'][<agent_id>]`` (if any)
+        is used as the ``initial_state`` overlay for that agent.
+    """
+
+    config_schema = {
+        **Composite.config_schema,
+        # ``maybe[tree[node]]`` keeps the field optional and opaque
+        # to the type system (it's only consumed by our own init).
+        'cell_build_config': 'maybe[tree[node]]',
+    }
+
+    def initialize(self, config: Optional[dict] = None) -> None:
+        cell_build = self.config.get('cell_build_config') if isinstance(
+            self.config, dict) else None
+        if cell_build:
+            from ecoli.composites.ecoli_composite import build_ecoli_document
+
+            sim_config = dict(cell_build.get('sim_config', {}))
+            agent_id = cell_build.get('agent_id', '0')
+            sim_data_path = cell_build.get('sim_data_path')
+            sim_config['agent_id'] = agent_id
+            sim_config.setdefault('seed', 0)
+            sim_config['sim_data_path'] = sim_data_path
+
+            # Use shipped state[agents][agent_id] as the data overlay
+            # (divided bulk/unique/threshold/...). _get_initial_state
+            # in build_ecoli_document picks this up via
+            # ``initial_state``.
+            agents_state = (
+                self.config.get('state', {}).get('agents')
+                if isinstance(self.config.get('state'), dict) else None)
+            divided = (agents_state.get(agent_id)
+                       if isinstance(agents_state, dict) else None)
+            if divided:
+                sim_config['initial_state'] = {
+                    'agents': {agent_id: divided}
+                }
+
+            lsd = get_cached_load_sim_data(sim_data_path, sim_config)
+            cell_doc = build_ecoli_document(
+                self.core, sim_config, load_sim_data=lsd)
+
+            # Replace the placeholder state with the freshly-built
+            # cell_doc. Now super().initialize sees the full cell
+            # tree as if we'd built it locally from scratch.
+            self.config['state'] = cell_doc
+
+        super().initialize(config)
 
 
 class EcoliCellProcess(Process):

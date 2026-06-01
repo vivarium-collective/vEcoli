@@ -971,6 +971,10 @@ def _build_flow(config, load_sim_data, configs, classes, partitioned,
             # system to walk them as state (schema → nonsense inferred
             # types; wrap_template → recursive realize-as-process).
             division_config['cell_as_composite_mode'] = True
+            # daughter_address inherited by every daughter and flows
+            # transparently across generations.
+            division_config['daughter_address'] = config.get(
+                'daughter_address', 'local:Composite')
         configs["division"] = division_config
         classes["division"] = CompositeDivision
 

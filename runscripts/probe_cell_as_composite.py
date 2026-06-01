@@ -79,6 +79,48 @@ def main():
     from ecoli.composites.ecoli_composite import build_ecoli_document
     from process_bigraph import Composite, allocate_core
 
+    # Ray init when the address indicates ray:Composite. Daughter
+    # cell-Composites then spawn on Ray actors (one per shard pool
+    # entry). RAY_SHARDS_DEFAULT caps the shard pool — without this
+    # the runtime would spawn one actor per outer process_path which
+    # over a divided colony would exceed available CPUs fast.
+    if args.address.startswith('ray:'):
+        import ray
+        from process_bigraph.protocols.ray import (
+            register_process_class, register_type_provider,
+            get_or_create_runtime)
+        os.environ.setdefault('RAY_SHARDS_DEFAULT', '2')
+        if not ray.is_initialized():
+            ray.init(num_cpus=4, log_to_driver=False)
+        register_process_class('Composite', Composite)
+        # Daughter cell-Composites use EcoliCellComposite, which
+        # builds its cell tree from sim_data on the actor side
+        # (avoids cloudpickle failure on Process instances that
+        # carry scipy lsoda's _queue.SimpleQueue across actors).
+        from ecoli.composites.ecoli_cell_process import EcoliCellComposite
+        register_process_class('EcoliCellComposite', EcoliCellComposite)
+        # Each Ray actor allocates its OWN core, which doesn't
+        # inherit driver-side type registrations. Register a
+        # type-provider so every actor calls ``register_ecoli_types``
+        # on its core before instantiating the cell-Composite. Without
+        # this the actor's realize hits unknown types
+        # (``sim_data_object_store``) and crashes.
+        register_type_provider(
+            'ecoli.library.bigraph_types', 'register_ecoli_types')
+        # Register the sim_data loader on the actor's core so
+        # ``_sim_data_object_instances`` is populated BEFORE the
+        # actor's cell-Composite is built. This lets us strip
+        # ``sim_data_objects`` from per-cell config['state'] —
+        # daughters then don't drag ~700MB of sim_data through
+        # every pool spawn.
+        register_type_provider(
+            'ecoli.library.bigraph_types', 'load_sim_data_provider',
+            kwargs={'sim_data_path': sim_data_path})
+        print(f'[probe] Ray runtime up '
+              f'(shards={os.environ["RAY_SHARDS_DEFAULT"]}); '
+              f'Composite + ECOLI + sim_data providers registered',
+              flush=True)
+
     sim = EcoliSim.from_file(os.path.join(CONFIG_DIR_PATH, 'default.json'))
     sim.processes = sim._retrieve_processes(
         sim.processes, sim.add_processes,
@@ -97,6 +139,12 @@ def main():
     core.register_types(ECOLI_TYPES)
     # Register Composite for cell-Composite address resolution.
     core.register_link('Composite', Composite)
+    # Register EcoliCellComposite on the driver too — load_protocol
+    # (called for ray:EcoliCellComposite addresses on the driver
+    # side when realizing daughter cell declarations) looks up the
+    # class via the driver's link_registry.
+    from ecoli.composites.ecoli_cell_process import EcoliCellComposite
+    core.register_link('EcoliCellComposite', EcoliCellComposite)
 
     # ===========================================================
     # Two-pass build to handle the chicken-and-egg:
@@ -127,6 +175,29 @@ def main():
             _bt._sim_data_object_instances[k] = v
     probe_cell = Composite({'state': cell_doc_probe, 'schema': {}}, core=core)
     cell_schema_resolved = probe_cell.schema
+    # EARLY extraction of the per-entry cell tree schema. The mother's
+    # cell_node config NEEDS this so the Ray actor's CompositeDivision
+    # can read parent.config.schema['agents']['_value'] at divide time.
+    # Without it the mother's cell_node carries no schema at all and
+    # the actor falls off the schema-extraction fallback path.
+    # ``_value`` on the resolved schema is the emit-target schema (4
+    # keys: bulk/listeners/process_state). The PER-ENTRY schema lives
+    # at ``cell.schema['agents']['<agent_id>']`` and has the FULL
+    # set of 75+ keys the cell tree actually contains.
+    _early_agents_sch = probe_cell.schema['agents']
+    if '0' in _early_agents_sch:
+        cell_tree_node_early = _early_agents_sch['0']
+        print(f'[probe]   EARLY cell_tree_node from agents[0]: '
+              f'{len(cell_tree_node_early)} keys', flush=True)
+    else:
+        # Fallback: _value (sparse).
+        cell_tree_node_early = getattr(
+            _early_agents_sch, '_value',
+            _early_agents_sch.get('_value', {}) if isinstance(
+                _early_agents_sch, dict) else {})
+        print(f'[probe]   EARLY fallback cell_tree_node from _value: '
+              f'{len(cell_tree_node_early) if isinstance(cell_tree_node_early, dict) else "?"} keys',
+              flush=True)
     # Extract the inner cell tree's schema (the per-agent shape) from
     # the full composite schema. The full schema has ``{agents: Map[
     # cell_tree], global_time: ..., sim_data_objects: ...}`` at top.
@@ -190,16 +261,19 @@ def main():
             # passing None for core because that serialize handler
             # has no signature for it — and explodes on
             # ``core.access_type``.
-            # Use mother's FULL resolved schema. The daughter has the
-            # same structural shape as mother (just different state
-            # values), so the same schema applies. Trying to build a
-            # minimal schema from ``{agents: Map[cell_tree_schema],
-            # global_time}`` was missing fields like ``sim_data_objects``,
-            # ``bulk``, ``unique``, ``environment``, ``boundary`` that
-            # the cell tree actually has — those fell through to
-            # ``realize(None) → infer → serialize`` on Python
-            # objects, taking forever.
-            'schema': cell_schema_resolved,
+            # Daughter schema matches mother: ``agents`` is a map whose
+            # _value is the per-entry cell tree schema we pulled from
+            # PASS 1's ``probe_cell.schema['agents']['0']`` (~75 keys
+            # — bulk, unique, listeners, environment, boundary,
+            # sim_data_objects, and every process_state slot). Passing
+            # the dict literal here means it survives pickling to the
+            # Ray actor; CompositeDivision on the actor reads
+            # ``parent.config['schema']['agents']['_value']`` to drive
+            # ``_divide_walk`` over mother state at divide time.
+            'schema': {
+                'agents': {'_type': 'map', '_value': cell_tree_node_early},
+                'global_time': 'float',
+            },
             'bridge': {
                 # CONDUIT (not outputs): divide events from
                 # ``divide_emit`` propagate to bridge_updates AND
@@ -224,7 +298,17 @@ def main():
         'outputs': {
             'agents': ['..'],
         },
-        'interval': 1.0,
+        # Outer-tick interval. Sets how often the outer Composite
+        # invokes ``cell.update(state, interval)``. The cell-Composite's
+        # own engine runs internally at its inner-process intervals
+        # regardless. For Ray, every outer tick is an RPC roundtrip
+        # (~400ms overhead) — so coarser intervals amortize the RPC.
+        # For local, the cost is small either way. 60 sim_sec gives
+        # ~50 RPCs per doubling and keeps env-feedback latency well
+        # under a cell-cycle. Bridge updates (divide events) propagate
+        # at the END of each outer tick — daughter cell-Composites
+        # spawn at outer.agents whenever the actor returns _add events.
+        'interval': 60.0,
     }
 
     # ===========================================================
@@ -289,9 +373,18 @@ def main():
     set_cell_tree_schema(cell_tree_schema)
     set_daughter_wrap_template(daughter_wrap_template)
 
+    # Daughter address: for Ray, use EcoliCellComposite which rebuilds
+    # its cell tree from sim_data on the actor side (no live Process
+    # instances cross the boundary). For local, plain Composite works
+    # since pickling isn't involved.
+    if args.address.startswith('ray:'):
+        daughter_address = 'ray:EcoliCellComposite'
+    else:
+        daughter_address = args.address
     sim_config_full = {
         **sim_config,
         'cell_as_composite_mode': True,
+        'daughter_address': daughter_address,
     }
     cell_doc = build_ecoli_document(core, sim_config_full,
                                      load_sim_data=lsd, flat=False)
@@ -305,16 +398,39 @@ def main():
     # override.
     agent_id = sim_config['agent_id']
     cell_doc['agents'][agent_id]['parquet_emitter'] = parquet_emitter_step
+    # Strip ``sim_data_objects`` from the cell document for Ray runs.
+    # The actor's ``load_sim_data_provider`` type-provider already
+    # populates ``_sim_data_object_instances`` from disk, so any
+    # SimDataObjectRef in the cell tree resolves against the
+    # actor-local instances. Sending sim_data through config doubles
+    # the wire transfer per pool spawn (~700MB) and per-daughter
+    # cloudpickle work. For local runs the driver already populated
+    # the instance store via _bt._sim_data_object_instances above —
+    # also safe to drop. The mother's already-driver-side instance
+    # store still satisfies driver-side realize for the outer.
+    if args.address.startswith('ray:') and 'sim_data_objects' in cell_doc:
+        del cell_doc['sim_data_objects']
+        print(f'[probe]   stripped sim_data_objects from cell_doc '
+              f'(actor loads via type-provider)', flush=True)
     print(f'[probe]   pass 2 built in {time.perf_counter()-t0:.1f}s; '
           f'cell_doc keys: {sorted(cell_doc.keys())[:8]}...',
           flush=True)
 
     # Cell node, identical shape to the wrap template.
+    # CRITICAL for Ray: include ``schema`` so the actor's Composite
+    # has ``self.config['schema']['agents']['_value']`` populated.
+    # CompositeDivision on the actor reads this at divide time (the
+    # module-global ``_CELL_TREE_SCHEMA`` is None on actors —
+    # process-isolated, no shared module state with the driver).
     cell_node = {
         '_type': 'process',
         'address': args.address,
         'config': {
             'state': cell_doc,
+            'schema': {
+                'agents': {'_type': 'map', '_value': cell_tree_node_early},
+                'global_time': 'float',
+            },
             'bridge': {
                 # CONDUIT (not outputs): divide events from
                 # ``divide_emit`` propagate to bridge_updates AND
@@ -334,12 +450,32 @@ def main():
             # (used by Equilibrium) is not thread-safe across parallel
             # daughter Composites. Each daughter ticks sequentially.
             'parallel_processes': False,
+            # cell_build_config: rides through CompositeDivision's
+            # wrap_template reconstruction on the actor so daughters
+            # can use EcoliCellComposite's rebuild-from-sim_data
+            # path. Composite ignores unknown config keys;
+            # EcoliCellComposite consumes them.
+            'cell_build_config': {
+                'sim_config': sim_config_full,
+                'sim_data_path': sim_data_path,
+                'agent_id': sim_config['agent_id'],
+            },
         },
         'inputs': {},
         'outputs': {
             'agents': ['..'],
         },
-        'interval': 1.0,
+        # Outer-tick interval. Sets how often the outer Composite
+        # invokes ``cell.update(state, interval)``. The cell-Composite's
+        # own engine runs internally at its inner-process intervals
+        # regardless. For Ray, every outer tick is an RPC roundtrip
+        # (~400ms overhead) — so coarser intervals amortize the RPC.
+        # For local, the cost is small either way. 60 sim_sec gives
+        # ~50 RPCs per doubling and keeps env-feedback latency well
+        # under a cell-cycle. Bridge updates (divide events) propagate
+        # at the END of each outer tick — daughter cell-Composites
+        # spawn at outer.agents whenever the actor returns _add events.
+        'interval': 60.0,
     }
 
     # Outer structure: agents.0.cell = cell-Composite. The depth-3
@@ -399,7 +535,12 @@ def main():
         # the schema-sharing the user pointed out: we already know
         # the cell tree shape, no need to recompute it for every
         # division event.
-        _agents_sch = cell_instance.schema['agents']
+        # Use PASS 1's LOCAL probe_cell schema. With ray:Composite,
+        # the outer's cell instance is a RayShadow proxy without
+        # direct ``.schema`` access — the schema lives on the actor.
+        # probe_cell (PASS 1) is local and has the same schema since
+        # both were built from the same sim_config.
+        _agents_sch = probe_cell.schema['agents']
         if hasattr(_agents_sch, '_value'):
             cell_tree_node = _agents_sch._value
         elif isinstance(_agents_sch, dict):
@@ -422,11 +563,16 @@ def main():
         if isinstance(cell_tree_node, dict):
             print(f'[probe] cell tree schema keys ({len(cell_tree_node)}): '
                   f'{sorted(cell_tree_node.keys())[:40]}', flush=True)
+        # Register on the DRIVER's core for local-mode runs.
         core.register_type('ecoli', cell_tree_node)
         set_cell_tree_schema(cell_tree_node)
-        # Update wrap_template to use the registered named type.
+        # INLINE the cell tree schema dict directly in the wrap
+        # template's config.schema (not via the registered name
+        # 'ecoli'). Ray actors get the schema through their pickled
+        # config and don't need the 'ecoli' name registered on
+        # their core. The schema dict pickles cleanly.
         daughter_wrap_template['config']['schema'] = {
-            'agents': 'map[ecoli]',
+            'agents': {'_type': 'map', '_value': cell_tree_node},
             'global_time': 'float',
         }
         set_daughter_wrap_template(daughter_wrap_template)
@@ -442,11 +588,15 @@ def main():
         inst = cell_entry.get('instance')
         if inst is not None:
             print(f'[probe] cell instance type: {type(inst).__name__}', flush=True)
-            print(f'[probe] cell.state keys: {sorted(inst.state.keys())}', flush=True)
-            print(f'[probe] cell.process_paths: {sorted(inst.process_paths.keys())[:5]}',
-                  flush=True)
-            print(f'[probe] cell.step_paths (first 5): '
-                  f'{sorted(inst.step_paths.keys())[:5]}', flush=True)
+            if hasattr(inst, 'process_paths'):
+                print(f'[probe] cell.state keys: {sorted(inst.state.keys())}', flush=True)
+                print(f'[probe] cell.process_paths: {sorted(inst.process_paths.keys())[:5]}',
+                      flush=True)
+                print(f'[probe] cell.step_paths (first 5): '
+                      f'{sorted(inst.step_paths.keys())[:5]}', flush=True)
+            else:
+                print(f'[probe] (RayShadow — skipping internal-attr dump)',
+                      flush=True)
 
     # Run as a normal composite: one call, no manual tick driving.
     # parallel_processes=True is set on outer + inner so FBA and other
@@ -498,7 +648,7 @@ def main():
         return
     _first_aid = sorted(_agents_now.keys())[0]
     cell_inst = outer.state['agents'][_first_aid].get('cell', {}).get('instance')
-    if cell_inst is not None:
+    if cell_inst is not None and hasattr(cell_inst, 'timing_summary'):
         print('\n=== TIMING (inner cell — last tick only) ===', flush=True)
         s_cell = cell_inst.timing_summary()
         print(f'  total:     {s_cell.total:7.3f}s', flush=True)

@@ -366,6 +366,12 @@ class CompositeDivision(Division):
         # inferred types; a process decl would get realized as a
         # live process inside the cell tree).
         'cell_as_composite_mode': 'boolean',
+        # When in cell-as-Composite mode, the address used to wrap
+        # daughter cell-Composites (``local:Composite`` or
+        # ``ray:Composite``). Inherited by daughters via
+        # _path_copy_merge — so changing this on the mother flows
+        # transparently into every subsequent generation.
+        'daughter_address': 'string',
     }
 
     def outputs(self):
@@ -443,13 +449,6 @@ class CompositeDivision(Division):
         self.dry_mass_inc_dict = self.parameters["dry_mass_inc_dict"]
 
     def update(self, states, interval=None):
-        import sys as _sys
-        import time as _ti
-        _sys.stderr.write(
-            f'[div-call] t={_ti.time():.3f} agent={self.agent_id} '
-            f'div_var={states.get("division_variable")} '
-            f'thresh={states.get("division_threshold")}\n')
-        _sys.stderr.flush()
         if states["division_threshold"] == "mass_distribution":
             current_media_id = states["media_id"]
             new_threshold = (
@@ -527,8 +526,61 @@ class CompositeDivision(Division):
                     cursor[path[-1]] = per_proc_seed
                 daughter_specs.append((daughter_id, override))
 
-            wrap_template = _DAUGHTER_WRAP_TEMPLATE if self.parameters.get(
-                'cell_as_composite_mode') else None
+            cell_as_composite = self.parameters.get('cell_as_composite_mode')
+            wrap_template = None
+            if cell_as_composite:
+                # First try the module-level template (set by the
+                # driver). On Ray actors this is None because module
+                # globals don't propagate to actor processes — fall
+                # through to building the template from the parent
+                # Composite's own config below.
+                wrap_template = _DAUGHTER_WRAP_TEMPLATE
+                if wrap_template is None:
+                    # Build from parent Composite's config. The
+                    # daughter cell-Composite has the SAME shape as
+                    # the parent — schema, bridge, interface,
+                    # parallel_processes — so we mirror them.
+                    from process_bigraph.composite import (
+                        get_current_composite)
+                    parent = get_current_composite()
+                    if parent is not None:
+                        pcfg = getattr(parent, 'config', {}) or {}
+                        # daughter_address: per-cell address override
+                        # ('local:Composite', 'ray:Composite', or
+                        # 'ray:EcoliCellComposite'). Set via the cell
+                        # tree's division config; falls back to
+                        # ``local:Composite``.
+                        addr = self.parameters.get(
+                            'daughter_address', 'local:Composite')
+                        # cell_build_config: when present (set by
+                        # probe on mother's cell_node config so it
+                        # rides through here on the actor), include
+                        # it so daughters can use the rebuild-from-
+                        # sim_data path (EcoliCellComposite). Without
+                        # this, daughter ship payload tries to carry
+                        # live Process instances (with scipy lsoda's
+                        # un-pickleable _queue.SimpleQueue) — and
+                        # cloudpickle dies.
+                        cbc = pcfg.get('cell_build_config')
+                        daughter_config = {
+                            'schema': pcfg.get('schema'),
+                            'bridge': pcfg.get('bridge'),
+                            'interface': pcfg.get('interface'),
+                            'run_steps_on_init': pcfg.get(
+                                'run_steps_on_init', True),
+                            'parallel_processes': pcfg.get(
+                                'parallel_processes', False),
+                        }
+                        if cbc:
+                            daughter_config['cell_build_config'] = cbc
+                        wrap_template = {
+                            '_type': 'process',
+                            'address': addr,
+                            'config': daughter_config,
+                            'inputs': {},
+                            'outputs': {'agents': ['..']},
+                            'interval': 1.0,
+                        }
             if wrap_template:
                 # Cell-as-Composite mode: do the divide here (so we
                 # can build a fully-wrapped Composite-Process decl
@@ -542,21 +594,89 @@ class CompositeDivision(Division):
 
                 cell_schema = _CELL_TREE_SCHEMA
                 if cell_schema is None:
+                    # Module global not set (typical for Ray actors —
+                    # globals don't propagate from driver). Extract
+                    # from parent Composite's config.schema which has
+                    # the cell tree shape inlined at
+                    # ``agents._value`` (or, when the agent was
+                    # already realized into ``self.schema``, look there
+                    # too — it carries the same dict).
+                    import sys as _dbg_sys
+                    from process_bigraph.composite import (
+                        get_current_composite)
+                    parent_c = get_current_composite()
+                    _dbg_sys.stderr.write(
+                        f'[div-schema] parent_c={type(parent_c).__name__ if parent_c else None}\n')
+                    if parent_c is not None:
+                        cfg = getattr(parent_c, 'config', {}) or {}
+                        psch = cfg.get('schema', {}) if isinstance(cfg, dict) else {}
+                        _dbg_sys.stderr.write(
+                            f'[div-schema] config.schema keys: '
+                            f'{list(psch.keys()) if isinstance(psch, dict) else type(psch).__name__}\n')
+                        if isinstance(psch, dict):
+                            agents_field = psch.get('agents', {})
+                            _dbg_sys.stderr.write(
+                                f'[div-schema] config.schema[agents] type: {type(agents_field).__name__}, '
+                                f'keys: {list(agents_field.keys()) if isinstance(agents_field, dict) else "?"}\n')
+                            if isinstance(agents_field, dict):
+                                cell_schema = agents_field.get('_value')
+                                _dbg_sys.stderr.write(
+                                    f'[div-schema] _value type: {type(cell_schema).__name__}, '
+                                    f'len: {len(cell_schema) if hasattr(cell_schema, "__len__") else "?"}\n')
+                        # Fallback to self.schema (realized) — same
+                        # dict, but on the realized tree.
+                        if cell_schema is None or (
+                                isinstance(cell_schema, dict) and len(cell_schema) < 5):
+                            rsch = getattr(parent_c, 'schema', {}) or {}
+                            _dbg_sys.stderr.write(
+                                f'[div-schema] self.schema keys: '
+                                f'{list(rsch.keys()) if isinstance(rsch, dict) else type(rsch).__name__}\n')
+                            if isinstance(rsch, dict):
+                                ragents = rsch.get('agents', {})
+                                _dbg_sys.stderr.write(
+                                    f'[div-schema] self.schema[agents] type: '
+                                    f'{type(ragents).__name__}, keys: '
+                                    f'{list(ragents.keys()) if isinstance(ragents, dict) else "?"}\n')
+                                if isinstance(ragents, dict):
+                                    # Pull the realized per-entry
+                                    # schema at the mother's agent_id.
+                                    if self.agent_id in ragents:
+                                        cell_schema = ragents[self.agent_id]
+                                        _dbg_sys.stderr.write(
+                                            f'[div-schema] used self.schema[agents][{self.agent_id}], '
+                                            f'len={len(cell_schema) if hasattr(cell_schema, "__len__") else "?"}\n')
+                                    elif '_value' in ragents:
+                                        cell_schema = ragents['_value']
+                                        _dbg_sys.stderr.write(
+                                            f'[div-schema] used self.schema[agents][_value], '
+                                            f'len={len(cell_schema) if hasattr(cell_schema, "__len__") else "?"}\n')
+                    _dbg_sys.stderr.flush()
+                if cell_schema is None:
                     raise RuntimeError(
-                        "cell_as_composite_mode requires "
-                        "set_cell_tree_schema(cell_tree_schema) to be called "
-                        "before divide fires (typically by the probe / driver "
-                        "after the throwaway pass-1 Composite is built).")
-                # Read mother state directly from the cell-Composite's
-                # live state, NOT via a wire port. See module-level
-                # cache comment for why.
-                if _CELL_COMPOSITE_INSTANCE is None:
+                        "cell_as_composite_mode requires the cell tree "
+                        "schema to be available — either via "
+                        "set_cell_tree_schema(...) (module global on "
+                        "the driver) or inlined at "
+                        "parent.config.schema['agents']['_value'] "
+                        "(typical for Ray actors).")
+                # Read mother state via the ``current_composite_var``
+                # contextvar set by ``Composite.run``. Works for local
+                # AND for Ray actors (each actor's Composite sets its
+                # own contextvar — no need to propagate a module global
+                # across process boundaries). Falls back to the
+                # module-level ``_CELL_COMPOSITE_INSTANCE`` for
+                # backward compatibility with non-Ray drivers.
+                from process_bigraph.composite import (
+                    get_current_composite)
+                parent_composite = get_current_composite() or _CELL_COMPOSITE_INSTANCE
+                if parent_composite is None:
                     raise RuntimeError(
-                        "cell_as_composite_mode requires "
-                        "set_cell_composite_instance(cell) to be called "
-                        "after the cell-Composite is built so divide can "
-                        "read mother state by reference.")
-                mother_state = _CELL_COMPOSITE_INSTANCE.state['agents'][
+                        "cell_as_composite_mode requires the parent "
+                        "Composite to be set on the ``current_composite_var`` "
+                        "contextvar — either by running inside its ``run`` "
+                        "(automatic) or by calling "
+                        "set_cell_composite_instance() explicitly.")
+                mother_state = parent_composite.state['agents'][
                     self.agent_id]
 
                 # Type-driven divide walk produces 2 baseline daughters
@@ -578,33 +698,22 @@ class CompositeDivision(Division):
                 # ``VECOLI_DUMP_DAUGHTER`` = output path.
                 import os as _os
                 _dump_path = _os.environ.get('VECOLI_DUMP_DAUGHTER')
+                import sys as _sys
+                _DEBUG_DIVIDE = _os.environ.get('VECOLI_DEBUG_DIVIDE')
                 for i, (daughter_id, override) in enumerate(daughter_specs):
                     baseline = baselines[i] if i < len(baselines) else baselines[0]
                     daughter_state = (
                         _path_copy_merge(baseline, override)
                         if override else baseline)
-                    # DEBUG: dump daughter bulk shape before wrap
-                    import sys as _sys
-                    _sys.stderr.write(
-                        f'[divide-debug] daughter={daughter_id} '
-                        f'state top keys: {sorted(daughter_state.keys())[:8]}\n')
-                    bulk = daughter_state.get('bulk')
-                    _sys.stderr.write(
-                        f'[divide-debug] daughter={daughter_id} '
-                        f'bulk type={type(bulk).__name__} '
-                        f'has_dtype={hasattr(bulk, "dtype")}\n')
-                    if hasattr(bulk, 'dtype'):
+                    if _DEBUG_DIVIDE:
                         _sys.stderr.write(
-                            f'[divide-debug]   bulk.dtype.names={bulk.dtype.names}\n')
-                    # Compare to mother
-                    mom_bulk = mother_state.get('bulk')
-                    _sys.stderr.write(
-                        f'[divide-debug] mother bulk type={type(mom_bulk).__name__} '
-                        f'has_dtype={hasattr(mom_bulk, "dtype")}\n')
-                    if hasattr(mom_bulk, 'dtype'):
-                        _sys.stderr.write(
-                            f'[divide-debug]   mother bulk.dtype.names={mom_bulk.dtype.names}\n')
-                    _sys.stderr.flush()
+                            f'[divide-debug] daughter={daughter_id} '
+                            f'state top keys: {sorted(daughter_state.keys())[:8]}\n')
+                        bulk = daughter_state.get('bulk')
+                        if hasattr(bulk, 'dtype'):
+                            _sys.stderr.write(
+                                f'[divide-debug]   bulk.dtype.names={bulk.dtype.names}\n')
+                        _sys.stderr.flush()
                     # Substitute daughter state into the wrap template's
                     # config.state slot. deepcopy so we don't mutate
                     # the shared template between daughters.
@@ -618,10 +727,73 @@ class CompositeDivision(Division):
                     # daughter state would be flat at root and these
                     # wires would resolve to wrong / out-of-bounds
                     # paths.
+                    # Project daughter_state through a DATA-ONLY
+                    # whitelist. A "process key" is identified by
+                    # the VALUE being a dict that contains either
+                    # ``address`` or ``instance`` — that's the
+                    # universal shape of a process declaration in
+                    # state. The schema is also resolved (a Schema
+                    # Node, not a plain dict) so checking via the
+                    # data is more robust than via the schema.
+                    # Process subtrees get re-instantiated on the
+                    # driver via the wrap_template's config.schema.
+                    # Pure-data keys (bulk, boundary, listeners,
+                    # division_threshold, ...) carry the per-cell
+                    # state through divide.
+                    def _looks_like_process(v):
+                        if not isinstance(v, dict):
+                            return False
+                        # Process/Step declarations always have one
+                        # of these keys when they appear in state.
+                        return 'address' in v or 'instance' in v
+                    # DATA-ONLY projection: ship only the divided data
+                    # fields that the daughter EcoliCellComposite uses
+                    # as ``initial_state`` overlay. Drop all process
+                    # declarations at TOP LEVEL — the daughter actor
+                    # rebuilds the process tree fresh via
+                    # ``build_ecoli_document(core, sim_config, lsd)``.
+                    # No live Process instances ever cross the actor
+                    # boundary; pickling is trivial.
+                    _DAUGHTER_NEVER_SHIP = frozenset({
+                        # Re-populated on the daughter actor by
+                        # ``load_sim_data_provider`` type-provider.
+                        'sim_data_objects',
+                        # Framework runtime, rebuilt by Composite
+                        # initialize on the daughter side.
+                        'process',
+                        'process_state',
+                        'step_flow',
+                        'next_update_time',
+                    })
+                    def _is_process_decl(v):
+                        return isinstance(v, dict) and (
+                            'address' in v or 'instance' in v)
+                    daughter_state_ship = {
+                        k: v for k, v in daughter_state.items()
+                        if not _is_process_decl(v)
+                        and k not in _DAUGHTER_NEVER_SHIP
+                    } if isinstance(daughter_state, dict) else daughter_state
+                    if i == 0 and _DEBUG_DIVIDE:
+                        mother_keys = sorted(daughter_state.keys()) if isinstance(daughter_state, dict) else []
+                        shipped_keys = sorted(daughter_state_ship.keys()) if isinstance(daughter_state_ship, dict) else []
+                        dropped = sorted(set(mother_keys) - set(shipped_keys))
+                        _sys.stderr.write(
+                            f'[whitelist] daughter={daughter_id} '
+                            f'mother_keys={len(mother_keys)} '
+                            f'shipped_keys={len(shipped_keys)} '
+                            f'dropped={len(dropped)}\n')
+                        _sys.stderr.flush()
                     wrapped = deepcopy(wrap_template)
                     wrapped.setdefault('config', {})['state'] = {
-                        'agents': {daughter_id: daughter_state},
+                        'agents': {daughter_id: daughter_state_ship},
                     }
+                    # Per-daughter agent_id in cell_build_config so
+                    # EcoliCellComposite builds the right shape for
+                    # this daughter (not the mother's '0').
+                    if 'cell_build_config' in wrapped['config']:
+                        cbc = dict(wrapped['config']['cell_build_config'])
+                        cbc['agent_id'] = daughter_id
+                        wrapped['config']['cell_build_config'] = cbc
                     daughter_add_entries.append(
                         (daughter_id, {'cell': wrapped}))
                     # In-process daughter-construct test: when env var

@@ -77,15 +77,21 @@ v1	configs/comparison_10s_16g_v1_aws.json	batch	vecoli:v2-comparison-arm64
 v2	configs/comparison_10s_16g_v2_aws.json	batch	vecoli:v2-comparison-arm64
 mp	configs/comparison_10s_16g_v2_mp_aws.json	multiprocessing
 ray	configs/comparison_10s_16g_v2_ray_aws.json	ray	vecoli:v2-ray-arm64
+colony	configs/colony_ray_aws.json	ray_colony	vecoli:v2-ray-arm64
 compare	configs/compare_head.json	comparison
 EOF
-    echo "Seeded $_REGISTRY with default aliases (v1/v2/mp/ray/compare)" >&2
+    echo "Seeded $_REGISTRY with default aliases (v1/v2/mp/ray/colony/compare)" >&2
   fi
   # Backfill ``compare`` for users whose registry was seeded before
   # this alias existed; idempotent.
   if [[ -f "$_REGISTRY" ]] && ! grep -qE '^compare\s' "$_REGISTRY" 2>/dev/null; then
     printf 'compare\tconfigs/compare_head.json\tcomparison\n' >> "$_REGISTRY"
     echo "Backfilled 'compare' alias in $_REGISTRY" >&2
+  fi
+  # Backfill ``colony`` (cell-as-Composite Ray pipeline) idempotently.
+  if [[ -f "$_REGISTRY" ]] && ! grep -qE '^colony\s' "$_REGISTRY" 2>/dev/null; then
+    printf 'colony\tconfigs/colony_ray_aws.json\tray_colony\tvecoli:v2-ray-arm64\n' >> "$_REGISTRY"
+    echo "Backfilled 'colony' alias in $_REGISTRY" >&2
   fi
   _migrate_registry_2col_to_3col
   _migrate_registry_3col_to_4col
@@ -240,10 +246,14 @@ _normalize_method() {
     ray|ray_cluster)                   echo "ray" ;;
     # ray_colony: sibling of ray. Same Ray-on-EC2-via-SSM
     # infrastructure (bootstrap_head_ray_colony.sh +
-    # ec2_cluster_ray_colony.py), but invokes the greenfield
-    # ``run_colony_ray.py`` instead of ``run_composite_lineage_ray.py``.
-    # Each Ray actor runs one colony (greenfield in-place divide,
-    # cells multiply 1 → 2^target_doublings inside the actor).
+    # ec2_cluster_ray_colony.py). Invokes the cell-as-Composite
+    # pipeline (``run_colony_cac_ray.py``) where each cell is its
+    # own Composite on a shared pool of Ray actors per node.
+    # Mother divides via _add/_remove sentinels → daughters spawn
+    # at outer.agents.<id>.cell and use ``ray:EcoliCellComposite``
+    # to rebuild their cell tree from sim_data on the receiving
+    # actor (avoids cloudpickle failure on Process instances with
+    # scipy lsoda's _queue.SimpleQueue and similar runtime state).
     ray_colony|ray_colony_cluster)     echo "ray_colony" ;;
     comparison|compare|comparison_head) echo "comparison" ;;
     *) echo "" ;;
@@ -406,10 +416,13 @@ _use_variant() {
       ;;
     ray_colony_cluster)
       # Same Ray-on-EC2 driver topology as ray_cluster; only the
-      # script that runs on the cluster changes. Each Ray actor runs
-      # one colony via the greenfield ``run_colony_ray.py`` (cells
-      # multiply 1 → 2^target_doublings in-place via the
-      # schema-driven _divide sentinel).
+      # script that runs on the cluster changes. Invokes the
+      # cell-as-Composite pipeline (``run_colony_cac_ray.py``).
+      # Outer Composite on the head holds N cells; each cell is
+      # its own Composite wrapped as ``ray:Composite`` (mother)
+      # or ``ray:EcoliCellComposite`` (daughter). Daughter actors
+      # rebuild from sim_data on receive — sim_data preloaded once
+      # per worker node via ``load_sim_data_provider``.
       HEAD_NAME="${HEAD_NAME_OVERRIDE:-${cfg_head:-$default_head}}"
       HEAD_INSTANCE_TYPE="${HEAD_INSTANCE_TYPE_OVERRIDE:-c7i.large}"
       BOOTSTRAP_SCRIPT="$SCRIPT_DIR/bootstrap_head_ray_colony.sh"

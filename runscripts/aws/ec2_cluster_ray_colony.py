@@ -169,7 +169,7 @@ def main() -> int:
         "CONFIG_RELPATH", "configs/comparison_10s_16g_v2_ray_aws.json")
     # CLI-supplied experiment_id (vecoli_aws.sh assigns one per
     # ``run launch ray`` and persists it in a sidecar). Forwarded as
-    # ``--experiment-id`` to run_colony_ray.py so all S3
+    # ``--experiment-id`` to run_colony_cac_ray.py so all S3
     # output / synthetic_trace land under the unique ID.
     experiment_id = os.environ.get("EXPERIMENT_ID", "")
 
@@ -340,8 +340,14 @@ def main() -> int:
                 # === end diagnostic ===
                 # POLARS_MAX_THREADS=1 to avoid oversubscription on the
                 # multi-actor head — same setup MP runner uses.
+                # ``run_colony_cac_ray.py`` is the cell-as-Composite
+                # pipeline (mother + daughters as ray:Composite /
+                # ray:EcoliCellComposite, sharing one actor pool per
+                # worker node via load_sim_data_provider). Replaced
+                # ``run_colony_ray.py`` (legacy _divide sentinel,
+                # single actor for whole colony).
                 f"POLARS_MAX_THREADS=1 "
-                f"python -u runscripts/run_colony_ray.py "
+                f"python -u runscripts/run_colony_cac_ray.py "
                 f"  --config {config_relpath} "
                 f"  --ray_address auto "
                 f"""{f"  --experiment-id {experiment_id} " if experiment_id else ""}"""

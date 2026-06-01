@@ -1664,3 +1664,89 @@ def bundle(schema: Function, state, context: typing.Optional[BundleContext] = No
     return serialize(schema, state)
 
 
+
+
+def register_ecoli_types(core):
+    """Type-provider for Ray actors. Registers the basic ECOLI_TYPES
+    on the actor's freshly-allocated core. Wire up via:
+
+        from process_bigraph.protocols.ray import register_type_provider
+        register_type_provider(
+            'ecoli.library.bigraph_types', 'register_ecoli_types')
+
+    Then every actor (per-shard pool) calls this against its own core
+    before instantiating the cell-Composite.
+    """
+    core.register_types(ECOLI_TYPES)
+
+
+_LSD_CACHE: typing.Dict[str, typing.Any] = {}
+
+
+def get_cached_load_sim_data(sim_data_path: str, sim_config: dict = None):
+    """Return a cached ``LoadSimData`` for this path, building it if
+    absent. ``EcoliCellComposite.initialize`` uses this so each
+    daughter doesn't re-load the same sim_data pickle from disk."""
+    lsd = _LSD_CACHE.get(sim_data_path)
+    if lsd is None:
+        from ecoli.library.sim_data import LoadSimData
+        cfg = dict(sim_config or {})
+        cfg.setdefault('sim_data_path', sim_data_path)
+        cfg.setdefault('seed', 0)
+        cfg.setdefault('agent_id', '0')
+        lsd = LoadSimData(**cfg)
+        _LSD_CACHE[sim_data_path] = lsd
+    return lsd
+
+
+def load_sim_data_provider(core, sim_data_path: str,
+                            sim_config: dict = None):
+    """Type-provider that pre-loads sim_data on the actor.
+
+    Populates the module-global ``_sim_data_object_instances`` from a
+    ``LoadSimData`` constructed from disk, so ``SimDataObjectRef`` can
+    resolve store_keys WITHOUT the actor having to receive sim_data
+    via per-cell ``config['state']``. The daughter's CompositeDivision
+    can therefore strip ``sim_data_objects`` from its shipped state.
+
+    Wire up via:
+
+        register_type_provider(
+            'ecoli.library.bigraph_types',
+            'load_sim_data_provider',
+            kwargs={'sim_data_path': '/path/to/simData.cPickle',
+                    'sim_config': {...}})
+    """
+    import sys as _sys
+    _sys.stderr.write(
+        f'[sim-data-provider] loading sim_data on actor '
+        f'from {sim_data_path}\n')
+    _sys.stderr.flush()
+    # Build (and cache) the LoadSimData so EcoliCellComposite can
+    # re-use it without re-loading the pickle.
+    lsd = get_cached_load_sim_data(sim_data_path, sim_config)
+    sd = lsd.sim_data
+    # Same mapping as build_ecoli_document populates into the
+    # cell_state['sim_data_objects'] dict. Kept in sync manually —
+    # adding a new key here requires mirroring it there.
+    _paths = {
+        'external_state': sd.external_state,
+        'mass': sd.mass,
+        'growth_rate_parameters': sd.growth_rate_parameters,
+        'getter': sd.getter,
+        'transcription': sd.process.transcription,
+        'transcription_regulation': sd.process.transcription_regulation,
+        'replication': sd.process.replication,
+        'translation': sd.process.translation,
+        'metabolism_data': sd.process.metabolism,
+        'equilibrium_data': sd.process.equilibrium,
+        'two_component_system': sd.process.two_component_system,
+        'concentration_updates': sd.process.metabolism.concentration_updates,
+    }
+    for key, instance in _paths.items():
+        if instance is not None:
+            _sim_data_object_instances[key] = instance
+    _sys.stderr.write(
+        f'[sim-data-provider] populated {len(_sim_data_object_instances)} '
+        f'sim_data instances on actor\n')
+    _sys.stderr.flush()
