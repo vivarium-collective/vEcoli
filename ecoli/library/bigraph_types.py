@@ -1700,7 +1700,8 @@ def get_cached_load_sim_data(sim_data_path: str, sim_config: dict = None):
 
 
 def load_sim_data_provider(core, sim_data_path: str,
-                            sim_config: dict = None):
+                            sim_config: dict = None,
+                            aws_region: str = None):
     """Type-provider that pre-loads sim_data on the actor.
 
     Populates the module-global ``_sim_data_object_instances`` from a
@@ -1708,6 +1709,14 @@ def load_sim_data_provider(core, sim_data_path: str,
     resolve store_keys WITHOUT the actor having to receive sim_data
     via per-cell ``config['state']``. The daughter's CompositeDivision
     can therefore strip ``sim_data_objects`` from its shipped state.
+
+    For S3 reads on GovCloud: Ray spawns actor processes that do NOT
+    inherit driver env vars, so boto3/polars/fsspec default to
+    us-east-1 and a HeadObject against a GovCloud bucket returns
+    400 Bad Request. ``aws_region`` (default ``us-gov-west-1``) is
+    set via ``os.environ.setdefault`` before any S3 op. Pass
+    ``aws_region=''`` to skip the setdefault entirely if running
+    against commercial AWS with credentials from a different chain.
 
     Wire up via:
 
@@ -1717,10 +1726,18 @@ def load_sim_data_provider(core, sim_data_path: str,
             kwargs={'sim_data_path': '/path/to/simData.cPickle',
                     'sim_config': {...}})
     """
+    import os as _os
     import sys as _sys
+    # One-stop actor-process setup: AWS_REGION env, thread pins, and
+    # s3fs CreateBucket monkey-patch. Same setup ``run_colony_ray.py``
+    # does inline inside its ``@ray.remote`` body. Idempotent
+    # (setdefault) so explicit env overrides survive.
+    from ecoli.library.ray_actor_setup import setup_ray_actor_process
+    setup_ray_actor_process(
+        aws_region='us-gov-west-1' if aws_region is None else aws_region)
     _sys.stderr.write(
         f'[sim-data-provider] loading sim_data on actor '
-        f'from {sim_data_path}\n')
+        f'from {sim_data_path} (AWS_REGION={_os.environ.get("AWS_REGION")})\n')
     _sys.stderr.flush()
     # Build (and cache) the LoadSimData so EcoliCellComposite can
     # re-use it without re-loading the pickle.

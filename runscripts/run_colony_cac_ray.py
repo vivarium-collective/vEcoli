@@ -315,14 +315,43 @@ def build_and_run(sim_data_path, target_doublings, max_duration,
     print(f'[colony-cac]   outer build: '
           f'{time.perf_counter()-t0:.1f}s', flush=True)
 
-    # Run.
+    # Run. Driver thread blocks in ``outer.run`` for the whole duration,
+    # so a side-thread reads ``outer.state['global_time']`` + cell count
+    # and prints every HEARTBEAT_SECS to stdout. Without this you stare
+    # at silence for hours on long cluster runs and can't tell whether
+    # the cluster is ticking or hung.
     target_n = 2 ** target_doublings
     print(f'[colony-cac] running for {max_duration:.0f}s sim time '
           f'(target: 1 → {target_n} cells, '
           f'experiment_id={experiment_id!r})...', flush=True)
+
+    import threading
+    holder: dict = {}
+
+    def _drive():
+        try:
+            outer.run(max_duration)
+            holder['ok'] = True
+        except BaseException as e:
+            holder['exc'] = e
+
     t0 = time.perf_counter()
-    outer.run(max_duration)
+    runner = threading.Thread(target=_drive, daemon=True)
+    runner.start()
+    HEARTBEAT_SECS = 60.0
+    while runner.is_alive():
+        runner.join(timeout=HEARTBEAT_SECS)
+        if runner.is_alive():
+            gt = outer.state.get('global_time', 0.0)
+            agents = outer.state.get('agents', {})
+            n_cells = len(agents) if isinstance(agents, dict) else 0
+            print(
+                f'[colony-cac] heartbeat: sim_t={gt:.1f}s cells={n_cells} '
+                f'wall={time.perf_counter()-t0:.0f}s',
+                flush=True)
     wall = time.perf_counter() - t0
+    if 'exc' in holder:
+        raise holder['exc']
 
     agents_pre = ['0']
     agents_post = sorted(outer.state.get('agents', {}).keys())

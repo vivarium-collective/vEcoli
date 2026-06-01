@@ -77,6 +77,8 @@ class EcoliCellComposite(Composite):
     }
 
     def initialize(self, config: Optional[dict] = None) -> None:
+        import sys as _sys
+        import time as _ti
         cell_build = self.config.get('cell_build_config') if isinstance(
             self.config, dict) else None
         if cell_build:
@@ -102,10 +104,24 @@ class EcoliCellComposite(Composite):
                 sim_config['initial_state'] = {
                     'agents': {agent_id: divided}
                 }
+            _t0 = _ti.perf_counter()
+            _sys.stderr.write(
+                f'[ecc-init] agent={agent_id} start '
+                f'(overlay_keys={len(divided) if isinstance(divided, dict) else 0})\n')
+            _sys.stderr.flush()
 
             lsd = get_cached_load_sim_data(sim_data_path, sim_config)
+            _sys.stderr.write(
+                f'[ecc-init] agent={agent_id} '
+                f'lsd-loaded ({_ti.perf_counter()-_t0:.1f}s)\n')
+            _sys.stderr.flush()
+
             cell_doc = build_ecoli_document(
                 self.core, sim_config, load_sim_data=lsd)
+            _sys.stderr.write(
+                f'[ecc-init] agent={agent_id} '
+                f'build_ecoli_document done ({_ti.perf_counter()-_t0:.1f}s)\n')
+            _sys.stderr.flush()
 
             # Replace the placeholder state with the freshly-built
             # cell_doc. Now super().initialize sees the full cell
@@ -113,6 +129,11 @@ class EcoliCellComposite(Composite):
             self.config['state'] = cell_doc
 
         super().initialize(config)
+        if cell_build:
+            _sys.stderr.write(
+                f'[ecc-init] agent={agent_id} '
+                f'composite-ready ({_ti.perf_counter()-_t0:.1f}s)\n')
+            _sys.stderr.flush()
 
 
 class EcoliCellProcess(Process):

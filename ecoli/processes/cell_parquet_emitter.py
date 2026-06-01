@@ -47,17 +47,31 @@ class CellParquetEmitter(Step):
 
     def __init__(self, config=None, core=None):
         super().__init__(config, core=core)
-        import sys as _sys
-        import time as _ti
-        _sys.stderr.write(
-            f'[cpe-init] t={_ti.time():.3f} agent={config.get("agent_id") if config else "?"}\n')
-        _sys.stderr.flush()
         from ecoli.library.parquet_emitter import ParquetEmitter
-        self._emitter = ParquetEmitter({
-            'out_dir': self.config['out_dir'],
+        # Route to ``out_uri`` for cloud (s3://, gs://) so
+        # ParquetEmitter uses fsspec; else local ``out_dir`` (which
+        # gets ``os.path.abspath``'d). Without this branch, an
+        # ``s3://...`` path passed as ``out_dir`` silently writes
+        # to a bogus local path like ``/.../s3:/...``.
+        _path = self.config['out_dir']
+        _emitter_cfg = {
             'batch_size': self.config.get('batch_size', 400),
             'threaded': True,
-        })
+        }
+        if isinstance(_path, str) and (
+                _path.startswith('s3://') or _path.startswith('gs://')):
+            _emitter_cfg['out_uri'] = _path
+        else:
+            _emitter_cfg['out_dir'] = _path
+        self._emitter = ParquetEmitter(_emitter_cfg)
+        # Register an atexit handler to flush the emitter buffer at
+        # interpreter shutdown. More reliable than ``__del__``: __del__
+        # may never fire on Ray actor exit (abrupt teardown), but
+        # atexit handlers run on normal shutdown including
+        # SIGTERM-handled Ray actor stops. The handler is idempotent
+        # — if __del__ flushed first, the second flush is a no-op.
+        import atexit as _atexit
+        _atexit.register(self._safe_finalize)
         # Configuration emit installs the partition path. Minimum
         # metadata keys to satisfy v1's column expectations; analyses
         # may want more later.
@@ -135,15 +149,23 @@ class CellParquetEmitter(Step):
         })
         return {}
 
-    def __del__(self):
-        # Flush remaining buffered emits on cell shutdown / divide.
-        # Without this, the last <batch_size> emits never reach disk.
+    def _safe_finalize(self) -> None:
+        """Idempotent finalize: flush buffer + write _success.pq marker.
+        Safe to call multiple times (from __del__ AND atexit)."""
+        em = getattr(self, '_emitter', None)
+        if em is None:
+            return
         try:
-            if hasattr(self, '_emitter') and self._emitter is not None:
-                self._emitter.success = True
-                self._emitter.finalize()
+            em.success = True
+            em.finalize()
         except Exception:
             pass
+        self._emitter = None  # mark flushed
+
+    def __del__(self):
+        # Backup path: __del__ fires when a cell-Composite is GC'd
+        # (e.g. on actor restart). atexit covers normal shutdown.
+        self._safe_finalize()
 
 
 class TickHeartbeat(Step):
