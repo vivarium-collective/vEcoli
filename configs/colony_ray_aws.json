@@ -3,6 +3,7 @@
     "experiment_id": "colony_ray_aws",
 
     "sim_data_path": "s3://smsvpctest-shared-sharedbucket60d199d6-abfvwv0day91/vecoli-output/comparison_10s_16g_v2_aws_listener_fix/comparison_10s_16g_v2_aws_listener_fix/parca/kb/simData.cPickle",
+    "validation_data_path": "s3://smsvpctest-shared-sharedbucket60d199d6-abfvwv0day91/vecoli-output/comparison_10s_16g_v2_aws_listener_fix/comparison_10s_16g_v2_aws_listener_fix/parca/kb/validationData.cPickle",
 
     "emitter_arg": {
         "out_uri": "s3://smsvpctest-shared-sharedbucket60d199d6-abfvwv0day91/vecoli-output/colony_ray_aws",
@@ -25,5 +26,33 @@
         }
     },
 
-    "progress_bar": false
+    "progress_bar": false,
+
+    "analysis_options": {
+        "cpus": 4,
+        "memory_gb": 8,
+
+        "single": {
+            "mass_fraction_summary": {},
+            "selected_fluxes": {},
+            "blame": {}
+        },
+
+        "multigeneration": {
+            "replication": {},
+            "ribosome_components": {},
+            "ribosome_production": {},
+            "ribosome_usage": {}
+        },
+
+        "multiseed": {
+            "ecocyc_table": {
+                "ignore_first_n_gens": 0
+            },
+            "protein_counts_validation": {},
+            "subgenerational_expression_table": {
+                "ignore_first_n_gens": 0
+            }
+        }
+    }
 }

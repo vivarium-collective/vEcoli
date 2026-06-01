@@ -128,6 +128,14 @@ def build_ecoli_document(core, sim_config, load_sim_data=None, flat=False):
     if parquet_cfg:
         from ecoli.processes.cell_parquet_emitter import (
             CellParquetEmitter, TOPOLOGY as _PARQUET_TOPOLOGY)
+        # Stamp the cell's canonical agent_id into the parquet config
+        # so daughters write to their OWN hive partition. Without this,
+        # the upstream parquet_cfg keeps the mother's agent_id and every
+        # daughter overwrites the mother's parquet batches at the same
+        # generation=N/agent_id=<mother>/ path.
+        parquet_cfg = deepcopy(parquet_cfg)
+        parquet_cfg['agent_id'] = str(sim_config.get(
+            'agent_id', parquet_cfg.get('agent_id', '0')))
         classes['parquet_emitter'] = CellParquetEmitter
         configs['parquet_emitter'] = parquet_cfg
         topology['parquet_emitter'] = deepcopy(_PARQUET_TOPOLOGY)
