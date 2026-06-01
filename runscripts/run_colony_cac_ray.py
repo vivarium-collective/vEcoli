@@ -265,7 +265,13 @@ def build_and_run(sim_data_path, target_doublings, max_duration,
 
     cell_node = {
         '_type': 'process',
-        'address': 'ray:Composite',
+        # Same class+pool as daughters so the actor that hosted the mother
+        # is immediately reusable for a daughter after divide. Without this,
+        # mother would live in a separate `Composite:default` pool and its
+        # actors would sit idle holding sim_data after divide. EcoliCellComposite
+        # detects mother vs daughter state shape and skips the rebuild when
+        # state is already a full cell_doc — see ecoli_cell_process.py:79.
+        'address': 'ray:EcoliCellComposite',
         'config': {
             'state': cell_doc,
             'schema': {

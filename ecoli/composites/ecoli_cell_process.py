@@ -81,14 +81,39 @@ class EcoliCellComposite(Composite):
         import time as _ti
         cell_build = self.config.get('cell_build_config') if isinstance(
             self.config, dict) else None
-        if cell_build:
+        # Detect daughter case: state is wrapped as {'agents': {<id>: overlay}}
+        # by CompositeDivision. Mother case: state is already a flat cell_doc
+        # built by the colony driver (no 'agents' wrapper). Skipping the
+        # rebuild for the mother lets the SAME class+pool host both — every
+        # actor is reusable across the colony lifetime instead of half the
+        # pool sitting idle after the mother divides.
+        state_in = self.config.get('state') if isinstance(
+            self.config, dict) else None
+        is_daughter_overlay = (
+            isinstance(state_in, dict)
+            and isinstance(state_in.get('agents'), dict)
+            and len(state_in.get('agents', {})) > 0)
+        if cell_build and is_daughter_overlay:
             from ecoli.composites.ecoli_composite import build_ecoli_document
 
             sim_config = dict(cell_build.get('sim_config', {}))
             agent_id = cell_build.get('agent_id', '0')
             sim_data_path = cell_build.get('sim_data_path')
             sim_config['agent_id'] = agent_id
-            sim_config.setdefault('seed', 0)
+            # Per-cell seed derived from the agent_id path so every
+            # daughter in the colony has its OWN RNG (otherwise all
+            # siblings inherit the mother's seed → identical
+            # trajectories → synchronous division). lineage_seed is the
+            # colony-level base (set as sim_config['seed'] by the
+            # colony driver). Formula: lineage_seed + (1 << len(path))
+            # + int(path, 2) gives unique seeds for every node in the
+            # binary lineage tree ('0'→+2, '00'→+4, '01'→+5,
+            # '000'→+8, '001'→+9, '010'→+10, '011'→+11, …).
+            lineage_seed = int(sim_config.get('lineage_seed',
+                                                sim_config.get('seed', 0)))
+            sim_config['seed'] = (lineage_seed
+                                  + (1 << len(agent_id))
+                                  + int(agent_id or '0', 2))
             sim_config['sim_data_path'] = sim_data_path
 
             # Use shipped state[agents][agent_id] as the data overlay
@@ -129,7 +154,7 @@ class EcoliCellComposite(Composite):
             self.config['state'] = cell_doc
 
         super().initialize(config)
-        if cell_build:
+        if cell_build and is_daughter_overlay:
             _sys.stderr.write(
                 f'[ecc-init] agent={agent_id} '
                 f'composite-ready ({_ti.perf_counter()-_t0:.1f}s)\n')

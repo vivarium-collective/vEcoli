@@ -21,7 +21,6 @@
         "ray": {
             "cluster_yaml": "runscripts/aws/vecoli-ray-ec2-cluster.yaml",
             "head_instance_type": "c7i.xlarge",
-            "max_workers": 1,
             "idle_timeout_minutes": 30
         }
     },

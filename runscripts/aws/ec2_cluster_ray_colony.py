@@ -179,48 +179,46 @@ def main() -> int:
     # config chain so values can live in any parent.
     n_seeds, target_doublings, max_duration = _read_sim_knobs_from_config(
         config_relpath)
-    # Cluster sizing: prefer config's ``aws.ray.max_workers`` (the
-    # config is the source of truth for the cluster topology). Env
-    # ``N_WORKERS`` overrides for ad-hoc swaps. Final fallback is
-    # n_seeds (one worker per lineage actor).
-    # Colony architecture (option a): ONE Ray actor per colony, with
-    # cells growing 1 → 2^target_doublings INSIDE that actor. The
-    # actor itself needs enough vCPU + RAM for the final cell count
-    # (each cell costs ~1 vCPU and ~500 MB at peak). Default
-    # n_workers = n_seeds (= number of independent parallel colonies);
-    # WORKER_INSTANCE_TYPE auto-picks based on target_doublings unless
-    # explicitly overridden via env/config.
+    # Cluster sizing for the cell-as-Composite architecture: cells are
+    # distributed as one Ray actor per shard, with each actor holding
+    # one OR MORE Composite cell instances (round-robin sticky
+    # assignment in _ShardPool — see process_bigraph/protocols/ray.py).
+    # Each cell needs ~1 vCPU + ~2.5 GB RAM at peak (sim_data + bulk +
+    # listeners). Density target: ~6 cells per c7i.4xlarge worker
+    # (15 GB cells + ~700 MB sim_data + headroom in 32 GB).
+    #
+    # The autopicker returns BOTH worker_instance_type AND n_workers
+    # jointly so the topology matches the load. Explicit overrides via
+    # WORKER_INSTANCE_TYPE / N_WORKERS env or aws.ray.* config still win.
+    import math
+    CELLS_PER_WORKER = 6
+    def _autopick_for_target(td, ns):
+        final_n = (2 ** td) * ns
+        n_workers = max(1, math.ceil(final_n / CELLS_PER_WORKER))
+        if final_n > 1024:
+            # At 2^10+ cells, naive per-cell scaling gets prohibitively
+            # expensive (~$1000/hr at 2^14). Sub-sample lineages
+            # statistically (e.g. SMC) or batch cells more aggressively
+            # before pushing further. Warn but proceed.
+            print(f"⚠️  target_doublings={td} (n_seeds={ns}) → "
+                  f"{final_n} cells × c7i.4xlarge = {n_workers} workers. "
+                  f"At this scale, consider sub-sampling lineages or "
+                  f"reducing per-cell footprint.", flush=True)
+        return ("c7i.4xlarge", n_workers)
+
+    autopicked_type, autopicked_n_workers = _autopick_for_target(
+        target_doublings, n_seeds)
     n_workers = int(
         os.environ.get("N_WORKERS")
         or _read_aws_ray_int(config_relpath, "max_workers")
-        or str(n_seeds))
-
-    # Auto-sizing table for the per-actor instance based on the
-    # expected final cell count (2^target_doublings). Each cell needs
-    # ~1 vCPU and ~500 MB RAM at peak. Pick the smallest c7i.* that
-    # fits; fall back to m7g for very large targets where memory
-    # dominates. Override via WORKER_INSTANCE_TYPE / config aws.ray.
-    # worker_instance_type if you need spot capacity / different family.
-    def _autopick_worker_for_target(td):
-        final_n = 2 ** td
-        if final_n <= 2:   return "c7i.xlarge"     # 4 vCPU, 8 GB
-        if final_n <= 8:   return "c7i.2xlarge"    # 8 vCPU, 16 GB
-        if final_n <= 32:  return "c7i.8xlarge"    # 32 vCPU, 64 GB
-        if final_n <= 128: return "c7i.24xlarge"   # 96 vCPU, 192 GB
-        # 256+ cells: option (a) breaks down — switch to option (b)
-        # (cells-as-actors). For now warn + return largest c7i.
-        print(f"⚠️  target_doublings={td} → {final_n} cells will not "
-              f"fit comfortably in a single Ray actor (option-a "
-              f"architecture). Consider the cells-as-actors design.",
-              flush=True)
-        return "c7i.48xlarge"  # 192 vCPU, 384 GB
+        or str(autopicked_n_workers))
 
     head_type = (os.environ.get("HEAD_INSTANCE_TYPE")
                  or _read_aws_ray_int(config_relpath, "head_instance_type")
                  or "m5.2xlarge")
     worker_type = (os.environ.get("WORKER_INSTANCE_TYPE")
                    or _read_aws_ray_int(config_relpath, "worker_instance_type")
-                   or _autopick_worker_for_target(target_doublings))
+                   or autopicked_type)
     iam_profile = os.environ.get("IAM_INSTANCE_PROFILE") or "ECR"
     baked_ami_id = os.environ.get("BAKED_AMI_ID") or None
     # process-bigraph 1.4.8 (PyPI, what's installed by vEcoli's frozen
@@ -340,6 +338,12 @@ def main() -> int:
                 # === end diagnostic ===
                 # POLARS_MAX_THREADS=1 to avoid oversubscription on the
                 # multi-actor head — same setup MP runner uses.
+                # RAY_SHARDS_DEFAULT sizes the actor pool to the final
+                # colony cell count so each cell gets its OWN actor
+                # (Ray scheduler spreads them across workers based on
+                # available CPU). Without this, pool defaults to
+                # os.cpu_count() on the head — 4-actor pool packed on
+                # one worker even when more workers are available.
                 # ``run_colony_cac_ray.py`` is the cell-as-Composite
                 # pipeline (mother + daughters as ray:Composite /
                 # ray:EcoliCellComposite, sharing one actor pool per
@@ -347,6 +351,7 @@ def main() -> int:
                 # ``run_colony_ray.py`` (legacy _divide sentinel,
                 # single actor for whole colony).
                 f"POLARS_MAX_THREADS=1 "
+                f"RAY_SHARDS_DEFAULT={n_seeds * (2 ** target_doublings)} "
                 f"python -u runscripts/run_colony_cac_ray.py "
                 f"  --config {config_relpath} "
                 f"  --ray_address auto "
