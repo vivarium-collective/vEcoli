@@ -198,6 +198,22 @@ def main():
         print(f'[probe]   EARLY fallback cell_tree_node from _value: '
               f'{len(cell_tree_node_early) if isinstance(cell_tree_node_early, dict) else "?"} keys',
               flush=True)
+    # Build nested-dict input schemas for CellParquetEmitter from
+    # the cell tree's actual schema. The wire system requires
+    # nested-dict declarations (not string types) to project the
+    # keys into the Step's update(state). See memory:
+    # wire-projection-requires-nested-dicts.
+    # SUBSET: only listeners.mass for now — full schema causes
+    # outer-build hangs in resolve (~12k chars total when rendered).
+    from ecoli.library.schema_types import schema_node_to_plain_dict
+    listeners_full = schema_node_to_plain_dict(
+        core, cell_tree_node_early['listeners'])
+    listeners_plain = {'mass': listeners_full.get('mass', {})}
+    process_state_plain = schema_node_to_plain_dict(
+        core, cell_tree_node_early['process_state'])
+    print(f'[probe]   built plain-dict schemas: listeners.mass '
+          f'{len(listeners_plain["mass"])} fields; process_state '
+          f'{len(process_state_plain)} top-level keys', flush=True)
     # Extract the inner cell tree's schema (the per-agent shape) from
     # the full composite schema. The full schema has ``{agents: Map[
     # cell_tree], global_time: ..., sim_data_objects: ...}`` at top.
@@ -335,28 +351,19 @@ def main():
         },
         'inputs': {'global_time': ['global_time']},
     }
-    parquet_emitter_step = {
-        '_type': 'step',
-        'address': 'local:!ecoli.processes.cell_parquet_emitter.CellParquetEmitter',
-        'config': {
-            'out_dir': parquet_out_dir,
-            'experiment_id': experiment_id,
-            'agent_id': sim_config['agent_id'],
-            'variant': 0,
-            'lineage_seed': sim_config.get('seed', 0),
-            'batch_size': 400,
-        },
-        # Wired from inside cell.state.agents.<id>.parquet_emitter:
-        #   - ['..', 'listeners']  → cell.state.agents.<id>.listeners
-        #   - ['..', 'bulk']        → cell.state.agents.<id>.bulk
-        #   - ['..', 'process_state'] → cell.state.agents.<id>.process_state
-        #   - ['..', '..', '..', 'global_time'] → cell.state.global_time
-        'inputs': {
-            'global_time': ['..', '..', 'global_time'],
-            'listeners': ['..', 'listeners'],
-            'bulk': ['..', 'bulk'],
-            'process_state': ['..', 'process_state'],
-        },
+    # parquet_emitter config goes into sim_config['parquet_emitter']
+    # so build_ecoli_document adds it through the normal step
+    # pipeline (classes/configs/flow/topology) — same paradigm as
+    # mass_listener et al. Schemas merge cleanly during the co-build.
+    parquet_emitter_config = {
+        'out_dir': parquet_out_dir,
+        'experiment_id': experiment_id,
+        'agent_id': sim_config['agent_id'],
+        'variant': 0,
+        'lineage_seed': sim_config.get('seed', 0),
+        'batch_size': 400,
+        'listeners_schema': listeners_plain,
+        'process_state_schema': process_state_plain,
     }
 
     print('[probe] PASS 2: rebuild cell tree with wrap_template + '
@@ -385,33 +392,22 @@ def main():
         **sim_config,
         'cell_as_composite_mode': True,
         'daughter_address': daughter_address,
+        # parquet_emitter config flows through build_ecoli_document
+        # → cell tree as a regular step (see ecoli_composite.py:3a).
+        'parquet_emitter': parquet_emitter_config,
+        # For ray:Composite: actor pre-loads sim_data via
+        # load_sim_data_provider type provider; skip shipping
+        # sim_data_objects through cell state.
+        **(
+            {'skip_sim_data_objects_in_state': True}
+            if args.address.startswith('ray:') else {}),
     }
     cell_doc = build_ecoli_document(core, sim_config_full,
                                      load_sim_data=lsd, flat=False)
-    # Inject the per-cell parquet emitter step as a sibling of
-    # division/allocators inside the cell's agents map. It travels
-    # with the cell tree through divide (path_copy_merge preserves
-    # it) and gets a fresh instance per daughter via realize. All
-    # daughters currently share the mother's agent_id in their
-    # emitter config — fix per-daughter agent_id later by adding
-    # 'parquet_emitter.config.agent_id' to CompositeDivision's
-    # override.
     agent_id = sim_config['agent_id']
-    cell_doc['agents'][agent_id]['parquet_emitter'] = parquet_emitter_step
-    # Strip ``sim_data_objects`` from the cell document for Ray runs.
-    # The actor's ``load_sim_data_provider`` type-provider already
-    # populates ``_sim_data_object_instances`` from disk, so any
-    # SimDataObjectRef in the cell tree resolves against the
-    # actor-local instances. Sending sim_data through config doubles
-    # the wire transfer per pool spawn (~700MB) and per-daughter
-    # cloudpickle work. For local runs the driver already populated
-    # the instance store via _bt._sim_data_object_instances above —
-    # also safe to drop. The mother's already-driver-side instance
-    # store still satisfies driver-side realize for the outer.
-    if args.address.startswith('ray:') and 'sim_data_objects' in cell_doc:
-        del cell_doc['sim_data_objects']
-        print(f'[probe]   stripped sim_data_objects from cell_doc '
-              f'(actor loads via type-provider)', flush=True)
+    # sim_data_objects skipped at build time via the
+    # skip_sim_data_objects_in_state flag (set above for Ray runs).
+    # Actor's load_sim_data_provider populates the instance store.
     print(f'[probe]   pass 2 built in {time.perf_counter()-t0:.1f}s; '
           f'cell_doc keys: {sorted(cell_doc.keys())[:8]}...',
           flush=True)

@@ -201,7 +201,29 @@ def build_and_run(sim_data_path, target_doublings, max_duration,
         **sim_config,
         'cell_as_composite_mode': True,
         'daughter_address': daughter_address,
+        # Actor pre-loads sim_data via load_sim_data_provider type
+        # provider — no need to ship sim_data_objects through cell
+        # state. Saves ~700MB per cell pool spawn over the wire.
+        'skip_sim_data_objects_in_state': True,
     }
+    # parquet_emitter config: build_ecoli_document picks this up and
+    # adds CellParquetEmitter to the cell tree as a regular step
+    # (alongside mass_listener etc.). Schemas merge cleanly because
+    # the step is part of the same build pass.
+    if out_uri:
+        from ecoli.library.schema_types import schema_node_to_plain_dict
+        sim_config_full['parquet_emitter'] = {
+            'out_dir': out_uri,
+            'experiment_id': experiment_id or f'cac_{int(time.time())}',
+            'agent_id': sim_config['agent_id'],
+            'variant': 0,
+            'lineage_seed': base_seed,
+            'batch_size': 400,
+            'listeners_schema': schema_node_to_plain_dict(
+                core, cell_tree_node['listeners']),
+            'process_state_schema': schema_node_to_plain_dict(
+                core, cell_tree_node['process_state']),
+        }
     daughter_wrap_template = {
         '_type': 'process',
         'address': daughter_address,
@@ -233,39 +255,13 @@ def build_and_run(sim_data_path, target_doublings, max_duration,
     t0 = time.perf_counter()
     cell_doc = build_ecoli_document(
         core, sim_config_full, load_sim_data=lsd, flat=False)
-    # Strip sim_data_objects: the actor's load_sim_data_provider
-    # type-provider populates _sim_data_object_instances from disk,
-    # so SimDataObjectRef resolves locally. Shipping sim_data through
-    # config doubles wire transfer per pool spawn.
-    if 'sim_data_objects' in cell_doc:
-        del cell_doc['sim_data_objects']
+    # sim_data_objects is OMITTED from cell_state at build time
+    # via skip_sim_data_objects_in_state — actor's
+    # load_sim_data_provider populates _sim_data_object_instances
+    # from disk so SimDataObjectRef resolves locally.
 
-    # Optional per-cell parquet emitter inside each cell tree.
-    if out_uri:
-        from ecoli.library.parquet_emitter import (  # noqa: F401
-            ParquetEmitter)
-        agent_id = sim_config['agent_id']
-        parquet_step = {
-            '_type': 'step',
-            'address': (
-                'local:!ecoli.processes.cell_parquet_emitter.'
-                'CellParquetEmitter'),
-            'config': {
-                'out_dir': out_uri,
-                'experiment_id': experiment_id or f'cac_{int(time.time())}',
-                'agent_id': agent_id,
-                'variant': 0,
-                'lineage_seed': base_seed,
-                'batch_size': 400,
-            },
-            'inputs': {
-                'global_time': ['..', '..', 'global_time'],
-                'listeners': ['..', 'listeners'],
-                'bulk': ['..', 'bulk'],
-                'process_state': ['..', 'process_state'],
-            },
-        }
-        cell_doc['agents'][agent_id]['parquet_emitter'] = parquet_step
+    # parquet_emitter step is added by build_ecoli_document via
+    # sim_config_full['parquet_emitter'] above — no post-injection.
 
     cell_node = {
         '_type': 'process',

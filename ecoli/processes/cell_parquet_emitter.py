@@ -1,5 +1,11 @@
 """Per-cell Parquet emitter Step.
 
+Registered via topology_registry so build_ecoli_document can add it
+as a regular step alongside mass_listener etc. — same paradigm,
+schemas merge cleanly. Post-injection into a built cell_doc
+corrupts sibling steps' precompile_link because the schema merge
+isn't part of the co-build pass.
+
 Wires inside the cell-Composite's state tree as a Step. Triggers
 every tick (its ``triggers()`` declares only ``global_time``, which
 changes once per tick). On fire, reads listeners/bulk/process_state
@@ -25,6 +31,22 @@ from typing import Any, Dict
 import numpy as np
 from process_bigraph.composite import Step
 
+from ecoli.processes.registries import topology_registry
+
+
+# Register topology so build_ecoli_document can pick this step up
+# alongside the rest of the cell tree (same paradigm as mass_listener,
+# dna_supercoiling, etc.). Wires are relative to the agent root —
+# the framework prepends ``agents/<id>/`` when realizing.
+NAME = "parquet_emitter"
+TOPOLOGY = {
+    "global_time": ("global_time",),
+    "bulk": ("bulk",),
+    "listeners": ("listeners",),
+    "process_state": ("process_state",),
+}
+topology_registry.register(NAME, TOPOLOGY)
+
 
 class CellParquetEmitter(Step):
     """Per-cell ParquetEmitter wired as a Step inside the cell tree."""
@@ -43,6 +65,15 @@ class CellParquetEmitter(Step):
         'lineage_seed': 'integer{0}',
         # Tuning
         'batch_size': 'integer{400}',
+        # Nested-dict input schemas. Build these at probe-time from
+        # the cell tree's actual schema using ``schema_to_plain``:
+        # walk the Schema Node tree, render leaves to type-strings,
+        # keep branches as plain dicts. The framework's wire
+        # projection requires NESTED DICTS (not string types) to
+        # include the keys in the projected state passed to
+        # ``update`` — see memory: wire-projection-requires-nested-dicts.
+        'listeners_schema': 'tree[node]',
+        'process_state_schema': 'tree[node]',
     }
 
     def __init__(self, config=None, core=None):
@@ -90,13 +121,16 @@ class CellParquetEmitter(Step):
         self._last_emit_time = None
 
     def inputs(self):
-        # Tree schemas keep this loosely-typed so any cell tree shape
-        # passes through. The actual data shape comes from the wires.
+        # Standard ecoli pattern (cf tf_binding, mass_listener):
+        # ``bulk`` uses the registered ``bulk_array`` type; the
+        # listeners / process_state subtrees are passed in as
+        # nested-dict schemas built from the cell tree's own
+        # schema at probe time (see schema_types.schema_node_to_plain_dict).
         return {
             'global_time': 'float',
-            'listeners': 'tree[node]',
-            'bulk': 'tree[node]',
-            'process_state': 'tree[node]',
+            'bulk': 'bulk_array',
+            'listeners': self.config['listeners_schema'],
+            'process_state': self.config['process_state_schema'],
         }
 
     def triggers(self):

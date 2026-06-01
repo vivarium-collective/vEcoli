@@ -84,3 +84,42 @@ UNIQUE_TYPES = {
     'DnaA_boxes': DNAA_BOX_ARRAY,
     'DnaA_box': DNAA_BOX_ARRAY,
 }
+
+
+# ---------------------------------------------------------------------------
+# Composite-schema helpers
+# ---------------------------------------------------------------------------
+def schema_node_to_plain_dict(core, schema_node):
+    """Walk a resolved Schema Node tree and produce a plain dict of
+    type-string leaves suitable for use in ``Process.inputs()`` /
+    ``outputs()`` declarations.
+
+    The bigraph-schema wire system only includes keys in the projected
+    state when the input port is declared as a NESTED DICT (branch)
+    with non-underscore keys. String types like ``'tree[node]'`` are
+    leaves — values get retrieved but don't appear in the projected
+    state dict. See memory: wire-projection-requires-nested-dicts.
+
+    This helper converts large composite schemas (e.g. the cell
+    tree's listeners / process_state Schema Node trees produced by
+    ``Composite.schema['agents'][<id>][<slot>]`` after build) into
+    the plain nested-dict-of-type-strings form the framework can
+    project through wires.
+
+    Args:
+        core: the bigraph-schema core (provides ``render`` for leaf
+            Schema Node objects).
+        schema_node: a Schema Node tree (dict at branches, Schema
+            Node at leaves).
+
+    Returns:
+        Plain Python dict: nested dicts at branches, type-string
+        leaves (rendered via ``core.render``).
+    """
+    if isinstance(schema_node, dict):
+        return {
+            k: schema_node_to_plain_dict(core, v)
+            for k, v in schema_node.items()
+            if isinstance(k, str) and not k.startswith('_')
+        }
+    return core.render(schema_node)

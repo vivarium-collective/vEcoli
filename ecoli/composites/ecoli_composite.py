@@ -117,6 +117,30 @@ def build_ecoli_document(core, sim_config, load_sim_data=None, flat=False):
         sim_config, load_sim_data, configs, classes, partitioned,
         partitioned_configs, time_step)
 
+    # 3a. Optional per-cell CellParquetEmitter step. Added here (alongside
+    # all other steps) so its schema merges cleanly with the cell tree
+    # in the same realize pass — post-injection corrupts sibling steps'
+    # precompile_link. See memory: wire-projection-requires-nested-dicts.
+    # Activated by setting ``sim_config['parquet_emitter']`` with the
+    # required output / metadata config. The TOPOLOGY for this step is
+    # registered in ecoli/processes/cell_parquet_emitter.py.
+    parquet_cfg = sim_config.get('parquet_emitter')
+    if parquet_cfg:
+        from ecoli.processes.cell_parquet_emitter import (
+            CellParquetEmitter, TOPOLOGY as _PARQUET_TOPOLOGY)
+        classes['parquet_emitter'] = CellParquetEmitter
+        configs['parquet_emitter'] = parquet_cfg
+        topology['parquet_emitter'] = deepcopy(_PARQUET_TOPOLOGY)
+        # Flow: run after all other steps. Put it after division so
+        # divided daughters' first tick also emits a row.
+        if 'division' in flow:
+            flow['parquet_emitter'] = [('division',)]
+        else:
+            # No division in this run; depend on last unique_update.
+            uu_names = sorted([k for k in flow if k.startswith('unique_update_')])
+            if uu_names:
+                flow['parquet_emitter'] = [(uu_names[-1],)]
+
     # 3b. Extract each edge's interface (inputs/outputs) via a temporary
     # instance BEFORE configs are rewritten into serializable refs.
     # Bound-method instances must still be callable for __init__.
@@ -126,7 +150,16 @@ def build_ecoli_document(core, sim_config, load_sim_data=None, flat=False):
     for name, cls in classes.items():
         cfg = configs[name]
         try:
-            inst = cls(cfg)
+            # Try with no core first (vivarium / BigraphStep path).
+            # Plain process-bigraph Steps require a core; retry with
+            # one if the first call raised "must provide a core".
+            try:
+                inst = cls(cfg)
+            except Exception as _err:
+                if 'must provide a core' in str(_err):
+                    inst = cls(cfg, core=core)
+                else:
+                    raise
             interfaces[name] = inst.interface()
             temp_instances[name] = inst
         except Exception as _err:
@@ -190,7 +223,14 @@ def build_ecoli_document(core, sim_config, load_sim_data=None, flat=False):
             sim_data_objects[key] = instance
             _instance_to_key[id(instance)] = key
     sim_data_objects['_type'] = 'sim_data_object_store'
-    cell_state['sim_data_objects'] = sim_data_objects
+    # When the receiving actor will pre-load sim_data via type-provider
+    # (Ray cell-as-Composite path), don't ship sim_data_objects through
+    # cell_state — keeps the per-cell shipping payload small and avoids
+    # the cost of pickling bound-method references. The actor still
+    # needs ``_instance_to_key`` populated for the config rewrite below
+    # so the SimDataObjectRef strings get the right store_key.
+    if not sim_config.get('skip_sim_data_objects_in_state'):
+        cell_state['sim_data_objects'] = sim_data_objects
 
     # Now rewrite configs: replace bound methods and sim_data object
     # instances with references to the sim_data_objects store.
