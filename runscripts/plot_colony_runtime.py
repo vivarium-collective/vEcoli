@@ -37,8 +37,14 @@ matplotlib.use('Agg')  # headless render — no display needed
 import matplotlib.pyplot as plt
 
 
+# Match BOTH heartbeat formats:
+#   legacy run_colony_ray.py:   ``[ray-colony] heartbeat: sim_time=N.Ns cells=N wall=Ns``
+#   cell-as-Composite driver:   ``[colony-cac] heartbeat: sim_t=N.Ns cells=N wall=Ns``
+# Driver prefix is permissive so future variants don't need another fix
+# here; key/value pair separators match either ``=`` form.
 HB_RE = re.compile(
-    r'\[ray-colony\] heartbeat:\s*sim_time=([\d.]+)s\s+'
+    r'\[(?:ray-colony|colony-cac)\] heartbeat:\s*'
+    r'sim_(?:time|t)=([\d.]+)s\s+'
     r'cells=(\d+)\s+wall=([\d.]+)s'
 )
 DIV_RE = re.compile(

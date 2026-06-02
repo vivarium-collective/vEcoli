@@ -82,7 +82,16 @@ class CellParquetEmitter(Step):
         # that query field_metadata (ecocyc_table,
         # subgenerational_expression_table, ribosome_components,
         # selected_fluxes).
-        'output_metadata': 'maybe[tree[node]]',
+        #
+        # IMPORTANT: serialized as a JSON STRING here (not a nested
+        # dict) because the bigraph-schema realize walker recurses
+        # into ``tree[node]`` config fields and hits leaves like
+        # ``np.str_('4FE-4S[c]')`` for which no ``realize`` method is
+        # registered (plum dispatch fails with NotFoundLookupError).
+        # Shipping as a single string makes the schema opaque to the
+        # walker; we json.loads it back in __init__ before passing
+        # the actual dict to ParquetEmitter.emit.
+        'output_metadata_json': 'maybe[string]',
     }
 
     def __init__(self, config=None, core=None):
@@ -129,9 +138,11 @@ class CellParquetEmitter(Step):
                 'initial_global_time': 0.0,
             }
         }
-        out_meta = self.config.get('output_metadata')
-        if out_meta:
-            config_data['metadata']['output_metadata'] = out_meta
+        out_meta_json = self.config.get('output_metadata_json')
+        if out_meta_json:
+            import json as _json
+            config_data['metadata']['output_metadata'] = _json.loads(
+                out_meta_json)
         self._emitter.emit({
             'table': 'configuration',
             'data': config_data,

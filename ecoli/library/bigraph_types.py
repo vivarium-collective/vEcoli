@@ -1699,16 +1699,34 @@ def get_cached_load_sim_data(sim_data_path: str, sim_config: dict = None):
     return lsd
 
 
-def load_sim_data_provider(core, sim_data_path: str,
+def load_sim_data_provider(core, sim_data_path: str = None,
+                            sim_data_ref=None,
                             sim_config: dict = None,
                             aws_region: str = None):
     """Type-provider that pre-loads sim_data on the actor.
 
-    Populates the module-global ``_sim_data_object_instances`` from a
-    ``LoadSimData`` constructed from disk, so ``SimDataObjectRef`` can
-    resolve store_keys WITHOUT the actor having to receive sim_data
-    via per-cell ``config['state']``. The daughter's CompositeDivision
-    can therefore strip ``sim_data_objects`` from its shipped state.
+    Populates the module-global ``_sim_data_object_instances`` so
+    ``SimDataObjectRef`` can resolve store_keys WITHOUT the actor having
+    to receive sim_data via per-cell ``config['state']``. The daughter's
+    CompositeDivision can therefore strip ``sim_data_objects`` from its
+    shipped state.
+
+    Two sim_data sources, in priority order:
+
+    1. ``sim_data_ref`` (Ray ObjectRef path) — **CURRENTLY BROKEN
+       for vEcoli**: arrays returned from plasma are READ-ONLY
+       memoryviews, but vEcoli's Cython code (e.g.
+       ``stochastic_arrow.Arrowhead.evolve`` invoked by
+       complexation) requires writable buffers. Symptoms:
+       ``ValueError: buffer source array is read-only``. To
+       re-enable, every mutation of sim_data-derived arrays in the
+       process tree would need a ``.copy()`` at the use site.
+       Kept as a code path because the wiring is correct — only
+       the consumer-side mutability needs auditing.
+    2. ``sim_data_path`` (default for now): pickle.load from disk
+       (or S3) via ``get_cached_load_sim_data``. One copy per actor
+       (~500 MB each). Slower startup (S3 download per actor) but
+       writable arrays.
 
     For S3 reads on GovCloud: Ray spawns actor processes that do NOT
     inherit driver env vars, so boto3/polars/fsspec default to
@@ -1720,6 +1738,16 @@ def load_sim_data_provider(core, sim_data_path: str,
 
     Wire up via:
 
+        # Preferred: pre-load on driver, ray.put, share via plasma:
+        sim_data_obj_ref = ray.put(loaded_sim_data)
+        register_type_provider(
+            'ecoli.library.bigraph_types',
+            'load_sim_data_provider',
+            kwargs={'sim_data_ref': sim_data_obj_ref,
+                    'sim_data_path': '/path/for/cache_key.cPickle',
+                    'sim_config': {...}})
+
+        # Fallback: each actor loads from disk independently:
         register_type_provider(
             'ecoli.library.bigraph_types',
             'load_sim_data_provider',
@@ -1735,17 +1763,43 @@ def load_sim_data_provider(core, sim_data_path: str,
     from ecoli.library.ray_actor_setup import setup_ray_actor_process
     setup_ray_actor_process(
         aws_region='us-gov-west-1' if aws_region is None else aws_region)
-    _sys.stderr.write(
-        f'[sim-data-provider] loading sim_data on actor '
-        f'from {sim_data_path} (AWS_REGION={_os.environ.get("AWS_REGION")})\n')
-    _sys.stderr.flush()
-    # Build (and cache) the LoadSimData so EcoliCellComposite can
-    # re-use it without re-loading the pickle.
-    lsd = get_cached_load_sim_data(sim_data_path, sim_config)
-    sd = lsd.sim_data
+    # Resolve sim_data. Path (1) zero-copies via plasma; path (2)
+    # falls through to the original disk-load behavior for back-compat.
+    if sim_data_ref is not None:
+        import ray
+        _sys.stderr.write(
+            f'[sim-data-provider] ray.get sim_data from plasma store '
+            f'(ref={sim_data_ref})\n')
+        _sys.stderr.flush()
+        sd = ray.get(sim_data_ref)
+        # Wrap shared sim_data in a LoadSimData with the colony seed
+        # so EcoliCellComposite's get_cached_load_sim_data picks it up.
+        # ``sim_data=sd`` skips the disk-load path inside LoadSimData.
+        from ecoli.library.sim_data import LoadSimData
+        cfg = dict(sim_config or {})
+        cfg.setdefault('sim_data_path', sim_data_path or '')
+        cfg.setdefault('seed', 0)
+        cfg.setdefault('agent_id', '0')
+        cfg['sim_data'] = sd
+        lsd = LoadSimData(**cfg)
+        # Cache under BOTH a synthetic key and the actual path so
+        # downstream get_cached_load_sim_data calls hit regardless of
+        # which key they use.
+        _LSD_CACHE['__ray_shared__'] = lsd
+        if sim_data_path:
+            _LSD_CACHE[sim_data_path] = lsd
+    else:
+        _sys.stderr.write(
+            f'[sim-data-provider] loading sim_data on actor '
+            f'from {sim_data_path} (AWS_REGION={_os.environ.get("AWS_REGION")})\n')
+        _sys.stderr.flush()
+        lsd = get_cached_load_sim_data(sim_data_path, sim_config)
+        sd = lsd.sim_data
     # Same mapping as build_ecoli_document populates into the
     # cell_state['sim_data_objects'] dict. Kept in sync manually —
-    # adding a new key here requires mirroring it there.
+    # adding a new key here requires mirroring it there. These are
+    # NAMED REFERENCES into the single sim_data object above (sharing
+    # underlying memory), not 12 independent copies.
     _paths = {
         'external_state': sd.external_state,
         'mass': sd.mass,
@@ -1765,5 +1819,5 @@ def load_sim_data_provider(core, sim_data_path: str,
             _sim_data_object_instances[key] = instance
     _sys.stderr.write(
         f'[sim-data-provider] populated {len(_sim_data_object_instances)} '
-        f'sim_data instances on actor\n')
+        f'sim_data attribute references on actor\n')
     _sys.stderr.flush()

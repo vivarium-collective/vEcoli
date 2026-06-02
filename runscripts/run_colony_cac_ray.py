@@ -137,6 +137,16 @@ def build_and_run(sim_data_path, target_doublings, max_duration,
     # load_sim_data_provider populates ``_sim_data_object_instances``
     # so SimDataObjectRef resolves without needing sim_data to ride
     # through per-cell config.
+    #
+    # NOTE: each actor loads its OWN copy of sim_data from S3 here.
+    # We tried sharing one ray.put copy across actors via plasma, but
+    # Ray's plasma-backed objects come back as READ-ONLY memoryviews,
+    # and vEcoli's Cython code (complexation/stochastic_arrow,
+    # likely others) requires writable arrays. Result:
+    # ``ValueError: buffer source array is read-only`` deep in
+    # ``Arrowhead.evolve``. Surgical fix (audit every mutation,
+    # add .copy() at the use site) is a separate effort — until
+    # then, accept per-actor sim_data RAM cost (~500 MB × actors).
     register_type_provider(
         'ecoli.library.bigraph_types', 'register_ecoli_types')
     register_type_provider(
@@ -144,7 +154,7 @@ def build_and_run(sim_data_path, target_doublings, max_duration,
         kwargs={'sim_data_path': sim_data_path})
     print(f'[colony-cac] ray runtime up '
           f'(address={ray_address or "local"}); '
-          f'providers registered', flush=True)
+          f'process classes + type providers registered', flush=True)
 
     sim = EcoliSim.from_file(os.path.join(CONFIG_DIR_PATH, 'default.json'))
     sim.processes = sim._retrieve_processes(
@@ -222,6 +232,21 @@ def build_and_run(sim_data_path, target_doublings, max_duration,
         # fail with Binder Errors in compare analyze.
         probe_output_metadata = collect_output_metadata_from_composite(
             probe_cell)
+        # JSON-serialize so it rides through the parquet_emitter config
+        # as a single opaque string instead of a tree[node]. The
+        # bigraph-schema realize walker recurses into tree[node] config
+        # fields and hits leaves (np.str_, np.ndarray) for which plum
+        # dispatch has no realize method → NotFoundLookupError. A
+        # single string is dispatchable; CellParquetEmitter json.loads
+        # it back before passing to ParquetEmitter.emit.
+        def _safe_json_default(obj):
+            if hasattr(obj, 'tolist'):
+                return obj.tolist()
+            if hasattr(obj, 'item'):
+                return obj.item()
+            return str(obj)
+        probe_output_metadata_json = json.dumps(
+            probe_output_metadata, default=_safe_json_default)
         sim_config_full['parquet_emitter'] = {
             'out_dir': out_uri,
             'experiment_id': experiment_id or f'cac_{int(time.time())}',
@@ -233,10 +258,12 @@ def build_and_run(sim_data_path, target_doublings, max_duration,
                 core, cell_tree_node['listeners']),
             'process_state_schema': schema_node_to_plain_dict(
                 core, cell_tree_node['process_state']),
-            'output_metadata': probe_output_metadata,
+            'output_metadata_json': probe_output_metadata_json,
         }
         print(f'[colony-cac]   collected output_metadata: '
-              f'{len(probe_output_metadata)} top-level keys', flush=True)
+              f'{len(probe_output_metadata)} top-level keys '
+              f'({len(probe_output_metadata_json) // 1024} KB serialized)',
+              flush=True)
     daughter_wrap_template = {
         '_type': 'process',
         'address': daughter_address,
@@ -278,13 +305,18 @@ def build_and_run(sim_data_path, target_doublings, max_duration,
 
     cell_node = {
         '_type': 'process',
-        # Same class+pool as daughters so the actor that hosted the mother
-        # is immediately reusable for a daughter after divide. Without this,
-        # mother would live in a separate `Composite:default` pool and its
-        # actors would sit idle holding sim_data after divide. EcoliCellComposite
-        # detects mother vs daughter state shape and skips the rebuild when
-        # state is already a full cell_doc — see ecoli_cell_process.py:79.
-        'address': 'ray:EcoliCellComposite',
+        # Mother lives in the ``Composite:default`` pool, daughters in
+        # ``EcoliCellComposite:default``. Two pools is wasteful at the
+        # margin (the Composite pool's actors sit idle after divide,
+        # each still holding ~700MB sim_data), but consolidating to a
+        # single pool by reusing ``ray:EcoliCellComposite`` for the
+        # mother triggers a hang at gen 3 when the mother's old actor
+        # gets reassigned to a daughter and runs the rebuild path for
+        # the first time. Suspected state pollution in the actor's
+        # core/type-registry from the mother's pre-built cell_doc that
+        # conflicts with build_ecoli_document's fresh type
+        # registration on the same actor. See task #63.
+        'address': 'ray:Composite',
         'config': {
             'state': cell_doc,
             'schema': {
