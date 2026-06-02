@@ -174,9 +174,20 @@ class CellParquetEmitter(Step):
 
     def update(self, state):
         global_t = float(state.get('global_time', 0.0))
+        # Skip the run-steps-on-init fire: the cell composite is built
+        # with ``run_steps_on_init=True`` (so mass_listener etc. populate
+        # initial state for downstream consumers), but on that FIRST
+        # invocation the parquet_emitter sees default-zero listener
+        # values that aren't real cell state. Emitting them produces
+        # a row 0 with mass=0 etc., which breaks every analysis that
+        # normalizes by row 0 (mass_fraction_summary divides by
+        # mass[v][0] → inf/nan → blank Vega chart).
+        if self._last_emit_time is None:
+            self._last_emit_time = global_t
+            return {}
         # Skip duplicate emits (defensive — triggers() should prevent
-        # this but the step may be invoked on init too).
-        if self._last_emit_time is not None and global_t <= self._last_emit_time:
+        # this but the step may be invoked again with the same time).
+        if global_t <= self._last_emit_time:
             return {}
         self._last_emit_time = global_t
 

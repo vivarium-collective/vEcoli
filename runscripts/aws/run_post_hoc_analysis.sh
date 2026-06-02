@@ -85,6 +85,12 @@ echo "  config:          $CONFIG_RELPATH"
 echo "  sim_data:        $SIM_DATA_URI"
 echo "  validation_data: $VALIDATION_URI"
 echo "  outdir:          $PLOTS"
+# analysis.py exits non-zero when any single analysis errors (e.g.
+# blame isn't ported to DuckDB, or an analysis is missing a metadata
+# field). We still want to upload the analyses that DID succeed, so
+# capture the exit code instead of letting ``set -e`` abort the
+# upload block below.
+set +e
 "${PY[@]}" runscripts/analysis.py \
   --config "$CONFIG_RELPATH" \
   --experiment_id "$EXP_ID" \
@@ -95,6 +101,13 @@ echo "  outdir:          $PLOTS"
   --cpus "$CPUS" \
   -o "$PLOTS" \
   "${ANALYSIS_ARGS[@]}"
+analysis_exit=$?
+set -e
+if [[ $analysis_exit -ne 0 ]]; then
+  echo
+  echo "⚠ analysis.py exited $analysis_exit — some analyses failed."
+  echo "  Proceeding to upload any plots that did generate."
+fi
 
 # analysis.py output structure:
 #   $PLOTS/experiment_id=<EXP_ID>/<middle>/analysis=<NAME>/<files>

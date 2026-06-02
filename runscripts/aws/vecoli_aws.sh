@@ -3032,13 +3032,21 @@ print(v if v else '', end='')
 
   local dns; dns=$(require_running_dns)
   echo "Pushing analysis scripts to compare head..."
-  ssh -i "$KEY_FILE" "ec2-user@$dns" 'mkdir -p ~/vEcoli/runscripts/aws'
+  ssh -i "$KEY_FILE" "ec2-user@$dns" 'mkdir -p ~/vEcoli/runscripts/aws ~/vEcoli/ecoli/analysis'
   scp -i "$KEY_FILE" \
       "$SCRIPT_DIR/run_post_hoc_analysis.sh" \
       "ec2-user@$dns:~/vEcoli/runscripts/aws/"
   scp -i "$KEY_FILE" \
       "$REPO_ROOT/runscripts/analysis.py" \
       "ec2-user@$dns:~/vEcoli/runscripts/"
+  # Also push the analysis subdirs (single/, multigeneration/, multiseed/,
+  # multivariant/, parca/, etc.) so local edits to individual analysis
+  # scripts land on the head. Without this, only analysis.py edits ship —
+  # patches to e.g. mass_fraction_summary.py silently get ignored because
+  # the head still has the previous bootstrap's version.
+  scp -i "$KEY_FILE" -r -q \
+      "$REPO_ROOT/ecoli/analysis" \
+      "ec2-user@$dns:~/vEcoli/ecoli/"
 
   local env_pairs="CONFIG_RELPATH='$target_cfg' EXP_ID='$target_exp'"
   env_pairs+=" SIM_DATA_URI='$sim_data_uri'"
@@ -3052,6 +3060,203 @@ print(v if v else '', end='')
     "set -e; cd ~/vEcoli && $env_pairs bash runscripts/aws/run_post_hoc_analysis.sh"
   echo
   echo "Done. Re-run 'compare report' to pick up the new plots for $target_alias."
+}
+
+# Pull the analyses/ folder for an alias from S3 to local out/. Wraps
+# ``aws s3 sync`` so the user doesn't have to remember the alias's
+# bucket / prefix / experiment_id. Reads the sidecar like the rest of
+# the compare subcommands.
+ns_compare_results() {
+  local target_alias=""
+  local out_dir=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -o|--out)   out_dir="$2"; shift 2 ;;
+      -h|--help)
+        cat >&2 <<USAGE
+usage: $(basename "$0") compare results <alias> [-o <local_dir>]
+
+Sync the alias's analyses/ folder from S3 to local. Defaults to
+``out/<experiment_id>/analyses/``. Resolves the experiment_id from the
+alias's sidecar (use ``experiment adopt <alias>`` first if missing).
+
+  -o, --out <dir>   override local destination (default:
+                    out/<experiment_id>/analyses)
+USAGE
+        return 0 ;;
+      -*) echo "compare results: unknown flag '$1'" >&2; return 1 ;;
+      *)
+        if [[ -z "$target_alias" ]]; then target_alias="$1"; shift
+        else echo "compare results: unexpected positional '$1'" >&2; return 1
+        fi ;;
+    esac
+  done
+  if [[ -z "$target_alias" ]]; then
+    echo "compare results: missing required <alias>" >&2
+    return 1
+  fi
+
+  local coords; coords=$(_resolve_alias_coords "$target_alias") || return 1
+  local target_exp target_bucket target_prefix target_base target_cfg
+  IFS=$'\t' read -r target_exp target_bucket target_prefix target_base target_cfg <<<"$coords"
+
+  local s3_uri="s3://$target_bucket/$target_prefix/$target_exp/analyses/"
+  [[ -z "$out_dir" ]] && out_dir="$REPO_ROOT/out/$target_exp/analyses"
+  mkdir -p "$out_dir"
+  echo "Syncing analyses from S3:"
+  echo "  alias  = $target_alias"
+  echo "  exp_id = $target_exp"
+  echo "  s3     = $s3_uri"
+  echo "  local  = $out_dir"
+  # ``aws s3 ls`` exits non-zero when a prefix has no top-level keys
+  # even if deep sub-prefixes exist (run_post_hoc_analysis.sh uploads
+  # to .../analyses/experiment_id=.../...../plots/analysis=.../). Skip
+  # the pre-check and let sync do the work; verify locally after.
+  aws_cli s3 sync --no-progress "$s3_uri" "$out_dir/"
+  echo
+  local n_html n_files
+  n_html=$(find "$out_dir" -name '*.html' 2>/dev/null | wc -l | tr -d ' ')
+  n_files=$(find "$out_dir" -type f 2>/dev/null | wc -l | tr -d ' ')
+  if [[ "$n_files" -eq 0 ]]; then
+    echo "  ⚠ no analyses found at $s3_uri" >&2
+    echo "  Run \`compare analyze $target_alias\` first to generate them." >&2
+    return 1
+  fi
+  echo "Done. $n_files file(s) synced ($n_html HTML report(s))."
+  if [[ "$n_html" -gt 0 ]]; then
+    echo "First few:"
+    find "$out_dir" -name '*.html' 2>/dev/null | head -8 | sed 's|^|  |'
+    echo
+    echo "Open the directory:"
+    echo "  xdg-open '$out_dir'"
+  fi
+}
+
+# Pull one parquet batch from an alias's S3 output and print the first
+# rows of the mass / dry_mass columns. Quick diagnostic for "is the
+# first emit a zero-init row?" (which breaks mass_fraction_summary)
+# and "are the listener columns actually populated?". Defaults to the
+# mother cell's first batch (gen=1, agent_id=0, batch=0).
+ns_compare_peek() {
+  local target_alias=""
+  local gen=1 agent="0" batch="0"
+  local table="history" cols="" nrows=10
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --gen)    gen="$2"; shift 2 ;;
+      --agent)  agent="$2"; shift 2 ;;
+      --batch)  batch="$2"; shift 2 ;;
+      --table)  table="$2"; shift 2 ;;       # history | configuration | success
+      --cols)   cols="$2"; shift 2 ;;        # comma-separated, substring match
+      --rows|-n) nrows="$2"; shift 2 ;;
+      -h|--help)
+        cat >&2 <<USAGE
+usage: $(basename "$0") compare peek <alias> [flags]
+
+Pull one parquet batch from an alias's S3 output and dump the first
+rows. Quick diagnostic for empty/zero-init rows, missing columns,
+etc. Defaults to the mother cell's smallest history batch.
+
+  --gen N         generation (= len(agent_id)). default 1
+  --agent ID      agent_id. default 0
+  --batch N       batch number (file is <N>.pq). default 0
+  --table T       history | configuration | success. default history
+  --cols a,b,...  comma-separated column substrings to show
+                  (default: time + every column containing "mass")
+  --rows N        rows to print. default 10
+
+Examples:
+  compare peek colony                         # mother's first batch
+  compare peek colony --agent 01 --gen 2      # gen-1 daughter
+  compare peek colony --cols bulk,time -n 5   # bulk columns only
+USAGE
+        return 0 ;;
+      -*) echo "compare peek: unknown flag '$1'" >&2; return 1 ;;
+      *)
+        if [[ -z "$target_alias" ]]; then target_alias="$1"; shift
+        else echo "compare peek: unexpected positional '$1'" >&2; return 1
+        fi ;;
+    esac
+  done
+  if [[ -z "$target_alias" ]]; then
+    echo "compare peek: missing required <alias>" >&2
+    return 1
+  fi
+
+  local coords; coords=$(_resolve_alias_coords "$target_alias") || return 1
+  local target_exp target_bucket target_prefix target_base target_cfg
+  IFS=$'\t' read -r target_exp target_bucket target_prefix target_base target_cfg <<<"$coords"
+
+  local file_name="${batch}.pq"
+  [[ "$table" == "configuration" ]] && file_name="config.pq"
+  [[ "$table" == "success" ]] && file_name="s.pq"
+  local s3_uri="s3://$target_bucket/$target_prefix/$target_exp/$table"
+  s3_uri+="/experiment_id=$target_exp/variant=0/lineage_seed=0"
+  s3_uri+="/generation=$gen/agent_id=$agent/$file_name"
+
+  local local_pq
+  local_pq=$(mktemp --suffix=.pq)
+  trap 'rm -f "${local_pq:-}"' RETURN
+  echo "Fetching $s3_uri"
+  if ! aws_cli s3 cp --no-progress --only-show-errors "$s3_uri" "$local_pq" 2>/dev/null; then
+    echo "  ⚠ object not found at $s3_uri" >&2
+    # List what IS available in the same partition so the user can
+    # pick a real batch number. Strip the trailing filename to get
+    # the partition prefix.
+    local s3_partition_dir="${s3_uri%/*}/"
+    echo
+    echo "  Available files in $s3_partition_dir :"
+    aws_cli s3 ls "$s3_partition_dir" 2>/dev/null | sed 's|^|    |' \
+      || echo "    (partition does not exist either — wrong --gen/--agent?)"
+    echo
+    echo "  Retry with --batch <N> (number from filename above, without .pq)" >&2
+    return 1
+  fi
+
+  local py
+  if [[ -x "$REPO_ROOT/.venv/bin/python" ]]; then
+    py="$REPO_ROOT/.venv/bin/python"
+  else
+    py="python3"
+  fi
+  COLS_FILTER="$cols" NROWS="$nrows" "$py" - "$local_pq" <<'PYINSPECT'
+import os, sys
+import polars as pl
+
+path = sys.argv[1]
+cols_filter = [c.strip() for c in os.environ.get("COLS_FILTER", "").split(",") if c.strip()]
+nrows = int(os.environ.get("NROWS", "10"))
+
+df = pl.read_parquet(path)
+print(f"rows: {len(df)}  cols: {len(df.columns)}")
+if "time" in df.columns:
+    t = df["time"]
+    print(f"time range: {t.min():.1f} .. {t.max():.1f}  (delta={t.max() - t.min():.1f})")
+
+# Default: time + any column containing "mass"
+if cols_filter:
+    keep = [c for c in df.columns
+            if any(s.lower() in c.lower() for s in cols_filter)]
+else:
+    keep = ["time"] + [c for c in df.columns if "mass" in c.lower()][:8]
+keep = [c for c in keep if c in df.columns]
+
+if not keep:
+    print("(no matching columns)")
+    print("all columns:")
+    for c in df.columns[:30]:
+        print(f"  {c}")
+    if len(df.columns) > 30:
+        print(f"  ... +{len(df.columns) - 30} more")
+    sys.exit(0)
+
+with pl.Config(set_tbl_cols=len(keep), set_tbl_rows=nrows):
+    print("first rows:")
+    print(df.select(keep).head(nrows))
+    if len(df) > nrows:
+        print("last rows:")
+        print(df.select(keep).tail(min(5, nrows)))
+PYINSPECT
 }
 
 # Walk the alias registry, list each alias's S3 prefix, pick the
@@ -3596,6 +3801,11 @@ EBS for synced parquet).
                        experiment_id. Use for Ray/MP runs that produced
                        parquet but skipped analyses/ (Nextflow v1/v2 already
                        publish their own). Must run AFTER ``compare bootstrap``.
+  results <alias> [-o <local_dir>]
+                       sync the alias's analyses/ folder from S3 to local
+                       (default: out/<experiment_id>/analyses/). No head
+                       required — just an aws s3 sync wrapping the alias
+                       coords. Lists the HTML reports it pulled.
   report [analysis|diff] [<alias>] [--gens 1,2] [--seeds 0,1]
          [--v1-id ID] [--v2-id ID] [--extra-ids label=ID,...]
          [--engine-cost N] [--out path]
@@ -3742,6 +3952,19 @@ case "$cmd" in
         # Pin the variant to compare and forward all args.
         _use_variant compare || exit 1
         ns_compare_analyze "$@"
+        ;;
+      results)
+        # ``results``'s first positional is the *target alias whose
+        # analyses we want locally*. No need for a running head — just
+        # an aws s3 sync from the alias's S3 prefix.
+        _use_variant compare || exit 1
+        ns_compare_results "$@"
+        ;;
+      peek)
+        # Diagnostic: pull one parquet batch and dump first rows.
+        # No head required.
+        _use_variant compare || exit 1
+        ns_compare_peek "$@"
         ;;
       report)
         # Sub-subcommands: ``report analysis`` (fast plots-only) and
