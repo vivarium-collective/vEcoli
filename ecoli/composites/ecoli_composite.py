@@ -431,6 +431,84 @@ def build_ecoli_document(core, sim_config, load_sim_data=None, flat=False):
 build_composite_native = build_ecoli_document
 
 
+def collect_output_metadata_from_composite(composite):
+    """Walk a realized Composite's state to collect ``output_metadata``
+    from each process/step's ports_schema. Mirrors
+    :py:meth:`EcoliSim.output_metadata` for the cell-as-Composite
+    pipeline — needed so the colony's parquet ``configuration`` table
+    has the ``output_metadata__listeners__...`` columns that
+    multiseed / multigeneration analyses query for cistron IDs, gene
+    names, and reaction lists.
+
+    Each migrated process still implements Vivarium-style
+    ``ports_schema()`` and may embed per-listener metadata under
+    ``_properties.metadata`` (see ``ecoli.library.schema.listener_schema``).
+    Walk the realized cell state, call ``ports_schema()`` on each
+    instance, extract those annotations via ``extract_metadata``, and
+    remap from port names to wire paths via each process's ``inputs``
+    declaration so the resulting columns line up with the listener
+    arrays in the history parquet.
+
+    Pass the result into ``CellParquetEmitter`` via
+    ``sim_config['parquet_emitter']['output_metadata']`` so it lands
+    in the first ``configuration`` emit alongside experiment_id, etc.
+    """
+    from vivarium.library.topology import inverse_topology
+    from vivarium.library.dict_utils import deep_merge_check
+    from ecoli.experiments.ecoli_master_sim import extract_metadata
+
+    output_metadata: dict = {}
+
+    def _collect(node, path):
+        """Yields (port_name_or_None, ports_schema, wires) for each
+        process instance found by walking ``node``. Stops descending at
+        any process/step boundary (don't recurse INTO an inner
+        Composite's encapsulated steps from outside)."""
+        results = []
+        if not isinstance(node, dict):
+            return results
+        instance = node.get('instance')
+        if instance is not None and hasattr(instance, 'ports_schema'):
+            try:
+                ports = instance.ports_schema()
+            except Exception:
+                return results
+            wires = node.get('inputs', {}) or {}
+            proc_name = path[-1] if path else None
+            results.append((proc_name, ports, wires))
+            # Don't descend into process internals — opaque boundary
+            # matches ``find_instances`` behavior in process_bigraph.
+            return results
+        for key, child in node.items():
+            if isinstance(child, dict):
+                results.extend(_collect(child, path + (key,)))
+        return results
+
+    for proc_name, ports, wires in _collect(composite.state, ()):
+        extracted = extract_metadata(ports)
+        if not extracted:
+            continue
+        # Remap port names to wire paths so listener metadata ends up
+        # at the same path as the listener data in history. ``wires``
+        # is the process decl's ``inputs`` dict (port → wire path).
+        if wires:
+            try:
+                extracted = inverse_topology((), extracted, wires)
+            except Exception:
+                # Some processes have wires that aren't simple tuples
+                # (e.g. ``__`` references) — fall back to leaving the
+                # extracted dict keyed by port name. Analyses that need
+                # the wire-path version will skip these annotations
+                # cleanly via field_metadata lookups.
+                pass
+        try:
+            output_metadata = deep_merge_check(
+                output_metadata, extracted, check_equality=True)
+        except Exception:
+            output_metadata = {**extracted, **output_metadata}
+    return output_metadata
+
+
 def reseed_loaded_bundle(document, sim_data_path, cli_seed, agent_id='0'):
     """Recompute per-process seeds from sim_data with the current
     generation's ``cli_seed`` and overwrite them in a freshly-loaded

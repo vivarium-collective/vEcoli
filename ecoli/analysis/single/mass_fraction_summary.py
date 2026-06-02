@@ -50,14 +50,29 @@ def plot(
         read_stacked_columns(history_sql, list(mass_columns.values()), conn=conn)
     )
 
+    # Skip cells with no history rows — happens at the colony tail when
+    # late-gen daughters spawn near run end and never emit a batch.
+    # Without this guard, the .mean() below returns None and the
+    # ``{fractions[k]:.3f}`` format string fails with
+    # "unsupported format string passed to NoneType.__format__".
+    if mass_data.is_empty():
+        print(f"  skipping mass_fraction_summary: no history rows for cell")
+        return
+
     fractions = {
         k: cast(float, (mass_data[v] / mass_data["listeners__mass__dry_mass"]).mean())
         for k, v in mass_columns.items()
     }
+    # Some fractions may still be None if the relevant mass column is
+    # all-null even when other columns have data (rare — partial
+    # listener emit on the cell's first tick before init completed).
+    # Render as "n/a" so the title is informative instead of crashing.
+    def _fmt(x):
+        return f"{x:.3f}" if x is not None else "n/a"
     new_columns = {
         "Time (min)": (mass_data["time"] - mass_data["time"].min()) / 60,
         **{
-            f"{k} ({fractions[k]:.3f})": mass_data[v] / mass_data[v][0]
+            f"{k} ({_fmt(fractions[k])})": mass_data[v] / mass_data[v][0]
             for k, v in mass_columns.items()
         },
     }

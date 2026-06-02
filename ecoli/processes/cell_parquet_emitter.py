@@ -74,6 +74,15 @@ class CellParquetEmitter(Step):
         # ``update`` — see memory: wire-projection-requires-nested-dicts.
         'listeners_schema': 'tree[node]',
         'process_state_schema': 'tree[node]',
+        # Per-listener metadata (cistron IDs, gene names, reaction
+        # lists, etc.) collected at colony probe time via
+        # collect_output_metadata_from_composite. Embedded into the
+        # configuration parquet row as output_metadata__<path>
+        # columns. Required for multiseed / multigeneration analyses
+        # that query field_metadata (ecocyc_table,
+        # subgenerational_expression_table, ribosome_components,
+        # selected_fluxes).
+        'output_metadata': 'maybe[tree[node]]',
     }
 
     def __init__(self, config=None, core=None):
@@ -104,19 +113,28 @@ class CellParquetEmitter(Step):
         import atexit as _atexit
         _atexit.register(self._safe_finalize)
         # Configuration emit installs the partition path. Minimum
-        # metadata keys to satisfy v1's column expectations; analyses
-        # may want more later.
+        # metadata keys to satisfy v1's column expectations; the
+        # ``output_metadata`` block (when present) is what gets
+        # flattened into ``output_metadata__listeners__...`` columns
+        # downstream — see ``parquet_emitter.flatten_dict`` +
+        # ``METADATA_PREFIX``. Without it, ``field_metadata`` lookups
+        # in multiseed / multigeneration analyses fail with Binder
+        # Errors.
+        config_data = {
+            'metadata': {
+                'experiment_id': self.config['experiment_id'],
+                'variant': self.config.get('variant', 0),
+                'lineage_seed': self.config.get('lineage_seed', 0),
+                'agent_id': str(self.config['agent_id']),
+                'initial_global_time': 0.0,
+            }
+        }
+        out_meta = self.config.get('output_metadata')
+        if out_meta:
+            config_data['metadata']['output_metadata'] = out_meta
         self._emitter.emit({
             'table': 'configuration',
-            'data': {
-                'metadata': {
-                    'experiment_id': self.config['experiment_id'],
-                    'variant': self.config.get('variant', 0),
-                    'lineage_seed': self.config.get('lineage_seed', 0),
-                    'agent_id': str(self.config['agent_id']),
-                    'initial_global_time': 0.0,
-                }
-            }
+            'data': config_data,
         })
         self._last_emit_time = None
 

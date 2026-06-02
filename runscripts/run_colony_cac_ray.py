@@ -212,6 +212,16 @@ def build_and_run(sim_data_path, target_doublings, max_duration,
     # the step is part of the same build pass.
     if out_uri:
         from ecoli.library.schema_types import schema_node_to_plain_dict
+        from ecoli.composites.ecoli_composite import (
+            collect_output_metadata_from_composite)
+        # Collect output_metadata from the realized probe Composite so
+        # the configuration parquet has the output_metadata__* columns
+        # multiseed / multigeneration analyses query (cistron IDs,
+        # gene names, reaction lists, etc.). Without this, queries like
+        # ``SELECT output_metadata__listeners__rna_counts__mRNA_cistron_counts``
+        # fail with Binder Errors in compare analyze.
+        probe_output_metadata = collect_output_metadata_from_composite(
+            probe_cell)
         sim_config_full['parquet_emitter'] = {
             'out_dir': out_uri,
             'experiment_id': experiment_id or f'cac_{int(time.time())}',
@@ -223,7 +233,10 @@ def build_and_run(sim_data_path, target_doublings, max_duration,
                 core, cell_tree_node['listeners']),
             'process_state_schema': schema_node_to_plain_dict(
                 core, cell_tree_node['process_state']),
+            'output_metadata': probe_output_metadata,
         }
+        print(f'[colony-cac]   collected output_metadata: '
+              f'{len(probe_output_metadata)} top-level keys', flush=True)
     daughter_wrap_template = {
         '_type': 'process',
         'address': daughter_address,

@@ -1302,6 +1302,92 @@ ns_experiment_list() {
   done < "$_REGISTRY"
 }
 
+# List experiment_ids that have data in S3 under the alias's out_uri.
+# Useful when the local sidecar got lost (e.g. ``experiment end`` was
+# run, or the workspace was cloned fresh) and you need to identify the
+# correct timestamped id to re-attach to. Marks the sidecar-active one.
+ns_experiment_runs() {
+  local prefix="${OUT_URI%/}/"
+  echo "Experiments under $prefix"
+  local active=""
+  if [[ -f "$STATE_FILE" ]]; then
+    active=$(<"$STATE_FILE"); active="${active//$'\n'/}"
+  fi
+  printf "  %-44s  %s\n" "EXPERIMENT_ID" "LAST_WRITE"
+  printf "  %-44s  %s\n" "--------------------------------------------" \
+                           "-------------------"
+  # ``aws s3 ls`` returns one "PRE <name>/" line per immediate
+  # subdirectory under the prefix. The exp_id is everything before the
+  # trailing slash. To attach a "last_write" timestamp we peek at the
+  # newest object inside (cheap one ``ls`` per prefix; for tens of runs
+  # this stays sub-second).
+  local exp
+  local lines
+  lines=$(aws_cli s3 ls "$prefix" 2>/dev/null \
+            | awk '/PRE /{ sub(/\/$/, "", $NF); print $NF }' | sort)
+  if [[ -z "$lines" ]]; then
+    echo "  (no experiments found at $prefix)"
+    return 0
+  fi
+  while IFS= read -r exp; do
+    [[ -z "$exp" ]] && continue
+    local latest
+    latest=$(aws_cli s3 ls --recursive "${prefix}${exp}/" 2>/dev/null \
+              | awk '$1 != "" { print $1, $2 }' \
+              | sort -r | head -1)
+    [[ -z "$latest" ]] && latest="(empty)"
+    local marker=""
+    [[ "$exp" == "$active" ]] && marker="  ← active"
+    printf "  %-44s  %s%s\n" "$exp" "$latest" "$marker"
+  done <<< "$lines"
+  echo
+  if [[ -n "$active" ]]; then
+    echo "Active sidecar: $active"
+    echo "  ($STATE_FILE)"
+  else
+    echo "No sidecar set. To attach, run:"
+    echo "  $(basename "$0") experiment adopt $STATE_KEY <experiment_id>"
+  fi
+}
+
+# Claim an experiment_id for this alias by writing the sidecar. With no
+# id given, auto-picks the most recent experiment_id from S3 (by the
+# YYYYMMDD-HHMMSS suffix produced by ``_persist_new_exp_id``, which
+# sorts chronologically). Pass an explicit id to attach to a specific
+# older run. Use after the sidecar got removed (e.g. by ``experiment
+# end``) or when attaching to an experiment that was run from a
+# different machine / workspace.
+ns_experiment_adopt() {
+  local exp_id="${1:-}"
+  if [[ -z "$exp_id" ]]; then
+    local prefix="${OUT_URI%/}/"
+    # Lex-sort is chronological for ``<base>_YYYYMMDD-HHMMSS`` ids.
+    # tail -1 picks the newest. ``aws s3 ls`` returns "PRE <name>/"
+    # one per immediate subdirectory.
+    exp_id=$(aws_cli s3 ls "$prefix" 2>/dev/null \
+              | awk '/PRE /{ sub(/\/$/, "", $NF); print $NF }' \
+              | sort | tail -1)
+    if [[ -z "$exp_id" ]]; then
+      echo "No experiments found under $prefix" >&2
+      echo "  Has $STATE_KEY ever been launched?" >&2
+      return 1
+    fi
+    echo "Auto-picked latest experiment under $prefix:"
+    echo "  $exp_id"
+  fi
+  mkdir -p "$STATE_DIR"
+  printf '%s\n' "$exp_id" > "$STATE_FILE"
+  echo "Adopted experiment_id=$exp_id"
+  echo "  state: $STATE_FILE"
+  echo "  alias: $STATE_KEY ($CONFIG_REL)"
+  # Sanity-check: warn if no data exists in S3 yet for this id (don't
+  # block — user may be claiming an id they're about to launch).
+  local probe="${OUT_URI%/}/${exp_id}/"
+  if ! aws_cli s3 ls "$probe" >/dev/null 2>&1; then
+    echo "  ⚠ no S3 data found at $probe (proceeding anyway)"
+  fi
+}
+
 # Soft-stop an experiment: cancels any running work + clears the
 # experiment_id sidecar, but leaves the head alive (cheap to keep) and
 # the alias registered. Pass --terminate-head to also kill the EC2,
@@ -3294,10 +3380,23 @@ Usage: $(basename "$0") experiment <subcmd> [args]
                        -f:        overwrite an existing alias.
   list                 show all registered aliases + methods + images +
                        active experiment_id (sidecar) + config path.
+  runs <alias>         list every experiment_id that has data in S3 under
+                       the alias's out_uri, with last-write timestamp.
+                       Marks the sidecar-active id. Use after the sidecar
+                       was lost (fresh checkout, ``experiment end``, etc.).
+  adopt <alias> [<experiment_id>]
+                       attach the alias's sidecar to an existing
+                       experiment_id. With no id, auto-picks the newest
+                       run from S3. Pass an explicit id to attach to an
+                       older run. Use after the sidecar was lost to
+                       reconnect to an in-S3 run for ``compare analyze``,
+                       ``run status``, etc.
   end <alias> [--terminate-head] [--rm]
                        soft-stop: cancel running work + clear sidecar.
                        --terminate-head: also terminate the EC2 head.
                        --rm: also unregister the alias.
+                       (To kill EC2 but KEEP the sidecar, use
+                        ``head terminate <alias>`` instead.)
   rm <alias> [-f]      hard remove (refuses if alias still has a running head;
                        -f overrides).
   help                 this screen
@@ -3555,6 +3654,8 @@ case "$cmd" in
     case "$sub" in
       new)              ns_experiment_new "$@" ;;
       list)             ns_experiment_list "$@" ;;
+      runs)             _dispatch_variant ns_experiment_runs  "$@" ;;
+      adopt)            _dispatch_variant ns_experiment_adopt "$@" ;;
       end)              _dispatch_variant ns_experiment_end "$@" ;;
       rm)               _dispatch_variant ns_experiment_rm  "$@" ;;
       help|-h|--help)   _help_experiment ;;
