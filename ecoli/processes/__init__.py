@@ -17,6 +17,7 @@ from ecoli.processes.metabolism import Metabolism
 from ecoli.processes.metabolism_redux import MetabolismRedux
 from ecoli.processes.metabolism_redux_classic import MetabolismReduxClassic
 from ecoli.processes.chromosome_replication import ChromosomeReplication
+from ecoli.processes.mock_secretion import MockSecretion
 from ecoli.processes.stubs.exchange_stub import Exchange
 from ecoli.processes.listeners.mass_listener import (
     MassListener,
@@ -63,6 +64,7 @@ from ecoli.processes.bulk_timeline import BulkTimelineProcess
 
 # add to registry
 process_registry.register(TfUnbinding.name, TfUnbinding)
+process_registry.register(MockSecretion.name, MockSecretion)
 process_registry.register(TfBinding.name, TfBinding)
 process_registry.register(TranscriptInitiation.name, TranscriptInitiation)
 process_registry.register(TranscriptElongation.name, TranscriptElongation)
