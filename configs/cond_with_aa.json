@@ -1,0 +1,11 @@
+{
+    "inherit_from": ["default.json"],
+    "experiment_id": "cond_with_aa",
+    "generations": 1,
+    "n_init_sims": 1,
+    "single_daughters": true,
+    "condition": "with_aa",
+    "fixed_media": "minimal_plus_amino_acids",
+    "max_duration": 3000.0,
+    "time_step": 1.0
+}
