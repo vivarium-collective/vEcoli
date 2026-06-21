@@ -349,8 +349,19 @@ class TranscriptInitiation(PartitionedProcess):
                     ppgpp_conc
                 )
                 ppgpp_scale = basal_prob[TU_index]
-                # Use original delta prob if no ppGpp basal
-                ppgpp_scale[ppgpp_scale == 0] = 1
+                # The TF delta below is scaled by the gene's ppGpp-adjusted
+                # basal expression. The historical `ppgpp_scale[==0] = 1` guard
+                # restored full-strength delta wherever that basal hit exactly
+                # 0.0 — but a gene with ~0 ppGpp expression is effectively
+                # unexpressed, so scaling its TF delta up to 1 lets that null
+                # gene's delta dominate the (renormalized) init probabilities.
+                # The guard is a floating-point knife-edge: a gene's basal here
+                # is usually denormal-tiny (so scale stays ~0 and the delta is
+                # suppressed), but a different BLAS/LAPACK build flushes it to
+                # exact 0.0 and trips the guard — making one null gene reach
+                # ~19% of all transcription on carbon-poor media. Scale the
+                # delta by the real (near-zero) basal so null genes stay
+                # suppressed regardless of underflow.
             else:
                 basal_prob = self.basal_prob
                 self.fracActiveRnap = self.fracActiveRnapDict[current_media_id]

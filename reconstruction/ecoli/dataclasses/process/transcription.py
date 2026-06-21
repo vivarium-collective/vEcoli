@@ -2129,10 +2129,23 @@ class Transcription(object):
         new_prob = normalize(new_prob)
 
         # Determine adjustments to the current ppGpp expression to scale
-        # to the expected expression
+        # to the expected expression. The ratio new_prob / old_prob is only
+        # meaningful where the gene carries appreciable ppGpp-regulated
+        # expression. Where old_prob sits at the numerical-noise floor (a gene
+        # that is effectively unexpressed), the ratio explodes to a huge but
+        # FINITE value, so that null gene's free/bound expression is amplified
+        # and — after the renormalization below — steals probability mass from
+        # real genes. The exact blow-up depends on the BLAS/LAPACK build, which
+        # made exp_free / exp_ppgpp non-reproducible across numpy/scipy versions
+        # (e.g. TU0-14501 reached the single highest exp_free of all TUs despite
+        # ~0 actual expression). Leave such genes unscaled so the fit is
+        # deterministic and version-independent. The floor is robust: old_prob
+        # values split cleanly into a dust band (<=1e-13) and real genes
+        # (>1e-9), so any threshold in between yields the same result.
         with np.errstate(invalid="ignore", divide="ignore"):
             adjustment = new_prob / old_prob
         adjustment[~np.isfinite(adjustment)] = 1
+        adjustment[old_prob <= 1e-10 * old_prob.max()] = 1
 
         # Scale free and bound expression and renormalize ppGpp regulated expression
         self.exp_free *= adjustment
