@@ -150,100 +150,100 @@ class TranscriptInitiation(PartitionedProcess):
     topology = TOPOLOGY
 
     config_schema = {
-        'fracActiveRnapDict': 'map[float]',
-        'rnaLengths': 'unum[array[integer],nt]',
-        'rnaPolymeraseElongationRateDict': 'map[unum[float,nucleotide/s]]',
-        'variable_elongation': 'boolean',
-        'make_elongation_rates': 'method',
-        'active_rnap_foorprint_size': 'integer',
-        'basal_prob': 'array[float]',
-        'delta_prob': {
-            'deltaI': 'array[integer[64]]',
-            'deltaJ': 'array[integer[64]]',
-            'deltaV': 'array[float]',
-            'shape': 'tuple[integer,integer]',
+        "fracActiveRnapDict": "map[float]",
+        "rnaLengths": "unum[array[integer],nt]",
+        "rnaPolymeraseElongationRateDict": "map[unum[float,nucleotide/s]]",
+        "variable_elongation": "boolean",
+        "make_elongation_rates": "method",
+        "active_rnap_foorprint_size": "integer",
+        "basal_prob": "array[float]",
+        "delta_prob": {
+            "deltaI": "array[integer[64]]",
+            "deltaJ": "array[integer[64]]",
+            "deltaV": "array[float]",
+            "shape": "tuple[integer,integer]",
         },
-        'get_delta_prob_matrix': 'method',
-        'perturbations': 'map[float]',
-        'rna_data': 'units_array',
-        'active_rnap_footprint_size': 'unum[nt]',
-        'get_rnap_active_fraction_from_ppGpp': 'method',
-        'idx_rRNA': 'array[integer[64]]',
-        'idx_mRNA': 'array[integer[64]]',
-        'idx_tRNA': 'array[integer[64]]',
-        'idx_rprotein': 'array[integer[64]]',
-        'idx_rnap': 'array[integer[64]]',
-        'rnaSynthProbFractions': 'map[float]',
-        'rnaSynthProbRProtein': 'map[array[float]]',
-        'rnaSynthProbRnaPolymerase': 'map[array[float]]',
-        'replication_coordinate': 'array[integer[64]]',
-        'transcription_direction': 'array[boolean]',
-        'n_avogadro': 'unum[1/mol]',
-        'cell_density': 'unum[g/L]',
-        'ppgpp': 'string',
-        'inactive_RNAP': 'string',
-        'synth_prob': 'method',
-        'copy_number': 'method',
-        'ppgpp_regulation': 'boolean',
-        'trna_attenuation': 'boolean',
-        'attenuated_rna_indices': 'array[integer[64]]',
-        'attenuation_adjustments': 'array[float]',
-        'seed': 'lineage_seed[integer]',
-        'emit_unique': 'boolean',
+        "get_delta_prob_matrix": "method",
+        "perturbations": "map[float]",
+        "rna_data": "units_array",
+        "active_rnap_footprint_size": "unum[nt]",
+        "get_rnap_active_fraction_from_ppGpp": "method",
+        "idx_rRNA": "array[integer[64]]",
+        "idx_mRNA": "array[integer[64]]",
+        "idx_tRNA": "array[integer[64]]",
+        "idx_rprotein": "array[integer[64]]",
+        "idx_rnap": "array[integer[64]]",
+        "rnaSynthProbFractions": "map[float]",
+        "rnaSynthProbRProtein": "map[array[float]]",
+        "rnaSynthProbRnaPolymerase": "map[array[float]]",
+        "replication_coordinate": "array[integer[64]]",
+        "transcription_direction": "array[boolean]",
+        "n_avogadro": "unum[1/mol]",
+        "cell_density": "unum[g/L]",
+        "ppgpp": "string",
+        "inactive_RNAP": "string",
+        "synth_prob": "method",
+        "copy_number": "method",
+        "ppgpp_regulation": "boolean",
+        "trna_attenuation": "boolean",
+        "attenuated_rna_indices": "array[integer[64]]",
+        "attenuation_adjustments": "array[float]",
+        "seed": "lineage_seed[integer]",
+        "emit_unique": "boolean",
     }
 
     def inputs(self):
         return {
-            'environment': {'media_id': 'string'},
-            'full_chromosomes': FULL_CHROMOSOME_ARRAY,
-            'RNAs': RNA_ARRAY,
-            'active_RNAPs': ACTIVE_RNAP_ARRAY,
-            'promoters': PROMOTER_ARRAY,
-            'bulk': 'bulk_array',
-            'listeners': {'mass': {'cell_mass': 'float[fg]'}},
-            'timestep': 'integer',
+            "environment": {"media_id": "string"},
+            "full_chromosomes": FULL_CHROMOSOME_ARRAY,
+            "RNAs": RNA_ARRAY,
+            "active_RNAPs": ACTIVE_RNAP_ARRAY,
+            "promoters": PROMOTER_ARRAY,
+            "bulk": "bulk_array",
+            "listeners": {"mass": {"cell_mass": "float[fg]"}},
+            "timestep": "integer",
         }
 
     def outputs(self):
         return {
-            'bulk': 'bulk_array',
-            'RNAs': RNA_ARRAY,
-            'active_RNAPs': ACTIVE_RNAP_ARRAY,
-            'listeners': {
-                'rna_synth_prob': {
+            "bulk": "bulk_array",
+            "RNAs": RNA_ARRAY,
+            "active_RNAPs": ACTIVE_RNAP_ARRAY,
+            "listeners": {
+                "rna_synth_prob": {
                     # Synthesis probabilities — dimensionless
-                    'target_rna_synth_prob': {
-                        '_type': 'overwrite[divide_share[array[float]]]',
-                        '_default': [0.0] * self.n_TUs,
+                    "target_rna_synth_prob": {
+                        "_type": "overwrite[divide_share[array[float]]]",
+                        "_default": [0.0] * self.n_TUs,
                     },
-                    'actual_rna_synth_prob': {
-                        '_type': 'overwrite[divide_share[array[float]]]',
-                        '_default': [0.0] * self.n_TUs,
+                    "actual_rna_synth_prob": {
+                        "_type": "overwrite[divide_share[array[float]]]",
+                        "_default": [0.0] * self.n_TUs,
                     },
-                    'max_p': 'overwrite[divide_share[float]]{0.0}',
-                    'tu_is_overcrowded': {
-                        '_type': 'overwrite[divide_share[array[boolean]]]',
-                        '_default': [False] * self.n_TUs,
+                    "max_p": "overwrite[divide_share[float]]{0.0}",
+                    "tu_is_overcrowded": {
+                        "_type": "overwrite[divide_share[array[boolean]]]",
+                        "_default": [False] * self.n_TUs,
                     },
-                    'total_rna_init': 'overwrite[divide_share[integer]]{0}',
+                    "total_rna_init": "overwrite[divide_share[integer]]{0}",
                 },
-                'ribosome_data': {
+                "ribosome_data": {
                     # rRNA initiation counts and probabilities
-                    'rRNA_initiated_TU': {
-                        '_type': 'overwrite[divide_share[array[integer]]]',
-                        '_default': [0] * len(self.idx_rRNA),
+                    "rRNA_initiated_TU": {
+                        "_type": "overwrite[divide_share[array[integer]]]",
+                        "_default": [0] * len(self.idx_rRNA),
                     },
-                    'rRNA_init_prob_TU': {
-                        '_type': 'overwrite[divide_share[array[float]]]',
-                        '_default': [0.0] * len(self.idx_rRNA),
+                    "rRNA_init_prob_TU": {
+                        "_type": "overwrite[divide_share[array[float]]]",
+                        "_default": [0.0] * len(self.idx_rRNA),
                     },
-                    'total_rna_init': 'overwrite[divide_share[integer]]{0}',
+                    "total_rna_init": "overwrite[divide_share[integer]]{0}",
                 },
-                'rnap_data': {
-                    'did_initialize': 'overwrite[divide_share[integer]]{0}',
-                    'rna_init_event': {
-                        '_type': 'overwrite[divide_share[array[integer]]]',
-                        '_default': [0] * self.n_TUs,
+                "rnap_data": {
+                    "did_initialize": "overwrite[divide_share[integer]]{0}",
+                    "rna_init_event": {
+                        "_type": "overwrite[divide_share[array[integer]]]",
+                        "_default": [0] * self.n_TUs,
                     },
                 },
             },
@@ -456,8 +456,22 @@ class TranscriptInitiation(PartitionedProcess):
                     ppgpp_conc
                 )
                 ppgpp_scale = basal_prob[TU_index]
-                # Use original delta prob if no ppGpp basal
-                ppgpp_scale[ppgpp_scale == 0] = 1
+                # TF effect is multiplicative on the gene's ppGpp-adjusted basal
+                # expression. A gene with zero basal can't be induced, so the
+                # original `ppgpp_scale[==0] = 1` switch let a silent gene take
+                # the TF delta additively at full strength. That `== 0` switch is
+                # a floating-point knife-edge: whether a near-zero basal lands at
+                # exactly 0 (full delta) or denormal-tiny (delta suppressed) is a
+                # BLAS/underflow accident that differs across numpy builds, so one
+                # truly-null gene (TU0-14529) reached ~19% of all transcription on
+                # carbon-poor media in one engine and ~0 in the other. Replace it
+                # with a smooth Hill/Michaelis-Menten accessibility gain
+                # scale = b^2/(b+K): ~b for expressed genes, smoothly ->0 for
+                # silent genes (cooperative-threshold biology), identical across
+                # underflow regimes. K sits in the empty gap between the noise
+                # floor (~1e-13) and the smallest real expression (~1e-9).
+                _PPGPP_SCALE_K = 1e-11
+                ppgpp_scale = ppgpp_scale**2 / (ppgpp_scale + _PPGPP_SCALE_K)
             else:
                 basal_prob = self.basal_prob
                 self.fracActiveRnap = self.fracActiveRnapDict[current_media_id]
