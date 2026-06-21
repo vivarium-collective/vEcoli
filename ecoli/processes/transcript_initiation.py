@@ -349,19 +349,27 @@ class TranscriptInitiation(PartitionedProcess):
                     ppgpp_conc
                 )
                 ppgpp_scale = basal_prob[TU_index]
-                # The TF delta below is scaled by the gene's ppGpp-adjusted
-                # basal expression. The historical `ppgpp_scale[==0] = 1` guard
-                # restored full-strength delta wherever that basal hit exactly
-                # 0.0 — but a gene with ~0 ppGpp expression is effectively
-                # unexpressed, so scaling its TF delta up to 1 lets that null
-                # gene's delta dominate the (renormalized) init probabilities.
-                # The guard is a floating-point knife-edge: a gene's basal here
-                # is usually denormal-tiny (so scale stays ~0 and the delta is
-                # suppressed), but a different BLAS/LAPACK build flushes it to
-                # exact 0.0 and trips the guard — making one null gene reach
-                # ~19% of all transcription on carbon-poor media. Scale the
-                # delta by the real (near-zero) basal so null genes stay
-                # suppressed regardless of underflow.
+                # TF effect is multiplicative on the gene's ppGpp-adjusted basal
+                # expression: p = basal * (1 + scale-weighted delta). A gene with
+                # zero basal can never be induced, so the original code used a
+                # hard `ppgpp_scale[basal == 0] = 1` switch to let a silent gene
+                # take the TF delta additively at full strength. That `== 0`
+                # switch is a floating-point knife-edge: whether a near-zero
+                # basal lands at exactly 0 (full delta) or denormal-tiny (delta
+                # suppressed) is a BLAS/underflow accident that differs across
+                # numpy builds, so one truly-null gene (TU0-14529) reached ~19%
+                # of all transcription on carbon-poor media in one engine and ~0
+                # in the other. Replace the switch with a smooth Hill/Michaelis-
+                # Menten accessibility gain — scale = b^2/(b+K): ~b for expressed
+                # genes (multiplicative regime unchanged), smoothly -> 0 for
+                # silent genes (b << K). This is the cooperative-threshold
+                # biology (a promoter needs a minimum RNAP-recruitment competence
+                # before a bound TF can act); it suppresses truly-null genes
+                # consistently and is identical across underflow regimes, so the
+                # engines agree. K sits in the empty gap between the numerical
+                # noise floor (~1e-13) and the smallest real expression (~1e-9).
+                _PPGPP_SCALE_K = 1e-11
+                ppgpp_scale = ppgpp_scale**2 / (ppgpp_scale + _PPGPP_SCALE_K)
             else:
                 basal_prob = self.basal_prob
                 self.fracActiveRnap = self.fracActiveRnapDict[current_media_id]
