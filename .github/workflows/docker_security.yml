@@ -46,6 +46,12 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Login to Docker Hub
+        id: dockerhub-login
+        # Docker Scout (below) needs a Docker Hub login, but a missing/expired
+        # credential should not turn the whole scheduled job red. Soft-fail here
+        # and gate the scan on the login outcome; the image build above still
+        # gates PRs/pushes as before.
+        continue-on-error: true
         uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
@@ -53,6 +59,10 @@ jobs:
 
       - name: Analyze for critical and high CVEs
         id: docker-scout-cves
+        # Only scan when the login succeeded (Scout requires Docker Hub auth);
+        # soft-fail so a transient Scout error doesn't red the job either.
+        if: steps.dockerhub-login.outcome == 'success'
+        continue-on-error: true
         uses: docker/scout-action@8910519cee8ac046f3ee99686b0dc6654d5ba1a7
         with:
           command: cves,recommendations
@@ -62,6 +72,14 @@ jobs:
 
       - name: Upload SARIF result
         id: upload-sarif
+        # Only upload when Scout actually produced the SARIF file.
+        if: steps.docker-scout-cves.outcome == 'success'
         uses: github/codeql-action/upload-sarif@7434149006143a4d75b82a2f411ef15b03ccc2d7
         with:
           sarif_file: sarif.output.json
+
+      - name: Warn if the CVE scan was skipped
+        # Make a skipped scan loud (annotation) rather than a silent green.
+        if: steps.dockerhub-login.outcome != 'success'
+        run: |
+          echo "::warning title=Docker Scout skipped::Docker Hub login failed or credentials are absent, so the CVE scan did not run. Set the DOCKERHUB_USERNAME variable and DOCKERHUB_TOKEN secret (a Docker Hub access token) to restore security scanning."
