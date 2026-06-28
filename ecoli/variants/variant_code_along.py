@@ -93,12 +93,12 @@ def apply_variant(
     sim_data = condition_variant(sim_data, params)
 
     # internlize internal shift dict
-    sim_data.internal_shift_dict = {}
+    sim_data.internal_shift_dict = {}  # type: ignore[attr-defined]
 
     # Add the new gene induction to the internal_shift instructions
     induction_gene = params.get("induction_gene", 1)
-    sim_data.internal_shift_dict[induction_gene] = (
-        modify_gen_exp(params["exp_trl_eff"]["exp"], params["exp_trl_eff"]["trl_eff"]),
+    sim_data.internal_shift_dict[induction_gene] = (  # type: ignore[attr-defined]
+        modify_gen_exp(params["exp_trl_eff"]["exp"], params["exp_trl_eff"]["trl_eff"]),  # type: ignore[call-arg]
     )
     if "knockout_gen" in params:
         assert params["knockout_gene"] > induction_gene, (

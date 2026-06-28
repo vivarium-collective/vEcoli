@@ -138,6 +138,8 @@ def plot_timeseries_network(
     arrowsize=12,  # mutation_scale for arrow patch (controls arrowhead size)
     edge_alpha=0.55,  # transparency of reaction arrows
     edge_width=1.3,  # line width of reaction arrows
+    title=None,  # optional figure title
+    figsize=None,  # optional figure size (width, height) in inches
 ):
     def build_graph_rxn_list(reactions):
         # """Build a directed graph with edges going from reactants to product for each rxn"""
@@ -236,9 +238,11 @@ def plot_timeseries_network(
         pos_fig = {n: (float(x), float(y)) for n, x, y in zip(G.nodes, xs, ys)}
 
     if fig is None:
-        fig = plt.figure(figsize=(12, 8))
+        fig = plt.figure(figsize=figsize or (12, 8))
     else:
         fig.clf()
+    if title is not None:
+        fig.suptitle(title, fontsize=10)
 
     axes = {}
     product_for_size = product_node or inferred_products
@@ -338,7 +342,7 @@ def plot(
     df_full = pd.DataFrame(bulk_matrix, columns=bulk_matrix_ids)
     df_full["Time (min)"] = time_mins
 
-    base_to_full = {}
+    base_to_full: dict[str, list[str]] = {}
     for col in bulk_matrix_ids:
         base = strip_compartment_labels(col)
         base_to_full.setdefault(base, []).append(col)
