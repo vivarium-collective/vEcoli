@@ -1,0 +1,23 @@
+{
+    "emitter_arg": {
+        "out_dir": "out"
+    },
+    "analysis_options": {
+        "experiment_id": ["complexation_flagella"],
+        "variant": [0],
+        "lineage_seed": [0],
+        "generation": [1],
+        "agent_id": ["0"],
+        "variant_data_dir": ["out/complexation_flagella/variant_sim_data"],
+        "validation_data_path": ["out/complexation_flagella/parca/kb/simData.cPickle"],
+        "outdir": "out/complexation_flagella",
+        "cpus": 1,
+
+        "single": {"complexation_flagella": {}},
+        "multidaughter": {},
+        "multigeneration": {},
+        "multiseed": {},
+        "multivariant": {},
+        "multiexperiment": {}
+    }
+}

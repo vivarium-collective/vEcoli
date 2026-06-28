@@ -1,0 +1,18 @@
+{
+    "experiment_id": "flagellum_complex_counts",
+    "suffix_time": false,
+    "sim_data_path": "reconstruction/sim_data/kb/simData.cPickle",
+    "initial_global_time": 0.0,
+    "fail_at_total_time": false,
+    "generations": 1,
+    "n_init_sims": 1,
+    "single_daughters": true,
+    "emitter": "parquet",
+    "emitter_arg": {
+        "out_dir": "out"
+    },
+    "raw_output": true,
+    "analysis_options": {
+        "single": {"flagellum_complex_counts": {}}
+    }
+}

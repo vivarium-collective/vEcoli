@@ -59,6 +59,10 @@ from ecoli.processes.antibiotics.conc_to_counts import ConcToCounts
 from ecoli.processes.global_clock import GlobalClock
 from ecoli.processes.antibiotics.murein_division import MureinDivision
 from ecoli.processes.bulk_timeline import BulkTimelineProcess
+from ecoli.processes.flagella_transcription_regulation import (
+    FlagellaTranscriptionRegulation,
+)
+from ecoli.processes.flagella_flgm_secretion import FlagellaFlgMSecretion
 
 
 # add to registry
@@ -123,5 +127,9 @@ process_registry.register(RnaInterference.name, RnaInterference)
 process_registry.register(GlobalClock.name, GlobalClock)
 process_registry.register(MureinDivision.name, MureinDivision)
 process_registry.register(BulkTimelineProcess.name, BulkTimelineProcess)
+process_registry.register(
+    FlagellaTranscriptionRegulation.name, FlagellaTranscriptionRegulation
+)
+process_registry.register(FlagellaFlgMSecretion.name, FlagellaFlgMSecretion)
 
 __all__ = ["processes"]

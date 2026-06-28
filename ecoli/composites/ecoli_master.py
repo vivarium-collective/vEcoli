@@ -10,6 +10,7 @@ steps, topology, and initial state of the E. coli whole cell model.
 
 from copy import deepcopy
 from typing import Any, Optional
+import warnings
 
 # vivarium-core
 from vivarium.core.composer import Composer
@@ -20,9 +21,6 @@ from vivarium.core.engine import _StepGraph
 
 # sim data
 from ecoli.library.sim_data import LoadSimData, RAND_MAX
-
-# cloud URI detection
-from wholecell.utils.filepath import is_cloud_uri
 
 # logging
 from ecoli.library.logging_tools import make_logging_process
@@ -42,6 +40,9 @@ from ecoli.processes.partition import Requester, Evolver, Step, Process
 from ecoli.library.json_state import get_state_from_file
 
 from reconstruction.ecoli.dataclasses.process.replication import MAX_TIMESTEP
+
+from wholecell.utils.filepath import ROOT_PATH
+import os
 
 MINIMAL_MEDIA_ID = "minimal"
 AA_MEDIA_ID = "minimal_plus_amino_acids"
@@ -159,57 +160,62 @@ class Ecoli(Composer):
         config = config or self.config
         # Allow initial state to be directly supplied instead of a file name
         # (e.g. when loading individual cells in a colony save file)
-        full_initial_state = config.get("initial_state", None)
-        if not full_initial_state:
+        initial_state = config.get("initial_state", None)
+        if not initial_state:
             initial_state_file = config.get("initial_state_file", None)
             # Generate initial state from sim_data if no file specified
             if not initial_state_file:
-                full_initial_state = self.load_sim_data.generate_initial_state()
+                initial_state = self.load_sim_data.generate_initial_state()
             else:
-                # Support cloud URIs, absolute paths, and local filenames
-                if is_cloud_uri(initial_state_file) or initial_state_file.startswith(
-                    "/"
-                ):
-                    state_path = initial_state_file
-                else:
-                    state_path = f"data/{initial_state_file}.json"
-                full_initial_state = get_state_from_file(path=state_path)
+                # Use relative path so nextflow can stage daughter_state_*.json
+                # into the work directory's data/ subdirectory and have it found
+                # correctly. ROOT_PATH-based absolute path broke multi-gen via nextflow.
+                initial_state = get_state_from_file(
+                    path=f"data/{initial_state_file}.json"
+                )
 
-        # Modify state for configured agent_id
-        if "agents" in full_initial_state.keys():
-            agent_initial_state = full_initial_state["agents"][
-                config.get("agent_id", "0")
-            ]
-        else:
-            agent_initial_state = full_initial_state
+        # Load first agent state in a division-enabled save state by default
+        if "agents" in initial_state.keys():
+            warnings.warn(
+                "Trying to load a multi-agent simulation state into "
+                "a single-cell simulation. Loading the state of arbitrary agent."
+            )
+            initial_state = list(initial_state["agents"].values())[0]
 
         initial_state_overrides = config.get("initial_state_overrides", [])
+        # Skip overrides when loading from a daughter state file — daughter cells
+        # inherit their molecular state from the parent at division and should not
+        # be reset to generation-1 initial values (e.g. FliA=500, FlgM=800).
+        if config.get("initial_state_file"):
+            initial_state_overrides = []
         # Create mapping of bulk molecule names to row indices, allowing users to
         # specify bulk molecule overrides by name
         if initial_state_overrides:
             bulk_map = {
                 bulk_id: row_id
-                for row_id, bulk_id in enumerate(agent_initial_state["bulk"]["id"])
+                for row_id, bulk_id in enumerate(initial_state["bulk"]["id"])
             }
         for override_file in initial_state_overrides:
-            override = get_state_from_file(path=f"data/{override_file}.json")
+            override = get_state_from_file(
+                path=os.path.join(ROOT_PATH, "data", f"{override_file}.json")
+            )
             # Apply bulk overrides of the form {molecule: count} to Numpy array
             bulk_overrides = override.pop("bulk", {})
-            agent_initial_state["bulk"].flags.writeable = True
+            initial_state["bulk"].flags.writeable = True
             for molecule, count in bulk_overrides.items():
-                agent_initial_state["bulk"]["count"][bulk_map[molecule]] = count
-            agent_initial_state["bulk"].flags.writeable = False
+                initial_state["bulk"]["count"][bulk_map[molecule]] = count
+            initial_state["bulk"].flags.writeable = False
             # All other overrides directly update initial state
-            deep_merge(agent_initial_state, override)
+            deep_merge(initial_state, override)
 
         # Put shared process instances for partitioned steps into state
         _, steps, _ = self.processes_and_steps
-        agent_initial_state["process"] = {
+        initial_state["process"] = {
             step.parameters["process"].name: (step.parameters["process"],)
             for step in steps.values()
             if "process" in step.parameters
         }
-        return full_initial_state
+        return initial_state
 
     def generate_processes_and_steps(
         self, config: dict[str, Any]
@@ -489,9 +495,10 @@ class Ecoli(Composer):
             else:
                 flow["division"] = [(f"unique_update_{unique_update_counter - 1}",)]
 
-            # Add process to raise catchable exception upon division
+            # Add Step to raise catchable exception upon division
             if config["generations"] is not None:
-                processes["stop-after-division"] = StopAfterDivision()
+                steps["stop-after-division"] = StopAfterDivision()
+                flow["stop-after-division"] = [("division",)]
 
         # update schema overrides for evolvers and requesters
         update_override = {}

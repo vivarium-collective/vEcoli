@@ -1,0 +1,23 @@
+{
+    "emitter_arg": {
+        "out_dir": "out"
+    },
+    "analysis_options": {
+        "experiment_id": ["flagella_actual_rna_synthesis_prob"],
+        "variant": [0],
+        "lineage_seed": [0],
+        "generation": [1],
+        "agent_id": ["0"],
+        "variant_data_dir": ["out/flagella_actual_rna_synthesis_prob/variant_sim_data"],
+        "validation_data_path": ["out/flagella_actual_rna_synthesis_prob/parca/kb/simData.cPickle"],
+        "outdir": "out/flagella_actual_rna_synthesis_prob",
+        "cpus": 1,
+
+        "single": {"flagella_actual_rna_synthesis_prob": {}},
+        "multidaughter": {},
+        "multigeneration": {},
+        "multiseed": {},
+        "multivariant": {},
+        "multiexperiment": {}
+    }
+}

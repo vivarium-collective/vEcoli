@@ -1,0 +1,19 @@
+{
+    "experiment_id": "flg_sim1_override",
+    "suffix_time": false,
+    "initial_global_time": 0.0,
+    "fail_at_total_time": false,
+    "sim_data_path": "reconstruction/sim_data/kb/simData.cPickle",
+    "generations": 1,
+    "seed": 0,
+    "n_init_sims": 1,
+    "single_daughters": true,
+    "emitter": "parquet",
+    "emitter_arg": {
+        "out_dir": "out"
+    },
+    "initial_state_overrides": ["overrides/flg_override_4flagella"],
+    "analysis_options": {
+        "single": {"CPLX0_7452_visual": {}}
+    }
+}

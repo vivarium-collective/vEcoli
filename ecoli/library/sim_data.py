@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 import pickle
 import os
-from fsspec import open as fsspec_open
 from typing import Any, Optional, TYPE_CHECKING
 from vivarium.library.units import units as vivunits
 from wholecell.utils import units
@@ -169,7 +168,7 @@ class LoadSimData:
         self.degrade_misc = False
 
         # load sim_data
-        with fsspec_open(sim_data_path, "rb") as sim_data_file:
+        with open(sim_data_path, "rb") as sim_data_file:
             self.sim_data: "SimulationDataEcoli" = pickle.load(sim_data_file)
 
         if condition is not None:
@@ -609,6 +608,8 @@ class LoadSimData:
             "exchange_data": self.get_exchange_data_config,
             "media_update": self.get_media_update_config,
             "bulk-timeline": self.get_bulk_timeline_config,
+            "ecoli-flagella-transcription-regulation": self.get_flagella_transcription_regulation_config,
+            "ecoli-flagella-flgm-secretion": self.get_flagella_flgm_secretion_config,
         }
 
         try:
@@ -758,6 +759,71 @@ class LoadSimData:
         }
 
         return transcript_initiation_config
+
+    def get_flagella_transcription_regulation_config(self, time_step=1):
+        t = self.sim_data.process.transcription
+        rna_ids = t.rna_data["id"]
+        cistron_ids = [
+            "EG10322_RNA",
+            "EG11346_RNA",
+            "EG11347_RNA",
+            "G358_RNA",
+            "G357_RNA",
+            "G7028_RNA",
+            "EG11355_RNA",
+        ]
+        flg_tu_rna_ids = [
+            rna_ids[t.cistron_id_to_rna_indexes(cid)[0]] for cid in cistron_ids
+        ]
+        # G369_RNA (flgM) is included here as a Class III (FliA-driven) gene.
+        # Although flgM has a dual promoter (Class II FlhDC + Class III FliA), Stefan et al.
+        # (2015, PLoS Comput Biol, doi:10.1371/journal.pcbi.1004028) found the Class II
+        # flgM promoter is near background and most FlgM production is FliA-driven.
+        # Adding flgM here closes the missing negative feedback loop: as free FliA rises,
+        # flgM transcription increases (init_prob_override = Y), producing more FlgM protein
+        # that re-sequesters FliA — preventing the runaway FliA accumulation seen without
+        # this feedback (Approach 3 limitation).
+        classIII_cistron_ids = [
+            "EG10321_RNA",
+            "EG10317_RNA",
+            "EG11967_RNA",
+            "EG11545_RNA",
+            "EG10601_RNA",
+            "EG10602_RNA",
+            "EG10146_RNA",
+            "EG10149_RNA",
+            "G369_RNA",
+        ]
+        flg_classIII_tu_rna_ids = [
+            rna_ids[t.cistron_id_to_rna_indexes(cid)[0]] for cid in classIII_cistron_ids
+        ]
+
+        # _patch_flia_delta_prob removed: the K&A gate now writes p_i directly
+        # to init_prob_override in the promoters unique molecule, so delta_prob
+        # no longer needs to be patched — transcript_initiation uses the override
+        # instead of basal_prob + delta_prob * bound_TF for Class II genes.
+        return {
+            "time_step": time_step,
+            "tf_ids": self.sim_data.process.transcription_regulation.tf_ids,
+            "rna_ids": rna_ids,
+            "bulk_molecule_ids": self.sim_data.internal_state.bulk_molecules.bulk_data[
+                "id"
+            ],
+            "flg_classII_rnaids": flg_tu_rna_ids,
+            "flg_classIII_rnaids": flg_classIII_tu_rna_ids,
+            "basal_prob": self.sim_data.process.transcription_regulation.basal_prob,
+            "K_flhDC": 50,
+            "K_fliA": 600,
+            "seed": self._seedFromName("FlagellaTranscriptionRegulation"),
+        }
+
+    def get_flagella_flgm_secretion_config(self, time_step=1):
+        return {
+            "bulk_molecule_ids": self.sim_data.internal_state.bulk_molecules.bulk_data[
+                "id"
+            ],
+            "secretion_rate": 0.1,
+        }
 
     def get_transcript_elongation_config(self, time_step=1):
         transcript_elongation_config = {
@@ -1586,11 +1652,13 @@ class LoadSimData:
         return rna_interference_config
 
     def get_tetracycline_ribosome_equilibrium_config(self, time_step=1):
-        transcription = self.sim_data.process.transcription
+        rna_ids = self.sim_data.process.transcription.rna_data["id"]
+        is_trna = self.sim_data.process.transcription.rna_data["is_tRNA"].astype(
+            np.bool_
+        )
         tetracycline_ribosome_equilibrium_config = {
             "time_step": time_step,
-            "trna_ids": transcription.charged_trna_names
-            + transcription.uncharged_trna_names,
+            "trna_ids": rna_ids[is_trna],
             # Ensure that a new seed is set upon division
             "seed": self.random_state.randint(RAND_MAX),
             "emit_unique": self.emit_unique,
