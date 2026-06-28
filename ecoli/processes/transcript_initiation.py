@@ -272,6 +272,7 @@ class TranscriptInitiation(PartitionedProcess):
         self.random_state = np.random.RandomState(seed=self.seed)
 
         # Helper indices for Numpy indexing
+
         self.ppgpp_idx = None
 
     def ports_schema(self):
@@ -332,8 +333,18 @@ class TranscriptInitiation(PartitionedProcess):
         current_media_id = states["environment"]["media_id"]
 
         if states["full_chromosomes"]["_entryState"].sum() > 0:
-            # Get attributes of promoters
-            TU_index, bound_TF = attrs(states["promoters"], ["TU_index", "bound_TF"])
+            # Get attributes of promoters. init_prob_override is written by the
+            # K&A flagella gate each timestep for Class II promoters; 0.0 means
+            # no override (numpy default for unwritten promoters).
+            if "init_prob_override" in states["promoters"].dtype.names:
+                TU_index, bound_TF, init_prob_override = attrs(
+                    states["promoters"], ["TU_index", "bound_TF", "init_prob_override"]
+                )
+            else:
+                TU_index, bound_TF = attrs(
+                    states["promoters"], ["TU_index", "bound_TF"]
+                )
+                init_prob_override = np.zeros(len(TU_index))
 
             if self.ppgpp_regulation:
                 cell_mass = states["listeners"]["mass"]["cell_mass"] * units.fg
@@ -360,6 +371,17 @@ class TranscriptInitiation(PartitionedProcess):
             self.promoter_init_probs = basal_prob[TU_index] + ppgpp_scale * np.multiply(
                 self.delta_prob_matrix[TU_index, :], bound_TF
             ).sum(axis=1)
+
+            # K&A gate override: for Class II flagella promoters, the
+            # FlagellaTranscriptionRegulation Step has already computed the
+            # correct initiation probability (p_i from the SUM gate) and
+            # stored it in init_prob_override. Substitute it directly so the
+            # K&A gate is the sole driver for those genes, eliminating the
+            # double-counting of FlhDC and FliA against ParCa's basal_prob.
+            # 0.0 (numpy default) means no override — only the K&A gate writes here.
+            ka_mask = init_prob_override > 0
+            if ka_mask.any():
+                self.promoter_init_probs[ka_mask] = init_prob_override[ka_mask]
 
             if len(self.genetic_perturbations) > 0:
                 self._rescale_initiation_probs(

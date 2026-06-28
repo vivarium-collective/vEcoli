@@ -1,0 +1,20 @@
+{
+    "experiment_id": "flagella_regulation_multigen_flgM_added",
+    "suffix_time": false,
+    "sim_data_path": "out_flgMfliA_kd_fix/kb/simData.cPickle",
+    "emitter": "parquet",
+    "generations": 3,
+    "analysis_options": {
+        "multigeneration": {"flagella_transcript_multigen": {}}
+    },
+    "emitter_arg": {
+        "out_dir": "out"
+    },
+    "initial_state_overrides": ["overrides/flagellum_initial_value"],
+    "add_processes": ["ecoli-flagella-transcription-regulation", "ecoli-flagella-flgm-secretion"],
+    "flow": {
+        "ecoli-flagella-transcription-regulation": [["ecoli-tf-binding"]],
+        "ecoli-flagella-flgm-secretion": [["ecoli-complexation"]],
+        "ecoli-transcript-initiation": [["ecoli-flagella-transcription-regulation", "ecoli-flagella-flgm-secretion"]]
+    }
+}

@@ -1,0 +1,20 @@
+{
+    "experiment_id": "biofilm_formation_genes",
+    "suffix_time": false,
+    "initial_global_time": 0.0,
+    "fail_at_total_time": false,
+    "sim_data_path": "reconstruction/sim_data/kb/simData.cPickle",
+    "generations": 1,
+    "n_init_sims": 1,
+    "single_daughters": true,
+    "emitter": "parquet",
+    "emitter_arg": {
+        "out_dir": "out"
+    },
+    "analysis_options": {
+        "single": {"genes_in_biofilm_formation": {}}
+    },
+    "process_configs": {
+        "chemotaxis": {"flagella_motor": {}}
+    }
+}

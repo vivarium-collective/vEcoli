@@ -291,6 +291,13 @@ class InternalState(object):
             "coordinates": "i8",
             "domain_index": "i4",
             "bound_TF": ("?", n_tf),
+            # K&A gate override: the FlagellaTranscriptionRegulation Step writes
+            # the K&A SUM-gate p_i directly here for Class II promoters each
+            # timestep. transcript_initiation substitutes this value in place of
+            # basal_prob + delta_prob * bound_TF for those promoters, so the K&A
+            # gate is the sole driver of Class II initiation probability.
+            # 0.0 (numpy default) means "no override" — only the K&A gate writes here.
+            "init_prob_override": "f8",
         }
 
         self.unique_molecule.add_to_unique_state(

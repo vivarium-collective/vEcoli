@@ -1,0 +1,19 @@
+{
+    "experiment_id": "flg_sim5_override_stoich_newrna",
+    "suffix_time": false,
+    "initial_global_time": 0.0,
+    "fail_at_total_time": false,
+    "sim_data_path": "out_stoich_new_rna_values/kb/simData.cPickle",
+    "generations": 1,
+    "seed": 0,
+    "n_init_sims": 1,
+    "single_daughters": true,
+    "emitter": "parquet",
+    "emitter_arg": {
+        "out_dir": "out"
+    },
+    "initial_state_overrides": ["overrides/flagellum_initial_value"],
+    "analysis_options": {
+        "single": {"CPLX0_7452_visual_new": {}}
+    }
+}

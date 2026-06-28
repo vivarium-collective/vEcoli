@@ -1,0 +1,19 @@
+{
+    "experiment_id": "flagella_mRNA_cistron_counts",
+    "suffix_time": false,
+    "parca_options": {
+        "cpus": 4
+    },
+    "fail_at_max_duration": true,
+    "sim_data_path": "reconstruction/sim_data/kb/simData.cPickle",
+    "generations": 1,
+    "n_init_sims": 1,
+    "single_daughters": true,
+    "emitter": "parquet",
+    "emitter_arg": {
+        "out_dir": "out"
+    },
+    "analysis_options": {
+        "single": {"flagella_mRNA_cistron_counts": {}}
+    }
+}

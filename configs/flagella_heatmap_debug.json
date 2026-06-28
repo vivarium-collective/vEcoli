@@ -1,0 +1,23 @@
+{
+    "emitter_arg": {
+        "out_dir": "out"
+    },
+    "analysis_options": {
+        "experiment_id": ["flagella_heatmap"],
+        "variant": [0],
+        "lineage_seed": [0],
+        "generation": [1],
+        "agent_id": ["0"],
+        "variant_data_dir": ["out/flagella_heatmap/variant_sim_data"],
+        "validation_data_path": ["out/flagella_heatmap/parca/kb/simData.cPickle"],
+        "outdir": "out/flagella_heatmap",
+        "cpus": 1,
+
+        "single": {"flagella_heatmap": {}},
+        "multidaughter": {},
+        "multigeneration": {},
+        "multiseed": {},
+        "multivariant": {},
+        "multiexperiment": {}
+    }
+}
