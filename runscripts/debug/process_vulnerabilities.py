@@ -67,7 +67,14 @@ Found vulnerabilities in **{len(packages)}** packages requiring updates.
         markdown += f"| **{name}** | {current_version} | **{recommended_version}** | {vuln_count} |\n"
 
         if recommended_version != "Unknown":
-            upgrade_commands.append(f'-P "{name}=={recommended_version}"')
+            # Use ">=" rather than "==" so uv's resolver may pick a compatible
+            # higher version. Pinning each flagged package to its exact fix
+            # version simultaneously can be unsatisfiable when one package caps
+            # another (e.g. marimo 0.23.9 requires pymdown-extensions<11 while
+            # pymdown-extensions is forced to ==11.0.1), which aborted the
+            # "Apply package updates" step. ">=" guarantees at least the fix
+            # version while letting the resolver find a consistent solution.
+            upgrade_commands.append(f'-P "{name}>={recommended_version}"')
 
     markdown += "\n## Detailed Vulnerability Information\n\n"
 
