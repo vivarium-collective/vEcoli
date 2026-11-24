@@ -18,11 +18,14 @@ def parse_cpu_arg():
     return config["analysis_options"].get("cpus", args.cpus)
 
 
-# Set Polars thread count before any imports might load it
-cpu_count = parse_cpu_arg()
-if cpu_count is not None:
-    os.environ["POLARS_MAX_THREADS"] = str(cpu_count)
-    print(f"Setting POLARS_MAX_THREADS={cpu_count}")
+# Set Polars thread count before any imports might load it. Only when run as a script: importing this module (as
+# bigraph-schema's process discovery does, inside other programs) must not read the importing program's command line,
+# whose -n or --config mean something else there.
+if __name__ == "__main__":
+    cpu_count = parse_cpu_arg()
+    if cpu_count is not None:
+        os.environ["POLARS_MAX_THREADS"] = str(cpu_count)
+        print(f"Setting POLARS_MAX_THREADS={cpu_count}")
 
 import importlib  # noqa: E402
 import warnings  # noqa: E402
